@@ -1,0 +1,58 @@
+# --- OS / Editor ---
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+
+# --- Env / Secrets ---
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# --- Logs ---
+*.log
+logs/
+
+# --- Node ---
+node_modules/
+dist/
+build/
+.npm/
+npm-debug.log*
+yarn-error.log*
+pnpm-lock.yaml.bak
+
+# --- Python ---
+__pycache__/
+*.pyc
+.venv/
+venv/
+*.egg-info/
+
+# --- Go ---
+bin/
+*.test
+
+# --- Java / Kotlin ---
+target/
+*.class
+.gradle/
+
+# --- Rust ---
+/target/
+
+# --- Databases / local data ---
+*.sqlite
+*.sqlite3
+*.db
+data/
+
+# --- Coverage / test output ---
+coverage/
+.nyc_output/
+
+# --- Docker ---
+*.override.yml
