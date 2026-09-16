@@ -190,7 +190,9 @@ Gleiche Anforderungen wie zuvor besprochen, aber entschärft: Der Server muss ni
   confirmReport(reportId, stillThere: bool)
   getSyncStatus() -> { lastSyncedAt, pendingWrites, subscribedTiles[] }
   ```
-- **Portabilität**: Da die Bibliothek „in verschiedene Apps" eingebunden werden soll, nicht nur in eine Flutter-App, ist zu prüfen, ob der Sync-/Speicher-Kern plattformunabhängig gebaut wird (z. B. Kern in einer portablen Sprache mit dünnen Bindings für Dart/Kotlin/Swift/JS) statt rein Flutter-spezifisch. **Offene Entscheidung für den späteren Prompt.**
+- **Portabilität** (**entschieden**): plattformunabhängiger Kern mit dünnen Bindings — Android, iOS/macOS, Flutter, React Native, Desktop/Server (C-ABI, Python, Node.js) und Web-Browser (WASM). Die Bibliothek ist ein Adapter, den beliebige Apps einbinden. Kernsprache/Toolchain und Speicher-Backend (SpatiaLite nur, wenn auf allen Zielen praktikabel) entscheidet Claude Code mit Begründung (siehe `docs/prompt-phase2-client-lib.md`).
+- **Geräte-Identität** (**entschieden**): anonyme Geräteregistrierung — eine App authentifiziert sich mit einem App-Schlüssel und erhält pro Gerät ein pseudonymes Credential, damit Rate-Limit, Duplikat-Erkennung und Reputation pro Gerät greifen.
+- **Statische Daten in Paketen** (**entschieden**): statt eines einzigen Voll-Snapshots werden statische Daten partitioniert und versioniert ausgeliefert (Manifest + Pakete), damit Geräte Änderungen — auch aus Bulk-Importen — erkennen und nur geänderte Teile laden.
 
 ---
 
@@ -238,7 +240,7 @@ Der übrige Aufbau bleibt gegenüber der Vorfassung unverändert:
 | 2 | Transport-Protokoll (Push) | MQTT | Claude Code entscheidet mit Begründung |
 | 3 | Server-Plattform | Supabase/Neon/andere | Claude Code entscheidet mit Begründung |
 | 4 | Tech-Stack API-Service | — | Claude Code entscheidet mit Begründung |
-| 5 | Client-Bibliothek: portabler Kern vs. Flutter-spezifisch | Portabler Kern empfohlen | Claude Code entscheidet mit Begründung |
+| 5 | Client-Bibliothek: portabler Kern vs. Flutter-spezifisch | Portabler Kern, alle Zielplattformen (Abschnitt 6) | **Entschieden** — Kernsprache/Toolchain entscheidet Claude Code |
 | 6 | Log-Aufbewahrungsfenster (Tage) | — | Claude Code entscheidet mit Begründung |
 | 7 | Repository-Struktur | Ein GitHub-Monorepo mit Paketen `/server`, `/client-lib`, `/ingestion` | **Entschieden** |
 | 8 | Geografischer Start-Scope | Europa, Architektur weltweit-fähig (Abschnitt 3.4) | **Entschieden** |
@@ -263,13 +265,16 @@ Der übrige Aufbau bleibt gegenüber der Vorfassung unverändert:
 | P1.4 | Blitzer-Namensraum (separat, standardmäßig deaktiviert) |
 | P1.5 | API vollständig (Bulk-Import-Endpunkt, Auth/Client-Credentials, Rate-Limits), dokumentiert und getestet — **Phase-1-Abschluss** |
 
-### Phase 2 — Client-Sync-Bibliothek, startet erst nach Phase 1
+### Phase 2 — Client-Sync-Bibliothek, startet erst nach Phase 1 (Phase 1 abgeschlossen)
 
 | # | Inhalt |
 |---|---|
-| P2.1 | Lokaler Speicher, Sync-Engine, regionale Subscription |
-| P2.2 | Lokales Map-Matching, lokale Verfallsberechnung, offline Schreibpuffer |
-| P2.3 | Öffentliche lokale API + Doku für Nachnutzer anderer Apps |
+| P2.0 | Server-Erweiterungen: anonyme Geräteregistrierung, partitionierte/versionierte statische Datenpakete + Manifest, ggf. Config-Endpunkt |
+| P2.1 | Kern-Grundgerüst, lokaler Speicher, C-ABI-Skelett, CI-Matrix |
+| P2.2 | Sync-Engine, WebSocket-Push, regionale Subscription, Paket-Updates |
+| P2.3 | Lokales Map-Matching, lokale Verfallsberechnung, offline Schreibpuffer |
+| P2.4 | Bindings für alle Zielplattformen + Konformitätstests |
+| P2.5 | Öffentliche lokale API + Doku für Nachnutzer anderer Apps — **Phase-2-Abschluss** |
 
 ### Phase 3 — Ingestion-Programm (Grundstock-Befüllung), startet erst nach Phase 2
 
