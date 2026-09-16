@@ -8,6 +8,7 @@ import { registerSpeedLimitRoutes } from "./modules/speed-limits/routes.js";
 import { registerStaticDataRoutes } from "./modules/static-data/routes.js";
 import { registerHazardReportRoutes } from "./modules/hazard-reports/routes.js";
 import { registerSyncRoutes } from "./modules/sync/routes.js";
+import { registerCameraRoutes } from "./modules/cameras/routes.js";
 
 export interface AppDependencies {
   env: Env;
@@ -50,6 +51,7 @@ export async function buildApp(deps: AppDependencies): Promise<FastifyInstance> 
   await registerSpeedLimitRoutes(app);
   await registerStaticDataRoutes(app);
   await registerHazardReportRoutes(app);
+  await registerCameraRoutes(app);
   await registerSyncRoutes(app);
 
   return app;

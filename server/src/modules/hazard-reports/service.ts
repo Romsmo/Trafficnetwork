@@ -58,11 +58,10 @@ export async function createOrMergeReport(db: Queryable, env: Env, input: Create
       return { report: updated, merged: true };
     }
 
-    const type = input.type as Exclude<HazardType, "fixedSpeedCamera">;
     const regionTile = positionToRegionTile(input.lat, input.lng, env);
-    const expiresAt = new Date(Date.now() + hazardExpiryMs(type, env));
+    const expiresAt = new Date(Date.now() + hazardExpiryMs(input.type, env));
     const created = await insertHazardReportRow(tx, {
-      type,
+      type: input.type,
       lat: input.lat,
       lng: input.lng,
       reporterId: input.reporterId,

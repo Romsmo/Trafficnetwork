@@ -6,6 +6,7 @@ import { expandTile } from "../../lib/h3.js";
 import { parseHazardTypes, parseLatLng, parseRadiusM } from "../../lib/query-params.js";
 import { badRequest } from "../../lib/errors.js";
 import { confirmReport, createOrMergeReport } from "./service.js";
+import { createOrMergeFixedCamera } from "../cameras/service.js";
 
 /** Intersects the caller's requested types with what this endpoint is allowed to serve. */
 function resolveTypes(requested: HazardType[] | undefined): HazardType[] {
@@ -56,7 +57,27 @@ export async function registerHazardReportRoutes(app: FastifyInstance) {
       throw badRequest("Invalid request body", parsed.error.issues);
     }
     const { reporterId, ...input } = parsed.data;
-    const result = await createOrMergeReport(app.deps.db, app.deps.env, { ...input, reporterId });
+
+    // fixedSpeedCamera is a valid input classification but is never stored as a
+    // hazard_reports row — it's routed into fixed_speed_cameras instead (see
+    // modules/cameras/service.ts and docs/prompt-phase1-server.md section 6).
+    if (input.type === "fixedSpeedCamera") {
+      const cameraResult = await createOrMergeFixedCamera(app.deps.db, app.deps.env, {
+        lat: input.lat,
+        lng: input.lng,
+        reporterId,
+      });
+      reply.status(cameraResult.merged ? 200 : 201);
+      return { camera: cameraResult.camera, merged: cameraResult.merged };
+    }
+
+    const result = await createOrMergeReport(app.deps.db, app.deps.env, {
+      type: input.type,
+      lat: input.lat,
+      lng: input.lng,
+      speedKmh: input.speedKmh,
+      reporterId,
+    });
     reply.status(result.merged ? 200 : 201);
     return result;
   });

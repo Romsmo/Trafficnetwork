@@ -11,8 +11,13 @@ import { badRequest } from "../../lib/errors.js";
  */
 const TYPES_ACCEPTING_SPEED_KMH: readonly HazardType[] = ["mobileSpeedCamera", "trailerCamera"];
 
+/**
+ * type excludes fixedSpeedCamera: the route layer (modules/hazard-reports/routes.ts)
+ * routes that classification into modules/cameras/service.ts before this ever
+ * runs, since it's never stored as a hazard_reports row.
+ */
 export interface HazardReportInput {
-  type: HazardType;
+  type: Exclude<HazardType, "fixedSpeedCamera">;
   lat: number;
   lng: number;
   speedKmh?: number;
@@ -20,12 +25,6 @@ export interface HazardReportInput {
 
 /** Throws a 400 ApiError on the first violated rule; returns void on success. */
 export function validatePlausibility(input: HazardReportInput, env: Env): void {
-  if (input.type === "fixedSpeedCamera") {
-    throw badRequest(
-      "fixedSpeedCamera reports are not yet accepted via this endpoint — fixed-camera routing lands in milestone P1.4",
-    );
-  }
-
   if (input.lat === 0 && input.lng === 0) {
     throw badRequest("Position (0, 0) is rejected as implausible (\"null island\")");
   }

@@ -30,6 +30,11 @@ const envSchema = z.object({
   HAZARD_EXPIRY_MEDIUM_MINUTES: z.coerce.number().int().positive().default(25),
   HAZARD_EXPIRY_CONSTRUCTION_DAYS: z.coerce.number().int().positive().default(7),
 
+  // Distinct-reporter "this fixed camera is gone" votes needed before it's marked
+  // removed (docs/concept.md section 8: "nur durch gehäufte 'nicht mehr da'-
+  // Meldungen entfernt" — no specific number given, this is our chosen default).
+  CAMERA_REMOVAL_THRESHOLD: z.coerce.number().int().positive().default(3),
+
   JWT_TTL_SECONDS: z.coerce.number().int().positive().default(3600),
 
   SPEED_LIMIT_LOOKUP_MAX_DISTANCE_METERS: z.coerce.number().int().positive().default(200),

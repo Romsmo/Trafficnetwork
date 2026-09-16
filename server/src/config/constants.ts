@@ -48,6 +48,9 @@ export const NON_CAMERA_HAZARD_TYPES = REPORTABLE_HAZARD_TYPES.filter(
   (t) => !CAMERA_NAMESPACE_TYPES.includes(t),
 );
 
+/** The four camera-adjacent types actually stored as hazard_reports rows (excludes fixedSpeedCamera, which lives in its own table). */
+export const DYNAMIC_CAMERA_TYPES = CAMERA_NAMESPACE_TYPES.filter((t) => t !== "fixedSpeedCamera");
+
 type ExpiryBand = "short" | "medium" | "construction";
 
 const EXPIRY_BAND_BY_TYPE: Record<Exclude<HazardType, "fixedSpeedCamera">, ExpiryBand> = {

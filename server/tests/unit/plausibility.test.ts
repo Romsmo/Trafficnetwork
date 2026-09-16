@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { loadEnv, resetEnvCache } from "../../src/config/env.js";
 import { validatePlausibility } from "../../src/modules/moderation/plausibility.js";
-import { ApiError } from "../../src/lib/errors.js";
 
 const env = () => {
   resetEnvCache();
@@ -14,10 +13,6 @@ const env = () => {
 describe("validatePlausibility", () => {
   it("accepts a plain traffic report with no speedKmh", () => {
     expect(() => validatePlausibility({ type: "traffic", lat: 52.5, lng: 13.4 }, env())).not.toThrow();
-  });
-
-  it("rejects fixedSpeedCamera (not yet routed until milestone P1.4)", () => {
-    expect(() => validatePlausibility({ type: "fixedSpeedCamera", lat: 52.5, lng: 13.4 }, env())).toThrow(ApiError);
   });
 
   it("rejects position (0, 0) as null island", () => {

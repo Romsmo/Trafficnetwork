@@ -4,6 +4,7 @@ import { generateSnapshot } from "./snapshot.service.js";
 import { getDeltaPage, SnapshotRequiredError } from "../../db/queries/event-log.js";
 import { parseCsv, parseHazardTypes } from "../../lib/query-params.js";
 import { badRequest, conflict } from "../../lib/errors.js";
+import { resolveSyncHazardTypes } from "../cameras/filter.js";
 
 const DELTA_LIMIT_DEFAULT = 500;
 const DELTA_LIMIT_MAX = 5000;
@@ -13,7 +14,11 @@ export async function registerSyncRoutes(app: FastifyInstance) {
     const query = req.query as Record<string, unknown>;
     const tiles = parseCsv(query.tiles);
     const types = parseHazardTypes(query.types);
-    const result = await generateSnapshot(app.deps.db, { tiles, types });
+    const result = await generateSnapshot(app.deps.db, {
+      tiles,
+      types,
+      cameraNamespaceEnabled: app.deps.env.SPEED_CAMERA_NAMESPACE_ENABLED,
+    });
     return result;
   });
 
@@ -25,7 +30,7 @@ export async function registerSyncRoutes(app: FastifyInstance) {
       throw badRequest("since query parameter is required and must be a non-negative integer");
     }
     const tiles = parseCsv(query.tiles);
-    const types = parseHazardTypes(query.types);
+    const types = resolveSyncHazardTypes(parseHazardTypes(query.types), app.deps.env.SPEED_CAMERA_NAMESPACE_ENABLED);
     const limitResult = z.coerce.number().int().positive().max(DELTA_LIMIT_MAX).safeParse(query.limit);
     const limit = limitResult.success ? limitResult.data : DELTA_LIMIT_DEFAULT;
 
