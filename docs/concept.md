@@ -103,7 +103,7 @@ HazardType-Enum:
 
 - **Statische Daten**: vollständig, global, an jedes Gerät — realistisch geschätzt niedriger einstelliger GB-Bereich für ganz Europa (siehe Abschnitt 6, Größenabschätzung), unproblematisch für jedes Gerät.
 - **Dynamische Live-Meldungen**: nur für die aktuelle Umgebung/Fahrtroute des Geräts abonniert (Geo-Tiling, grobe Rasterung oder administrative Regionen als `regionTile`). Grund: nicht Speicherplatz, sondern Bandbreite/Akku — eine Live-Meldung aus einer anderen Region ist ohnehin meist verfallen, bevor das Gerät sie je erreicht. Das Gerät wechselt sein Abonnement dynamisch mit der Position.
-- **Offene Frage, vor Prompt-Erstellung zu bestätigen**: Granularität der Region-Tiles (z. B. Verwaltungsgrenzen vs. festes Raster) — Vorschlag: festes, global durchgängiges Raster (einfacher zu implementieren, unabhängig von Ländergrenzen, siehe 3.4), mit mir final abzustimmen.
+- **Granularität der Region-Tiles** (z. B. Verwaltungsgrenzen vs. festes Raster): festes, global durchgängiges Raster (einfacher zu implementieren, unabhängig von Ländergrenzen, siehe 3.4) — konkrete Kachelgröße entscheidet Claude Code mit Begründung, zusammen mit der Wahl des Indexierungsschemas (Abschnitt 3.4).
 
 ### 3.4 Geografischer Geltungsbereich: Europa zuerst, weltweit vorgesehen
 
@@ -135,6 +135,7 @@ Der Start-Datenbestand deckt Europa ab, die Architektur ist aber so ausgelegt, d
 | TomTom (Traffic Incidents/Flow API) | Ähnliche Einschränkung, mehrere Freikontingente unterschiedlicher Endpunkte | Wird trotzdem genutzt, mit Kill-Switch |
 
 ---
+
 ## 5. Server: Relay-/Moderator-System
 
 ### 5.1 Ereignisprotokoll
@@ -238,17 +239,18 @@ Der übrige Aufbau bleibt gegenüber der Vorfassung unverändert:
 | 3 | Server-Plattform | Supabase/Neon/andere | Claude Code entscheidet mit Begründung |
 | 4 | Tech-Stack API-Service | — | Claude Code entscheidet mit Begründung |
 | 5 | Client-Bibliothek: portabler Kern vs. Flutter-spezifisch | Portabler Kern empfohlen | Claude Code entscheidet mit Begründung |
-| 6 | Log-Aufbewahrungsfenster (Tage) | Konkreter Wert offen | Mit mir abzustimmen |
+| 6 | Log-Aufbewahrungsfenster (Tage) | — | Claude Code entscheidet mit Begründung |
 | 7 | Repository-Struktur | Ein GitHub-Monorepo mit Paketen `/server`, `/client-lib`, `/ingestion` | **Entschieden** |
 | 8 | Geografischer Start-Scope | Europa, Architektur weltweit-fähig (Abschnitt 3.4) | **Entschieden** |
 | 9 | Open-Source-Lizenz für den Code | Apache License 2.0 | **Entschieden** |
-| 10 | Baureihenfolge der drei Komponenten | Server (inkl. API) vollständig → Ingestion/Grundstock-Befüllung → Client-Sync-Bibliothek (siehe Abschnitt 11) | **Entschieden** |
+| 10 | Baureihenfolge der drei Komponenten | Server (inkl. API) vollständig → Client-Sync-Bibliothek → Ingestion/Grundstock-Befüllung (siehe Abschnitt 11) | **Entschieden** |
+| 11 | Regionale Filterung dynamischer Daten (Abschnitt 3.3) | Statisch global vollständig, dynamisch nur regional (`regionTile`-Abonnement) | **Entschieden** — Umsetzungsdetails entscheidet Claude Code |
 
 ---
 
 ## 11. Meilensteinplan — in drei Phasen, strikt sequenziert
 
-**Baureihenfolge (verbindlich):** Phase 1 (Server samt API) wird vollständig fertiggestellt, bevor Phase 2 (Ingestion/Grundstock-Befüllung) beginnt. Die Client-Sync-Bibliothek (Phase 3) ist hier bewusst zuletzt eingeordnet, da sie nur von der stabilen Server-API abhängt, nicht umgekehrt, und erst gebraucht wird, sobald tatsächlich eine App darauf zugreifen soll — falls stattdessen ein anderer Zeitpunkt gewünscht ist (z. B. parallel zu Phase 2), bitte korrigieren.
+**Baureihenfolge (verbindlich, bestätigt):** Phase 1 (Server samt API) wird vollständig fertiggestellt, bevor Phase 2 (Client-Sync-Bibliothek) beginnt. Phase 3 (Ingestion-Programm/Grundstock-Befüllung) kommt bewusst zuletzt. Das ist unabhängig von der technischen Abhängigkeit: Ingestion braucht architektonisch nur die stabile Server-API (Abschnitt 7), nicht die Client-Bibliothek — die Reihenfolge Server → Client-lib → Ingestion ist eine bewusste Priorisierung des Betreibers, keine technische Notwendigkeit.
 
 ### Phase 1 — Server (Relay/Moderator + API), vollständig
 
@@ -261,27 +263,27 @@ Der übrige Aufbau bleibt gegenüber der Vorfassung unverändert:
 | P1.4 | Blitzer-Namensraum (separat, standardmäßig deaktiviert) |
 | P1.5 | API vollständig (Bulk-Import-Endpunkt, Auth/Client-Credentials, Rate-Limits), dokumentiert und getestet — **Phase-1-Abschluss** |
 
-### Phase 2 — Ingestion-Programm (Grundstock-Befüllung), startet erst nach Phase 1
+### Phase 2 — Client-Sync-Bibliothek, startet erst nach Phase 1
 
 | # | Inhalt |
 |---|---|
-| P2.1 | Quellenkatalog recherchiert und mit Belegen dokumentiert |
-| P2.2 | OSM-Worker zuerst (regionsparametrisiert, Start Europa) |
-| P2.3 | Weitere Quellen (Autobahn-API, HERE, TomTom, ggf. weitere) inkl. Kill-Switches |
-| P2.4 | Grundbefüllung durchgeführt — Ingestion-Programm danach optional abschaltbar (siehe Abschnitt 7), kein weiterer Zwang zum Dauerbetrieb |
+| P2.1 | Lokaler Speicher, Sync-Engine, regionale Subscription |
+| P2.2 | Lokales Map-Matching, lokale Verfallsberechnung, offline Schreibpuffer |
+| P2.3 | Öffentliche lokale API + Doku für Nachnutzer anderer Apps |
 
-### Phase 3 — Client-Sync-Bibliothek
+### Phase 3 — Ingestion-Programm (Grundstock-Befüllung), startet erst nach Phase 2
 
 | # | Inhalt |
 |---|---|
-| P3.1 | Lokaler Speicher, Sync-Engine, regionale Subscription |
-| P3.2 | Lokales Map-Matching, lokale Verfallsberechnung, offline Schreibpuffer |
-| P3.3 | Öffentliche lokale API + Doku für Nachnutzer anderer Apps |
+| P3.1 | Quellenkatalog recherchiert und mit Belegen dokumentiert |
+| P3.2 | OSM-Worker zuerst (regionsparametrisiert, Start Europa) |
+| P3.3 | Weitere Quellen (Autobahn-API, HERE, TomTom, ggf. weitere) inkl. Kill-Switches |
+| P3.4 | Grundbefüllung durchgeführt — Ingestion-Programm danach optional abschaltbar (siehe Abschnitt 7), kein weiterer Zwang zum Dauerbetrieb |
 
 ### Begleitend, kein fester Phasenbezug
 
 - Reputationsbewertung (nachgelagert)
-- `docs/privacy.md` — vor der ersten echten Nutzermeldung, also spätestens vor Phase 3
+- `docs/privacy.md` — vor der ersten echten Nutzermeldung über eine Host-App, also spätestens vor produktivem Einsatz von Phase 2
 - Tests/CI durchgängig je Phase
 
 ---
