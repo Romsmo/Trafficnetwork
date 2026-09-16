@@ -37,6 +37,17 @@ export const CAMERA_NAMESPACE_TYPES: readonly HazardType[] = [
   "distanceControl",
 ];
 
+/**
+ * The general /v1/hazard-reports/* endpoints only ever serve these — the four
+ * camera-adjacent types that live in hazard_reports (mobileSpeedCamera etc.) are
+ * exposed exclusively through /v1/speed-cameras/* (milestone P1.4), gated by the
+ * namespace flag, so a client that never asks about cameras never sees them mixed
+ * into an otherwise unrelated "traffic near me" query.
+ */
+export const NON_CAMERA_HAZARD_TYPES = REPORTABLE_HAZARD_TYPES.filter(
+  (t) => !CAMERA_NAMESPACE_TYPES.includes(t),
+);
+
 type ExpiryBand = "short" | "medium" | "construction";
 
 const EXPIRY_BAND_BY_TYPE: Record<Exclude<HazardType, "fixedSpeedCamera">, ExpiryBand> = {

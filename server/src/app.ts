@@ -4,6 +4,10 @@ import type { Env } from "./config/env.js";
 import type { Database } from "./db/client.js";
 import { ApiError } from "./lib/errors.js";
 import { registerHealthRoutes } from "./modules/health/routes.js";
+import { registerSpeedLimitRoutes } from "./modules/speed-limits/routes.js";
+import { registerStaticDataRoutes } from "./modules/static-data/routes.js";
+import { registerHazardReportRoutes } from "./modules/hazard-reports/routes.js";
+import { registerSyncRoutes } from "./modules/sync/routes.js";
 
 export interface AppDependencies {
   env: Env;
@@ -43,6 +47,10 @@ export async function buildApp(deps: AppDependencies): Promise<FastifyInstance> 
   });
 
   await registerHealthRoutes(app);
+  await registerSpeedLimitRoutes(app);
+  await registerStaticDataRoutes(app);
+  await registerHazardReportRoutes(app);
+  await registerSyncRoutes(app);
 
   return app;
 }
