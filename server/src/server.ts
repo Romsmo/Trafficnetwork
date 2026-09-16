@@ -1,0 +1,24 @@
+import "dotenv/config";
+import closeWithGrace from "close-with-grace";
+import { buildApp } from "./app.js";
+import { loadEnv } from "./config/env.js";
+import { createDb } from "./db/client.js";
+
+async function main() {
+  const env = loadEnv();
+  const { db, client } = createDb(env);
+  const app = await buildApp({ env, db });
+
+  closeWithGrace(async ({ err }) => {
+    if (err) app.log.error(err, "closing due to error");
+    await app.close();
+    await client.end();
+  });
+
+  await app.listen({ port: env.PORT, host: env.HOST });
+}
+
+main().catch((err) => {
+  console.error("Failed to start server:", err);
+  process.exit(1);
+});
