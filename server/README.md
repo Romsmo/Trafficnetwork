@@ -1,14 +1,14 @@
 # server
 
-Relay-/Moderator-Server: Ereignisprotokoll, materialisierter Zustand (PostGIS), Snapshot-/Delta-API, Moderationsgate, Blitzer-Namensraum (standardmäßig deaktiviert).
+Relay-/Moderator-Server: Ereignisprotokoll, materialisierter Zustand (PostGIS), Snapshot-/Delta-API, Moderationsgate, Blitzer-Namensraum (standardmäßig deaktiviert), Client-Credential-Auth, Bulk-Import, WebSocket-Push.
 
-**Status**: Phase 1, Meilenstein P1.4 abgeschlossen (Blitzer-Namensraum, standardmäßig deaktiviert). Details siehe [`docs/concept.md`](../docs/concept.md) und [`docs/prompt-phase1-server.md`](../docs/prompt-phase1-server.md).
+**Status**: Phase 1 abgeschlossen (P1.0–P1.5). API vollständig, dokumentiert (siehe [`docs/api.md`](docs/api.md), [`docs/schema.md`](docs/schema.md)) und getestet. Details zum Architekturkonzept siehe [`docs/concept.md`](../docs/concept.md) und [`docs/prompt-phase1-server.md`](../docs/prompt-phase1-server.md).
 
-Muss vollständig fertig sein, bevor Phase 2 (`client-lib/`) beginnt.
+Phase 2 (`client-lib/`) kann beginnen.
 
 ## Tech-Stack
 
-Node.js + TypeScript + [Fastify](https://fastify.dev/) + [Drizzle ORM](https://orm.drizzle.team/) gegen Postgres/PostGIS (empfohlen: [Neon](https://neon.com/)). Begründung der Plattform-/Protokoll-/Tiling-Entscheidungen: siehe Plan-Dokument dieser Session bzw. `docs/prompt-phase1-server.md` Abschnitt 2.
+Node.js + TypeScript + [Fastify](https://fastify.dev/) + [Drizzle ORM](https://orm.drizzle.team/) gegen Postgres/PostGIS (empfohlen: [Neon](https://neon.com/)). WebSocket-Push über [`@fastify/websocket`](https://github.com/fastify/fastify-websocket), Auth über clientseitige JWTs ([`jose`](https://github.com/panva/jose)). Begründung der Plattform-/Protokoll-/Tiling-Entscheidungen: siehe Plan-Dokument dieser Session bzw. `docs/prompt-phase1-server.md` Abschnitt 2.
 
 ## Setup
 
@@ -17,18 +17,30 @@ npm install
 cp .env.example .env
 # .env ausfüllen: DATABASE_URL (Neon-Connection-String), JWT_SECRET
 npm run db:migrate
+npm run create-client -- --name "mein-erster-client" --scope client
 npm run dev
 ```
 
-`GET /v1/health` prüft Erreichbarkeit der Datenbank.
+`GET /v1/health` prüft Erreichbarkeit der Datenbank (kein Auth nötig). Jeder andere `/v1/*`-Endpunkt braucht einen Bearer-Token — siehe [`docs/api.md`](docs/api.md) Abschnitt "Auth".
 
 ## Umgebungsvariablen
 
 Siehe [`.env.example`](.env.example) — alle Werte sind dokumentiert und haben sinnvolle Defaults, insbesondere:
 
 - `SPEED_CAMERA_NAMESPACE_ENABLED` — globaler Kill-Switch für den Blitzer-Namensraum, **muss** `false` bleiben, bis der Betreiber nach rechtlicher Prüfung (§23 Abs. 1b StVO, siehe `docs/concept.md` Abschnitt 8) grünes Licht gibt.
-- `EVENT_LOG_RETENTION_DAYS_DYNAMIC` / `_STATIC` — Aufbewahrungsfenster für das Ereignisprotokoll.
-- Moderationsgate-Parameter (`REPORT_RATE_LIMIT_*`, `DUPLICATE_MERGE_RADIUS_METERS`, `SPEED_KMH_*`).
+- `EVENT_LOG_RETENTION_DAYS_DYNAMIC` / `_STATIC` — Aufbewahrungsfenster für das Ereignisprotokoll, durchgesetzt vom stündlichen Cleanup-Job (`modules/expiry/retention.ts`).
+- Moderationsgate-Parameter (`REPORT_RATE_LIMIT_*`, `DUPLICATE_MERGE_RADIUS_METERS`, `SPEED_KMH_*`, `CAMERA_REMOVAL_THRESHOLD`).
+- `JWT_SECRET` / `JWT_TTL_SECONDS` — Signierschlüssel und Gültigkeitsdauer für Client-Tokens.
+
+## API
+
+Vollständige Referenz: [`docs/api.md`](docs/api.md). Kurzfassung:
+
+- **Auth**: `POST /v1/auth/token` (Client-Credentials → JWT). Jeder `/v1/*`-Endpunkt außer `/v1/health` und `/v1/auth/token` braucht `Authorization: Bearer <token>`. `reporterId` kommt bei Schreibzugriffen immer aus dem Token, nie aus dem Body.
+- **Lesen**: `GET /v1/speed-limit`, `/v1/speed-limit-segments/nearby`, `/v1/static-signs/nearby`, `/v1/hazard-reports/{nearby,by-tile}`, `/v1/speed-cameras/{nearby,by-tile}` (leer, solange das Blitzer-Flag aus ist), `/v1/snapshot`, `/v1/delta`.
+- **Schreiben**: `POST /v1/hazard-reports` (läuft durchs Moderationsgate: Plausibilität, Rate-Limit, Duplikat-Merge; `type: "fixedSpeedCamera"` wird in den Blitzer-Namensraum umgeleitet), `POST /v1/hazard-reports/:id/confirmations`, `POST /v1/speed-cameras/:id/removal-reports`. Schreibzugriffe auf den Blitzer-Namensraum funktionieren unabhängig vom Flag — nur Lesezugriffe sind gegated.
+- **Bulk-Import** (Scope `bulk-import`): `POST /v1/bulk-import/{speed-limit-segments,static-signs,speed-cameras}`, max. 5000 Zeilen/Aufruf, erzeugt bewusst keine Event-Log-Einträge (Abholung nur über `/v1/snapshot`, siehe `docs/api.md`).
+- **Realtime**: `GET /v1/ws` (WebSocket) — Auth per erster Nachricht (nicht per Query-String-Token), danach `subscribe`/`unsubscribe` auf H3-Tiles.
 
 ## Datenbank / Migrations
 
@@ -39,41 +51,7 @@ npm run db:generate   # neue Migration aus Schema-Änderungen generieren
 npm run db:migrate    # ausstehende Migrations gegen DATABASE_URL anwenden
 ```
 
-Die erste Migration (`0000_enable_postgis.sql`) aktiviert die PostGIS-Extension und muss vor der Schema-Migration laufen — das ist bereits so in der Migrationsreihenfolge hinterlegt.
-
-**Hinweis zu Geometrie-Spalten**: Alle `geometry`-Spalten nutzen einen eigenen Custom-Type (`src/db/schema/geometry.ts`) statt Drizzles eingebauten `geometry()`-Helper, weil dessen `getSQLType()` in der hier gepinnten Drizzle-Version den SRID stillschweigend ignoriert und immer unqualifiziertes `geometry(point)` erzeugt — das hätte SRID-Mismatch-Fehler bei jedem `ST_DWithin`/`ST_MakePoint(...,4326)`-Vergleich verursacht. Lesen/Schreiben über diese Spalten läuft daher immer über rohe `sql`-Templates, nicht über Drizzles typisierte Insert/Select-Helfer.
-
-## Implementierte Endpunkte (Stand P1.4)
-
-Noch ohne Auth (kommt gebündelt in P1.5, siehe Meilensteintabelle unten):
-
-- `GET /v1/health`
-- `GET /v1/speed-limit?lat&lng`, `GET /v1/speed-limit-segments/nearby?lat&lng&radiusM`
-- `GET /v1/static-signs/nearby?lat&lng&radiusM`
-- `GET /v1/hazard-reports/nearby?lat&lng&radiusM&types`, `GET /v1/hazard-reports/by-tile?tile&k&types` (liefert nur die nicht-Blitzer-Typen, siehe `NON_CAMERA_HAZARD_TYPES` — unabhängig vom Blitzer-Flag)
-- `POST /v1/hazard-reports` (Body: `type, lat, lng, speedKmh?, reporterId`) — läuft durch das Moderationsgate (Plausibilität, Rate-Limit, Duplikat-Merge); mergt in einen bestehenden aktiven Report gleichen Typs im Umkreis von `DUPLICATE_MERGE_RADIUS_METERS`, statt einen zweiten anzulegen. `type: "fixedSpeedCamera"` wird abgefangen und stattdessen in den Blitzer-Namensraum umgeleitet (siehe unten) — Schreibzugriff funktioniert unabhängig vom Flag.
-- `POST /v1/hazard-reports/:id/confirmations` (Body: `kind: "stillThere" | "gone", reporterId`) — eine Stimme pro Reporter und Report, idempotent
-- `GET /v1/snapshot?tiles&types` (statische Daten immer vollständig, dynamische nur bei angegebenen `tiles`; `fixedSpeedCameras` nur befüllt, wenn das Blitzer-Flag an ist)
-- `GET /v1/delta?since&tiles&types&limit` (409 `SNAPSHOT_REQUIRED`, wenn `since` außerhalb des Aufbewahrungsfensters liegt; Blitzer-Typen werden aus Events herausgefiltert, solange das Flag aus ist)
-
-**Blitzer-Namensraum** (`SPEED_CAMERA_NAMESPACE_ENABLED`, Standard `false`):
-- `GET /v1/speed-cameras/nearby?lat&lng&radiusM&types` — liefert bei ausgeschaltetem Flag immer `{cameras: []}`; bei eingeschaltetem Flag alle fünf Blitzer-Typen (feste Blitzer aus `fixed_speed_cameras` + die vier dynamischen Typen aus `hazard_reports`)
-- `GET /v1/speed-cameras/by-tile?tile&k&types` — wie oben, aber nur die vier dynamischen (regional getilten) Typen; feste Blitzer sind global synchronisiert wie `static_signs`, nicht regional gefiltert
-- `POST /v1/speed-cameras/:id/removal-reports` (Body: `reporterId`) — "hier ist kein Blitzer mehr", ein Report pro Reporter; ab `CAMERA_REMOVAL_THRESHOLD` verschiedenen Reportern wird der Blitzer als `removed` markiert. Funktioniert unabhängig vom Flag.
-
-**Hinweis `reporterId`**: Body-Feld ist ein Übergangszustand — sobald das Auth-Modul (P1.5) steht, kommt die Reporter-Identität aus dem verifizierten Client-Token statt vom Client selbst behauptet zu werden; das Feld fällt dann weg.
-
-Bulk-Import folgt in P1.5.
-
-## Tests
-
-```bash
-npm run test:unit          # keine Infrastruktur nötig
-npm run test:integration   # startet einen postgis/postgis-Container über Testcontainers — braucht lokal Docker
-npm test                   # beides
-```
-
-Integrationstests laufen automatisch in CI (`.github/workflows/server-ci.yml`, GitHub-Actions-Runner bringt Docker mit). Lokal ohne Docker Desktop lassen sich nur die Unit-Tests ausführen.
+Die erste Migration (`0000_enable_postgis.sql`) aktiviert die PostGIS-Extension und muss vor der Schema-Migration laufen — das ist bereits so in der Migrationsreihenfolge hinterlegt. Vollständige Schema-Doku: [`docs/schema.md`](docs/schema.md) (u. a. der Grund, warum alle Geometrie-Spalten einen Custom-Type statt Drizzles eingebauten `geometry()`-Helper nutzen).
 
 ## Client-Provisionierung
 
@@ -84,7 +62,24 @@ npm run create-client -- --name "mein-erster-client" --scope client
 npm run create-client -- --name "ingestion-worker" --scope bulk-import
 ```
 
-*(Skript folgt in Meilenstein P1.5, zusammen mit dem Auth-Modul.)*
+Das `clientSecret` wird nur einmal ausgegeben (gehasht gespeichert, siehe `modules/auth/credentials.ts`) — sofort sichern.
+
+## Hintergrund-Jobs
+
+Beide starten automatisch mit dem Server (`src/server.ts`), sauberer Shutdown über `close-with-grace`:
+
+- **Expiry-Sweep** (`modules/expiry/worker.ts`, standardmäßig jede Minute): setzt abgelaufene `hazard_reports` auf `expired`, publiziert `ReportExpired` an WebSocket-Abonnenten.
+- **Retention-Cleanup** (`modules/expiry/retention.ts`, standardmäßig stündlich): löscht Event-Log-Einträge außerhalb der Aufbewahrungsfenster sowie länger `expired`/`removed` `hazard_reports`-Zeilen.
+
+## Tests
+
+```bash
+npm run test:unit          # keine Infrastruktur nötig
+npm run test:integration   # startet einen postgis/postgis-Container über Testcontainers — braucht lokal Docker
+npm test                   # beides
+```
+
+Integrationstests laufen automatisch in CI (`.github/workflows/server-ci.yml`, GitHub-Actions-Runner bringt Docker mit). Lokal ohne Docker Desktop lassen sich nur die Unit-Tests ausführen. WebSocket-Tests starten einen echten horchenden Server plus einen echten `ws`-Client (Fastifys `app.inject()` unterstützt kein WS-Upgrade).
 
 ## Meilensteine
 
@@ -95,4 +90,4 @@ npm run create-client -- --name "ingestion-worker" --scope bulk-import
 | P1.2 | Snapshot- und Delta-Mechanik, Lese-Endpunkte, Expiry-Sweep-Worker | ✅ |
 | P1.3 | Moderationsgate, Schreib-Endpunkte für Hazard-Reports | ✅ |
 | P1.4 | Blitzer-Namensraum, separat, standardmäßig deaktiviert | ✅ |
-| P1.5 | API vollständig, dokumentiert und getestet — **Phase-1-Abschluss** | ⬜ |
+| P1.5 | Auth, Bulk-Import, WebSocket-Push, Retention-Cleanup, API-/Schema-Doku, vollständige Testsuite — **Phase-1-Abschluss** | ✅ |

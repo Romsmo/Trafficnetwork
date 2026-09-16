@@ -22,6 +22,7 @@ export interface CreateCameraInput {
 export interface CreateCameraResult {
   camera: FixedSpeedCameraApi;
   merged: boolean;
+  event: Awaited<ReturnType<typeof appendEvent>>;
 }
 
 /**
@@ -42,25 +43,25 @@ export async function createOrMergeFixedCamera(db: Queryable, env: Env, input: C
 
     if (existing) {
       const updated = await touchFixedSpeedCameraConfirmed(tx, existing.id);
-      await appendEvent(tx, {
+      const event = await appendEvent(tx, {
         type: "StaticDataUpdated",
         entityType: "fixedSpeedCamera",
         entityId: updated.id,
         payload: updated,
         source: "community",
       });
-      return { camera: updated, merged: true };
+      return { camera: updated, merged: true, event };
     }
 
     const created = await insertFixedSpeedCamera(tx, { lat: input.lat, lng: input.lng, source: "community" });
-    await appendEvent(tx, {
+    const event = await appendEvent(tx, {
       type: "StaticDataUpdated",
       entityType: "fixedSpeedCamera",
       entityId: created.id,
       payload: created,
       source: "community",
     });
-    return { camera: created, merged: false };
+    return { camera: created, merged: false, event };
   });
 }
 
@@ -73,6 +74,8 @@ export interface ReportRemovalResult {
   camera: FixedSpeedCameraApi;
   recorded: boolean;
   removed: boolean;
+  /** Only set when removed is true — that's the only branch that appends an event. */
+  event?: Awaited<ReturnType<typeof appendEvent>>;
 }
 
 /**
@@ -102,13 +105,13 @@ export async function reportCameraRemoval(db: Queryable, env: Env, input: Report
     }
 
     const removed = await markFixedSpeedCameraRemoved(tx, camera.id);
-    await appendEvent(tx, {
+    const event = await appendEvent(tx, {
       type: "StaticDataRemoved",
       entityType: "fixedSpeedCamera",
       entityId: removed.id,
       payload: removed,
       source: "community",
     });
-    return { camera: removed, recorded: true, removed: true };
+    return { camera: removed, recorded: true, removed: true, event };
   });
 }

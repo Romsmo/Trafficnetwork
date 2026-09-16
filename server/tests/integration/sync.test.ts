@@ -7,10 +7,12 @@ import { startTestDatabase, type TestDatabase } from "./setup.js";
 import { insertHazardReport, insertSpeedLimitSegment, insertStaticSign } from "./helpers.js";
 import { appendEvent } from "../../src/db/append-event.js";
 import { positionToRegionTile } from "../../src/lib/h3.js";
+import { authHeader, testToken } from "./auth-helper.js";
 
 describe("snapshot and delta", () => {
   let testDb: TestDatabase;
   let app: FastifyInstance;
+  let auth: { authorization: string };
 
   beforeAll(async () => {
     testDb = await startTestDatabase();
@@ -20,6 +22,7 @@ describe("snapshot and delta", () => {
       JWT_SECRET: "a".repeat(32),
     });
     app = await buildApp({ env, db: testDb.db });
+    auth = authHeader(await testToken(env));
   });
 
   afterEach(async () => {
@@ -59,12 +62,12 @@ describe("snapshot and delta", () => {
       expiresAt: new Date(Date.now() + 60_000),
     });
 
-    const noTiles = await app.inject({ method: "GET", url: "/v1/snapshot" });
+    const noTiles = await app.inject({ method: "GET", url: "/v1/snapshot", headers: auth });
     expect(noTiles.json().staticSigns).toHaveLength(1);
     expect(noTiles.json().speedLimitSegments).toHaveLength(1);
     expect(noTiles.json().hazardReports).toHaveLength(0);
 
-    const berlinOnly = await app.inject({ method: "GET", url: `/v1/snapshot?tiles=${berlinTile}` });
+    const berlinOnly = await app.inject({ method: "GET", url: `/v1/snapshot?tiles=${berlinTile}`, headers: auth });
     expect(berlinOnly.json().staticSigns).toHaveLength(1);
     expect(berlinOnly.json().hazardReports).toHaveLength(1);
     expect(berlinOnly.json().hazardReports[0].reporterId).toBe("test-reporter");
@@ -79,10 +82,10 @@ describe("snapshot and delta", () => {
       status: "expired",
     });
 
-    const nearby = await app.inject({ method: "GET", url: "/v1/hazard-reports/nearby?lat=52.52&lng=13.405&radiusM=1000" });
+    const nearby = await app.inject({ method: "GET", url: "/v1/hazard-reports/nearby?lat=52.52&lng=13.405&radiusM=1000", headers: auth });
     expect(nearby.json().reports).toHaveLength(0);
 
-    const byTile = await app.inject({ method: "GET", url: `/v1/hazard-reports/by-tile?tile=${berlinTile}` });
+    const byTile = await app.inject({ method: "GET", url: `/v1/hazard-reports/by-tile?tile=${berlinTile}`, headers: auth });
     expect(byTile.json().reports).toHaveLength(0);
   });
 
@@ -99,13 +102,13 @@ describe("snapshot and delta", () => {
       });
     }
 
-    const page1 = await app.inject({ method: "GET", url: "/v1/delta?since=0&limit=2" });
+    const page1 = await app.inject({ method: "GET", url: "/v1/delta?since=0&limit=2", headers: auth });
     const body1 = page1.json();
     expect(body1.events).toHaveLength(2);
     expect(body1.hasMore).toBe(true);
     expect(body1.nextSince).toBe(body1.events[1].sequence);
 
-    const page2 = await app.inject({ method: "GET", url: `/v1/delta?since=${body1.nextSince}&limit=2` });
+    const page2 = await app.inject({ method: "GET", url: `/v1/delta?since=${body1.nextSince}&limit=2`, headers: auth });
     const body2 = page2.json();
     expect(body2.events).toHaveLength(1);
     expect(body2.hasMore).toBe(false);
@@ -126,12 +129,12 @@ describe("snapshot and delta", () => {
     // Simulate the retention job having purged the first 3 events.
     await testDb.db.execute(sql`delete from event_log where sequence <= 3`);
 
-    const res = await app.inject({ method: "GET", url: "/v1/delta?since=1" });
+    const res = await app.inject({ method: "GET", url: "/v1/delta?since=1", headers: auth });
     expect(res.statusCode).toBe(409);
     expect(res.json().error.code).toBe("SNAPSHOT_REQUIRED");
 
     // since=3 (one below the new earliest retained sequence 4) is still gap-free.
-    const ok = await app.inject({ method: "GET", url: "/v1/delta?since=3" });
+    const ok = await app.inject({ method: "GET", url: "/v1/delta?since=3", headers: auth });
     expect(ok.statusCode).toBe(200);
     expect(ok.json().events).toHaveLength(2);
   });

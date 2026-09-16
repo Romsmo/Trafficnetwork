@@ -2,17 +2,25 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import type { FastifyInstance } from "fastify";
 import { sql } from "drizzle-orm";
 import { buildApp } from "../../src/app.js";
-import { loadEnv, resetEnvCache } from "../../src/config/env.js";
+import { loadEnv, resetEnvCache, type Env } from "../../src/config/env.js";
 import { startTestDatabase, type TestDatabase } from "./setup.js";
+import { authHeader, testToken } from "./auth-helper.js";
 
 describe("moderation gate / hazard report writes", () => {
   let testDb: TestDatabase;
   let app: FastifyInstance;
+  let env: Env;
+  const as: Record<string, { authorization: string }> = {};
+
+  async function tokenFor(name: string) {
+    if (!as[name]) as[name] = authHeader(await testToken(env, { sub: name }));
+    return as[name];
+  }
 
   beforeAll(async () => {
     testDb = await startTestDatabase();
     resetEnvCache();
-    const env = loadEnv({
+    env = loadEnv({
       DATABASE_URL: testDb.container.getConnectionUri(),
       JWT_SECRET: "a".repeat(32),
       REPORT_RATE_LIMIT_MAX: "3",
@@ -34,12 +42,14 @@ describe("moderation gate / hazard report writes", () => {
     const res = await app.inject({
       method: "POST",
       url: "/v1/hazard-reports",
-      payload: { type: "traffic", lat: 52.52, lng: 13.405, reporterId: "alice" },
+      headers: await tokenFor("alice"),
+      payload: { type: "traffic", lat: 52.52, lng: 13.405 },
     });
     expect(res.statusCode).toBe(201);
     const body = res.json();
     expect(body.merged).toBe(false);
     expect(body.report.confirmCount).toBe(0);
+    expect(body.report.reporterId).toBe("alice");
 
     const events = await testDb.db.execute<{ type: string } & Record<string, unknown>>(
       sql`select type from event_log where entity_id = ${body.report.id}`,
@@ -48,11 +58,12 @@ describe("moderation gate / hazard report writes", () => {
     expect(events[0]?.type).toBe("ReportCreated");
   });
 
-  it("rejects fixedSpeedCamera with 400", async () => {
+  it("rejects an unrelated speedKmh field with 400", async () => {
     const res = await app.inject({
       method: "POST",
       url: "/v1/hazard-reports",
-      payload: { type: "fixedSpeedCamera", lat: 52.52, lng: 13.405, reporterId: "alice" },
+      headers: await tokenFor("alice"),
+      payload: { type: "traffic", lat: 52.52, lng: 13.405, speedKmh: 50 },
     });
     expect(res.statusCode).toBe(400);
   });
@@ -61,15 +72,17 @@ describe("moderation gate / hazard report writes", () => {
     const first = await app.inject({
       method: "POST",
       url: "/v1/hazard-reports",
-      payload: { type: "accident", lat: 52.52, lng: 13.405, reporterId: "alice" },
+      headers: await tokenFor("alice"),
+      payload: { type: "accident", lat: 52.52, lng: 13.405 },
     });
     const firstBody = first.json();
 
     const second = await app.inject({
       method: "POST",
       url: "/v1/hazard-reports",
+      headers: await tokenFor("bob"),
       // ~100m away — well within the 500m merge radius configured above.
-      payload: { type: "accident", lat: 52.5209, lng: 13.405, reporterId: "bob" },
+      payload: { type: "accident", lat: 52.5209, lng: 13.405 },
     });
     const secondBody = second.json();
 
@@ -88,14 +101,16 @@ describe("moderation gate / hazard report writes", () => {
     const first = await app.inject({
       method: "POST",
       url: "/v1/hazard-reports",
-      payload: { type: "ice", lat: 52.52, lng: 13.405, reporterId: "alice" },
+      headers: await tokenFor("alice"),
+      payload: { type: "ice", lat: 52.52, lng: 13.405 },
     });
     const id = first.json().report.id;
 
     const repeat = await app.inject({
       method: "POST",
       url: "/v1/hazard-reports",
-      payload: { type: "ice", lat: 52.5209, lng: 13.405, reporterId: "alice" },
+      headers: await tokenFor("alice"),
+      payload: { type: "ice", lat: 52.5209, lng: 13.405 },
     });
     expect(repeat.json().report.confirmCount).toBe(0);
     expect(repeat.json().report.id).toBe(id);
@@ -105,37 +120,29 @@ describe("moderation gate / hazard report writes", () => {
     await app.inject({
       method: "POST",
       url: "/v1/hazard-reports",
-      payload: { type: "traffic", lat: 52.52, lng: 13.405, reporterId: "alice" },
+      headers: await tokenFor("alice"),
+      payload: { type: "traffic", lat: 52.52, lng: 13.405 },
     });
     const res = await app.inject({
       method: "POST",
       url: "/v1/hazard-reports",
-      payload: { type: "obstacle", lat: 52.52, lng: 13.405, reporterId: "bob" },
+      headers: await tokenFor("bob"),
+      payload: { type: "obstacle", lat: 52.52, lng: 13.405 },
     });
     expect(res.json().merged).toBe(false);
   });
 
   it("enforces the rate limit across creates and confirmations combined", async () => {
-    await app.inject({
-      method: "POST",
-      url: "/v1/hazard-reports",
-      payload: { type: "traffic", lat: 10, lng: 10, reporterId: "carol" },
-    });
-    await app.inject({
-      method: "POST",
-      url: "/v1/hazard-reports",
-      payload: { type: "traffic", lat: 20, lng: 20, reporterId: "carol" },
-    });
-    await app.inject({
-      method: "POST",
-      url: "/v1/hazard-reports",
-      payload: { type: "traffic", lat: 30, lng: 30, reporterId: "carol" },
-    });
+    const carol = await tokenFor("carol");
+    await app.inject({ method: "POST", url: "/v1/hazard-reports", headers: carol, payload: { type: "traffic", lat: 10, lng: 10 } });
+    await app.inject({ method: "POST", url: "/v1/hazard-reports", headers: carol, payload: { type: "traffic", lat: 20, lng: 20 } });
+    await app.inject({ method: "POST", url: "/v1/hazard-reports", headers: carol, payload: { type: "traffic", lat: 30, lng: 30 } });
     // REPORT_RATE_LIMIT_MAX=3 for this test env — the 4th submission within the window is rejected.
     const fourth = await app.inject({
       method: "POST",
       url: "/v1/hazard-reports",
-      payload: { type: "traffic", lat: 40, lng: 40, reporterId: "carol" },
+      headers: carol,
+      payload: { type: "traffic", lat: 40, lng: 40 },
     });
     expect(fourth.statusCode).toBe(429);
   });
@@ -144,14 +151,16 @@ describe("moderation gate / hazard report writes", () => {
     const created = await app.inject({
       method: "POST",
       url: "/v1/hazard-reports",
-      payload: { type: "breakdown", lat: 60, lng: 60, reporterId: "dave" },
+      headers: await tokenFor("dave"),
+      payload: { type: "breakdown", lat: 60, lng: 60 },
     });
     const id = created.json().report.id;
 
     const confirm = await app.inject({
       method: "POST",
       url: `/v1/hazard-reports/${id}/confirmations`,
-      payload: { kind: "stillThere", reporterId: "erin" },
+      headers: await tokenFor("erin"),
+      payload: { kind: "stillThere" },
     });
     expect(confirm.json().recorded).toBe(true);
     expect(confirm.json().report.confirmCount).toBe(1);
@@ -159,7 +168,8 @@ describe("moderation gate / hazard report writes", () => {
     const repeat = await app.inject({
       method: "POST",
       url: `/v1/hazard-reports/${id}/confirmations`,
-      payload: { kind: "stillThere", reporterId: "erin" },
+      headers: await tokenFor("erin"),
+      payload: { kind: "stillThere" },
     });
     expect(repeat.json().recorded).toBe(false);
     expect(repeat.json().report.confirmCount).toBe(1);
@@ -167,7 +177,8 @@ describe("moderation gate / hazard report writes", () => {
     const deny = await app.inject({
       method: "POST",
       url: `/v1/hazard-reports/${id}/confirmations`,
-      payload: { kind: "gone", reporterId: "frank" },
+      headers: await tokenFor("frank"),
+      payload: { kind: "gone" },
     });
     expect(deny.json().report.denyCount).toBe(1);
   });
@@ -176,7 +187,8 @@ describe("moderation gate / hazard report writes", () => {
     const res = await app.inject({
       method: "POST",
       url: "/v1/hazard-reports/00000000-0000-0000-0000-000000000000/confirmations",
-      payload: { kind: "stillThere", reporterId: "erin" },
+      headers: await tokenFor("erin"),
+      payload: { kind: "stillThere" },
     });
     expect(res.statusCode).toBe(404);
   });

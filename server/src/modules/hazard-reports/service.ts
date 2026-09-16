@@ -23,6 +23,8 @@ export interface CreateReportInput extends HazardReportInput {
 export interface CreateReportResult {
   report: HazardReportApi;
   merged: boolean;
+  /** For modules/hazard-reports/routes.ts to publish via WebSocket after commit. */
+  event: Awaited<ReturnType<typeof appendEvent>>;
 }
 
 /**
@@ -47,7 +49,7 @@ export async function createOrMergeReport(db: Queryable, env: Env, input: Create
         incrementConfirm: isNewConfirmation,
         newExpiresAt,
       });
-      await appendEvent(tx, {
+      const event = await appendEvent(tx, {
         type: "ReportConfirmed",
         entityType: "hazardReport",
         entityId: updated.id,
@@ -55,7 +57,7 @@ export async function createOrMergeReport(db: Queryable, env: Env, input: Create
         regionTile: updated.regionTile,
         source: "community",
       });
-      return { report: updated, merged: true };
+      return { report: updated, merged: true, event };
     }
 
     const regionTile = positionToRegionTile(input.lat, input.lng, env);
@@ -69,7 +71,7 @@ export async function createOrMergeReport(db: Queryable, env: Env, input: Create
       regionTile,
       expiresAt,
     });
-    await appendEvent(tx, {
+    const event = await appendEvent(tx, {
       type: "ReportCreated",
       entityType: "hazardReport",
       entityId: created.id,
@@ -77,7 +79,7 @@ export async function createOrMergeReport(db: Queryable, env: Env, input: Create
       regionTile,
       source: "community",
     });
-    return { report: created, merged: false };
+    return { report: created, merged: false, event };
   });
 }
 
@@ -90,6 +92,8 @@ export interface ConfirmReportInput {
 export interface ConfirmReportResult {
   report: HazardReportApi;
   recorded: boolean;
+  /** Undefined when recorded is false (idempotent no-op — nothing to publish). */
+  event?: Awaited<ReturnType<typeof appendEvent>>;
 }
 
 /**
@@ -129,7 +133,7 @@ export async function confirmReport(db: Queryable, env: Env, input: ConfirmRepor
         : undefined,
     });
 
-    await appendEvent(tx, {
+    const event = await appendEvent(tx, {
       type: isStillThere ? "ReportConfirmed" : "ReportDenied",
       entityType: "hazardReport",
       entityId: updated.id,
@@ -138,6 +142,6 @@ export async function confirmReport(db: Queryable, env: Env, input: ConfirmRepor
       source: "community",
     });
 
-    return { report: updated, recorded: true };
+    return { report: updated, recorded: true, event };
   });
 }

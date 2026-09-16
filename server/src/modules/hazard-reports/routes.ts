@@ -7,6 +7,7 @@ import { parseHazardTypes, parseLatLng, parseRadiusM } from "../../lib/query-par
 import { badRequest } from "../../lib/errors.js";
 import { confirmReport, createOrMergeReport } from "./service.js";
 import { createOrMergeFixedCamera } from "../cameras/service.js";
+import { publishEvent } from "../realtime/publisher.js";
 
 /** Intersects the caller's requested types with what this endpoint is allowed to serve. */
 function resolveTypes(requested: HazardType[] | undefined): HazardType[] {
@@ -40,15 +41,15 @@ export async function registerHazardReportRoutes(app: FastifyInstance) {
     return { reports };
   });
 
-  // reporterId comes from the request body only until milestone P1.5's auth module
-  // exists — it will then be derived from the authenticated client's JWT subject
-  // instead, and this field will be removed rather than trusted from the client.
+  // reporterId is the authenticated client's own identity (the JWT subject set by
+  // modules/auth/hook.ts), never a client-supplied field — one client credential
+  // per device (see docs/concept.md's architecture), so the credential itself is
+  // the reporter identity.
   const createBodySchema = z.object({
     type: z.enum(HAZARD_TYPES),
     lat: z.number().min(-90).max(90),
     lng: z.number().min(-180).max(180),
     speedKmh: z.number().optional(),
-    reporterId: z.string().min(1),
   });
 
   app.post("/v1/hazard-reports", async (req, reply) => {
@@ -56,7 +57,8 @@ export async function registerHazardReportRoutes(app: FastifyInstance) {
     if (!parsed.success) {
       throw badRequest("Invalid request body", parsed.error.issues);
     }
-    const { reporterId, ...input } = parsed.data;
+    const input = parsed.data;
+    const reporterId = req.auth!.sub;
 
     // fixedSpeedCamera is a valid input classification but is never stored as a
     // hazard_reports row — it's routed into fixed_speed_cameras instead (see
@@ -67,6 +69,7 @@ export async function registerHazardReportRoutes(app: FastifyInstance) {
         lng: input.lng,
         reporterId,
       });
+      publishEvent(app.realtime, cameraResult.event);
       reply.status(cameraResult.merged ? 200 : 201);
       return { camera: cameraResult.camera, merged: cameraResult.merged };
     }
@@ -78,13 +81,13 @@ export async function registerHazardReportRoutes(app: FastifyInstance) {
       speedKmh: input.speedKmh,
       reporterId,
     });
+    publishEvent(app.realtime, result.event);
     reply.status(result.merged ? 200 : 201);
-    return result;
+    return { report: result.report, merged: result.merged };
   });
 
   const confirmBodySchema = z.object({
     kind: z.enum(["stillThere", "gone"]),
-    reporterId: z.string().min(1),
   });
 
   app.post("/v1/hazard-reports/:id/confirmations", async (req) => {
@@ -93,10 +96,12 @@ export async function registerHazardReportRoutes(app: FastifyInstance) {
     if (!parsed.success) {
       throw badRequest("Invalid request body", parsed.error.issues);
     }
-    return confirmReport(app.deps.db, app.deps.env, {
+    const result = await confirmReport(app.deps.db, app.deps.env, {
       reportId: params.id,
-      reporterId: parsed.data.reporterId,
+      reporterId: req.auth!.sub,
       kind: parsed.data.kind,
     });
+    if (result.event) publishEvent(app.realtime, result.event);
+    return { report: result.report, recorded: result.recorded };
   });
 }

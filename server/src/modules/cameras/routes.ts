@@ -7,6 +7,7 @@ import { expandTile } from "../../lib/h3.js";
 import { parseHazardTypes, parseLatLng, parseRadiusM } from "../../lib/query-params.js";
 import { badRequest } from "../../lib/errors.js";
 import { reportCameraRemoval } from "./service.js";
+import { publishEvent } from "../realtime/publisher.js";
 
 /** Splits a requested types filter into "include fixed cameras?" + "which dynamic camera types". */
 function resolveCameraFilter(requested: HazardType[] | undefined): { includeFixed: boolean; dynamicTypes: HazardType[] } {
@@ -54,15 +55,14 @@ export async function registerCameraRoutes(app: FastifyInstance) {
   });
 
   // Writes are always accepted regardless of the flag — see modules/cameras/service.ts.
-  const removalBodySchema = z.object({ reporterId: z.string().min(1) });
-
+  // reporterId is the authenticated client's own identity, see modules/hazard-reports/routes.ts.
   app.post("/v1/speed-cameras/:id/removal-reports", async (req) => {
     const params = req.params as { id: string };
-    const parsed = removalBodySchema.safeParse(req.body);
-    if (!parsed.success) throw badRequest("Invalid request body", parsed.error.issues);
-    return reportCameraRemoval(app.deps.db, app.deps.env, {
+    const result = await reportCameraRemoval(app.deps.db, app.deps.env, {
       cameraId: params.id,
-      reporterId: parsed.data.reporterId,
+      reporterId: req.auth!.sub,
     });
+    if (result.event) publishEvent(app.realtime, result.event);
+    return { camera: result.camera, recorded: result.recorded, removed: result.removed };
   });
 }

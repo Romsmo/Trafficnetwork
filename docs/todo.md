@@ -16,13 +16,13 @@
 
 ## Phase 1 — Server (Relay/Moderator + API) — muss vollständig fertig sein, bevor Phase 2 beginnt
 - [x] Claude-Code-Prompt aus dem Konzept generieren (`docs/prompt-phase1-server.md`)
-- [ ] Plattform wählen lassen (Supabase/Neon/andere, Claude Code entscheidet mit Begründung)
-- [ ] Schema + Ereignisprotokoll + materialisierter Zustand
-- [ ] Snapshot- und Delta-Mechanik
-- [ ] Moderationsgate (Rate-Limit, Duplikat-Erkennung, Reputation)
-- [ ] Transport-Protokoll wählen (MQTT vs. WebSocket)
-- [ ] Blitzer-Namensraum bauen — standardmäßig deaktiviert
-- [ ] API vollständig dokumentiert und getestet (Bulk-Import-Endpunkt, Auth, Rate-Limits) — **Phase-1-Abschluss**
+- [x] Plattform gewählt: Neon (siehe `server/README.md`, Begründung in `docs/prompt-phase1-server.md` Abschnitt 2)
+- [x] Schema + Ereignisprotokoll + materialisierter Zustand
+- [x] Snapshot- und Delta-Mechanik
+- [x] Moderationsgate (Rate-Limit, Duplikat-Erkennung, Reputation)
+- [x] Transport-Protokoll gewählt: WebSocket (siehe Begründung im Server-Plan)
+- [x] Blitzer-Namensraum gebaut — standardmäßig deaktiviert
+- [x] API vollständig dokumentiert und getestet (Bulk-Import-Endpunkt, Auth, Rate-Limits) — **Phase-1-Abschluss erreicht**
 
 ## Phase 2 — Client-Sync-Bibliothek — startet erst nach Phase 1
 - [ ] Claude-Code-Prompt generieren

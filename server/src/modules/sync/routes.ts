@@ -22,7 +22,7 @@ export async function registerSyncRoutes(app: FastifyInstance) {
     return result;
   });
 
-  app.get("/v1/delta", async (req, reply) => {
+  app.get("/v1/delta", async (req) => {
     const query = req.query as Record<string, unknown>;
     const sinceSchema = z.coerce.number().int().nonnegative();
     const sinceResult = sinceSchema.safeParse(query.since);

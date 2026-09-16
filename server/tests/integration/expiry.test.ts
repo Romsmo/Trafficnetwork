@@ -30,19 +30,20 @@ describe("expiry sweep", () => {
       expiresAt: new Date(Date.now() - 1000),
     });
 
-    const count = await runExpirySweep(testDb.db);
-    expect(count).toBe(1);
+    const events = await runExpirySweep(testDb.db);
+    expect(events).toHaveLength(1);
+    expect(events[0]?.regionTile).toBe(tile);
 
     const rows = await testDb.db.execute<{ status: string } & Record<string, unknown>>(
       sql`select status from hazard_reports where id = ${id}`,
     );
     expect(rows[0]?.status).toBe("expired");
 
-    const events = await testDb.db.execute<{ type: string; entity_id: string } & Record<string, unknown>>(
+    const loggedEvents = await testDb.db.execute<{ type: string; entity_id: string } & Record<string, unknown>>(
       sql`select type, entity_id from event_log where entity_id = ${id}`,
     );
-    expect(events).toHaveLength(1);
-    expect(events[0]?.type).toBe("ReportExpired");
+    expect(loggedEvents).toHaveLength(1);
+    expect(loggedEvents[0]?.type).toBe("ReportExpired");
   });
 
   it("leaves not-yet-expired active reports untouched", async () => {
@@ -53,8 +54,8 @@ describe("expiry sweep", () => {
       expiresAt: new Date(Date.now() + 60_000),
     });
 
-    const count = await runExpirySweep(testDb.db);
-    expect(count).toBe(0);
+    const events = await runExpirySweep(testDb.db);
+    expect(events).toHaveLength(0);
 
     const rows = await testDb.db.execute<{ status: string } & Record<string, unknown>>(
       sql`select status from hazard_reports where id = ${id}`,

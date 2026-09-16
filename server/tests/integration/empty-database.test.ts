@@ -3,6 +3,7 @@ import type { FastifyInstance } from "fastify";
 import { buildApp } from "../../src/app.js";
 import { loadEnv, resetEnvCache } from "../../src/config/env.js";
 import { startTestDatabase, type TestDatabase } from "./setup.js";
+import { authHeader, testToken } from "./auth-helper.js";
 
 /**
  * docs/prompt-phase1-server.md section "ROLLE & ARBEITSWEISE" point 6 and
@@ -13,6 +14,7 @@ import { startTestDatabase, type TestDatabase } from "./setup.js";
 describe("empty database", () => {
   let testDb: TestDatabase;
   let app: FastifyInstance;
+  let auth: { authorization: string };
 
   beforeAll(async () => {
     testDb = await startTestDatabase();
@@ -22,6 +24,7 @@ describe("empty database", () => {
       JWT_SECRET: "a".repeat(32),
     });
     app = await buildApp({ env, db: testDb.db });
+    auth = authHeader(await testToken(env));
   });
 
   afterAll(async () => {
@@ -29,14 +32,19 @@ describe("empty database", () => {
     await testDb.teardown();
   });
 
-  it("reports healthy against a freshly migrated, empty database", async () => {
+  it("reports healthy against a freshly migrated, empty database (no auth required)", async () => {
     const res = await app.inject({ method: "GET", url: "/v1/health" });
     expect(res.statusCode).toBe(200);
     expect(res.json()).toEqual({ status: "ok", database: "ok" });
   });
 
-  it("returns 404 (not empty arrays/500) for a point speed-limit lookup with no data", async () => {
+  it("rejects every /v1 route without a bearer token", async () => {
     const res = await app.inject({ method: "GET", url: "/v1/speed-limit?lat=52.5&lng=13.4" });
+    expect(res.statusCode).toBe(401);
+  });
+
+  it("returns 404 (not empty arrays/500) for a point speed-limit lookup with no data", async () => {
+    const res = await app.inject({ method: "GET", url: "/v1/speed-limit?lat=52.5&lng=13.4", headers: auth });
     expect(res.statusCode).toBe(404);
   });
 
@@ -45,7 +53,7 @@ describe("empty database", () => {
     "/v1/static-signs/nearby?lat=52.5&lng=13.4&radiusM=1000",
     "/v1/hazard-reports/nearby?lat=52.5&lng=13.4&radiusM=1000",
   ])("returns 200 with an empty list for %s", async (url) => {
-    const res = await app.inject({ method: "GET", url });
+    const res = await app.inject({ method: "GET", url, headers: auth });
     expect(res.statusCode).toBe(200);
     const body = res.json();
     const [, list] = Object.entries(body)[0] as [string, unknown[]];
@@ -53,17 +61,17 @@ describe("empty database", () => {
   });
 
   it("returns 200 with an empty list for hazard-reports/by-tile", async () => {
-    const res = await app.inject({ method: "GET", url: "/v1/hazard-reports/by-tile?tile=871f200d3ffffff&k=1" });
+    const res = await app.inject({ method: "GET", url: "/v1/hazard-reports/by-tile?tile=871f200d3ffffff&k=1", headers: auth });
     expect(res.statusCode).toBe(200);
     expect(res.json()).toEqual({ reports: [] });
   });
 
   it("speed-cameras endpoints return an empty list regardless of data (namespace flag defaults to off)", async () => {
-    const nearby = await app.inject({ method: "GET", url: "/v1/speed-cameras/nearby?lat=52.5&lng=13.4&radiusM=1000" });
+    const nearby = await app.inject({ method: "GET", url: "/v1/speed-cameras/nearby?lat=52.5&lng=13.4&radiusM=1000", headers: auth });
     expect(nearby.statusCode).toBe(200);
     expect(nearby.json()).toEqual({ cameras: [] });
 
-    const byTile = await app.inject({ method: "GET", url: "/v1/speed-cameras/by-tile?tile=871f200d3ffffff&k=1" });
+    const byTile = await app.inject({ method: "GET", url: "/v1/speed-cameras/by-tile?tile=871f200d3ffffff&k=1", headers: auth });
     expect(byTile.statusCode).toBe(200);
     expect(byTile.json()).toEqual({ cameras: [] });
   });
@@ -72,13 +80,13 @@ describe("empty database", () => {
     const res = await app.inject({
       method: "POST",
       url: "/v1/speed-cameras/00000000-0000-0000-0000-000000000000/removal-reports",
-      payload: { reporterId: "tester" },
+      headers: auth,
     });
     expect(res.statusCode).toBe(404);
   });
 
   it("returns an empty snapshot with sequence 0", async () => {
-    const res = await app.inject({ method: "GET", url: "/v1/snapshot" });
+    const res = await app.inject({ method: "GET", url: "/v1/snapshot", headers: auth });
     expect(res.statusCode).toBe(200);
     expect(res.json()).toEqual({
       snapshotSequence: 0,
@@ -90,13 +98,13 @@ describe("empty database", () => {
   });
 
   it("returns an empty delta page for since=0", async () => {
-    const res = await app.inject({ method: "GET", url: "/v1/delta?since=0" });
+    const res = await app.inject({ method: "GET", url: "/v1/delta?since=0", headers: auth });
     expect(res.statusCode).toBe(200);
     expect(res.json()).toEqual({ events: [], nextSince: null, hasMore: false });
   });
 
   it("rejects delta for a since far in the future as SNAPSHOT_REQUIRED (log is empty, cannot prove no gap)", async () => {
-    const res = await app.inject({ method: "GET", url: "/v1/delta?since=999" });
+    const res = await app.inject({ method: "GET", url: "/v1/delta?since=999", headers: auth });
     expect(res.statusCode).toBe(409);
     expect(res.json().error.code).toBe("SNAPSHOT_REQUIRED");
   });
