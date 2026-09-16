@@ -24,15 +24,23 @@
 - [x] Blitzer-Namensraum gebaut — standardmäßig deaktiviert
 - [x] API vollständig dokumentiert und getestet (Bulk-Import-Endpunkt, Auth, Rate-Limits) — **Phase-1-Abschluss erreicht**
 
-## Phase 2 — Client-Sync-Bibliothek — startet erst nach Phase 1
-- [ ] Claude-Code-Prompt generieren
-- [ ] Portabilität entscheiden (plattformunabhängiger Kern vs. Flutter-spezifisch)
-- [ ] Lokaler Speicher (SQLite + SpatiaLite)
-- [ ] Sync-Engine (Bootstrap-Snapshot, Delta-Pull, regionale Subscription)
+## Phase 2 — Client-Sync-Bibliothek — gestartet (Phase 1 abgeschlossen)
+- [x] Claude-Code-Prompt generieren (`docs/prompt-phase2-client-lib.md`)
+- [x] Portabilität entschieden: plattformunabhängiger Kern + dünne Bindings (Android, iOS, Flutter, React Native, Desktop/Server über C-ABI inkl. Python/Node, Web/WASM)
+- [x] Geräte-Identität entschieden: anonyme Geräteregistrierung per App-Schlüssel (Server-Erweiterung in P2.0)
+- [ ] P2.0 Server-Erweiterungen: Geräteregistrierung, partitionierte/versionierte statische Datenpakete + Manifest, ggf. Config-Endpunkt
+- [ ] Kernsprache/Toolchain + Speicher/Geo-Index wählen lassen (SpatiaLite-Verfügbarkeit auf allen Zielen prüfen)
+- [ ] Lokaler Speicher + Migrationen
+- [ ] Sync-Engine (Registrierung/Token, Bootstrap, Delta inkl. 409-Fallback, WebSocket-Push, regionale Subscription, Paket-Updates)
 - [ ] Lokales Map-Matching für Tempolimits
 - [ ] Lokale Verfallsberechnung
 - [ ] Offline-Schreibpuffer + Reconciliation
-- [ ] Öffentliche lokale API dokumentieren (`getNearby`, `getSpeedLimitAt`, `submitReport`, …)
+- [ ] Bindings + Konformitätstests für alle Zielplattformen
+- [ ] Öffentliche lokale API + Integrations-Guides dokumentieren — **Phase-2-Abschluss**
+
+## Vor produktivem Einsatz von Phase 2
+- [ ] Letzten `server-ci`-Lauf prüfen (Integrationstests grün)
+- [ ] `docs/privacy.md` (DSGVO) fertig — Geräteregistrierung und Positions-Tiles berücksichtigen
 
 ## Phase 3 — Ingestion-Programm (Grundstock-Befüllung) — startet erst nach Phase 2
 - [ ] Claude-Code-Prompt generieren
