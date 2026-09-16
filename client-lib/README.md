@@ -1,7 +1,9 @@
 # client-lib
 
-Client-Sync-Bibliothek: lokaler Speicher (SQLite + SpatiaLite), Sync-Engine (Snapshot-Bootstrap, Delta-Pull, regionale Subscription), lokales Map-Matching, lokale Verfallsberechnung, Offline-Schreibpuffer. Einbettbar in beliebige Host-Apps, nicht auf eine bestimmte App festgelegt.
+Client-Sync-Bibliothek: einbettbarer, maximal portabler Adapter für beliebige Apps. Lokaler Speicher, Sync-Engine (Snapshot/Paket-Bootstrap, Delta-Pull, WebSocket-Push, regionale Subscription), lokales Map-Matching, lokale Verfallsberechnung, Offline-Schreibpuffer.
 
-**Status**: Noch nicht implementiert — Phase 2 des Projekts, startet erst nach Phase 1 (`server/`). Details siehe [`docs/concept.md`](../docs/concept.md) (Abschnitt 6) und [`docs/todo.md`](../docs/todo.md).
+Zielplattformen: Android (Kotlin), iOS/macOS (Swift), Flutter (Dart), React Native, Desktop/Server über C-ABI (inkl. Python, Node.js), Web-Browser (WASM).
 
-Hängt von der stabilen API aus `server/` ab.
+**Status**: Phase 2 gestartet — Umsetzungsauftrag in [`docs/prompt-phase2-client-lib.md`](../docs/prompt-phase2-client-lib.md). Noch kein Code. Details siehe [`docs/concept.md`](../docs/concept.md) (Abschnitt 6) und [`docs/todo.md`](../docs/todo.md).
+
+Hängt von der API aus `server/` ab (inkl. der Erweiterungen aus Meilenstein P2.0).
