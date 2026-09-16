@@ -6,6 +6,18 @@
 
 ---
 
+## 0. SETUP — REPO SELBST KLONEN
+
+Du startest möglicherweise in einem leeren Arbeitsverzeichnis. Stelle das Repo **selbstständig** bereit, bevor du irgendetwas anderes tust (dieser Schritt ist vom Plan-Modus ausgenommen):
+
+1. Prüfe, ob du dich bereits in einem Klon von `Romsmo/Trafficnetwork` befindest (`git remote -v`). Falls ja: `git checkout main && git pull`, weiter mit Schritt 4.
+2. Falls nicht: klone das Repo selbst — `git clone https://github.com/Romsmo/Trafficnetwork.git` (alternativ `gh repo clone Romsmo/Trafficnetwork` oder per SSH `git@github.com:Romsmo/Trafficnetwork.git`) — und wechsle in das Verzeichnis `Trafficnetwork`.
+3. Das Repo ist **privat**. Schlägt der Clone mangels Authentifizierung fehl: zeig mir die konkrete Fehlermeldung und nenne die Optionen (z. B. `gh auth login`, SSH-Key, Personal Access Token über den Git-Credential-Helper). Frag mich nie nach Passwörtern oder Tokens im Chat und lege keine Zugangsdaten im Repo oder in Dateien ab.
+4. Prüfe, dass die erwartete Struktur vorhanden ist (`docs/concept.md`, `docs/todo.md`, `server/`, `client-lib/`, `ingestion/`). Fehlt etwas, melde es mir, statt es selbst anzulegen.
+5. Danach weiter mit „Rolle & Arbeitsweise“. Alle Commits gehen in diesen Klon und werden nach jedem Meilenstein nach `origin` gepusht.
+
+---
+
 ## ROLLE & ARBEITSWEISE
 
 Du baust das Relay-/Moderator-Backend eines offenen, dezentralen Verkehrsdaten-Netzwerks (Local-First-Architektur): Der Server ist **nicht** die Quelle, die Endgeräte bei jeder Positionsprüfung live abfragen — das übernimmt später die lokale Speicherung jedes Geräts (`client-lib/`, Phase 2). Der Server vermittelt und moderiert Änderungen zwischen Geräten über ein Ereignisprotokoll plus Snapshot-/Delta-Sync.
@@ -15,7 +27,7 @@ Arbeitsregeln für die gesamte Session:
 1. **Erst planen, dann bauen.** Plan-Modus zuerst. Lies `docs/concept.md` vollständig, recherchiere die offenen Entscheidungen (Abschnitt „Offene Entscheidungen, die du triffst" unten) eigenständig, lege mir Plan + Meilensteine vor, warte auf Freigabe.
 2. **Bei offenen Fragen: frag mich.** Konkrete Optionen mit Empfehlung, nicht raten.
 3. **Nichts erfinden.** Keine angenommenen Preise/Limits/API-Verhalten einer Plattform oder Bibliothek — mit Beleg (Link/Datum) dokumentieren, da sich Free-Tier-Konditionen und APIs ändern.
-4. **Inkrementell und grün.** Nach jedem Meilenstein: Build läuft, Tests laufen, Commit, kurze Zusammenfassung.
+4. **Inkrementell und grün.** Nach jedem Meilenstein: Build läuft, Tests laufen, Commit + Push, kurze Zusammenfassung.
 5. **Sprache:** Code, Kommentare, Commit-Messages, README, `docs/` auf Englisch. Dieser Prompt und deine Rückfragen an mich auf Deutsch.
 6. **Keine Annahme, dass Ingestion oder Client-Bibliothek existieren.** Ein frisch aufgesetzter Server mit leerer Datenbank ist ein gültiger, funktionierender Zustand (liefert einfach noch keine Daten aus) — das muss durch einen Test abgedeckt sein.
 
@@ -193,7 +205,7 @@ Stil: deine Entscheidung (Abschnitt 2, Punkt 5).
 | P1.4 | Blitzer-Namensraum, separat, standardmäßig deaktiviert (Abschnitt 6) |
 | P1.5 | API vollständig (Bulk-Import-Endpunkt, Auth/Client-Credentials mit Scopes, Rate-Limits, Versionierung), dokumentiert (`docs/api.md`, `docs/schema.md` innerhalb von `server/`) und getestet, inkl. Test „leere Datenbank ist ein gültiger Zustand" — **Phase-1-Abschluss** |
 
-Nach jedem Meilenstein: `server/README.md` aktualisieren (ersetzt den aktuellen Platzhaltertext), Commit, kurze Zusammenfassung an mich.
+Nach jedem Meilenstein: `server/README.md` aktualisieren (ersetzt den aktuellen Platzhaltertext), Commit + Push, kurze Zusammenfassung an mich.
 
 ---
 
