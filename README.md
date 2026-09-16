@@ -16,8 +16,8 @@ Jedes Geraet haelt seine Daten lokal und funktioniert offline. Der Server ist Ve
 ## Baureihenfolge
 
 1. Server (inkl. API) - vollstaendig fertig
-2. Ingestion-Programm - Grundstock-Befuellung
-3. Client-Sync-Bibliothek
+2. Client-Sync-Bibliothek
+3. Ingestion-Programm - Grundstock-Befuellung
 
 Details: siehe `docs/concept.md` und `docs/todo.md`.
 
