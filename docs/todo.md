@@ -1,5 +1,36 @@
 # ToDo: Verkehrsdaten-Backend
 
+## Koordination laufender Sessions
+
+Zwei Claude-Code-Sessions arbeiten gleichzeitig im selben Checkout (F-S und
+F-C laufen parallel, siehe "Überarbeitung F" unten) — dieser Abschnitt ist
+der gemeinsame Status, damit keine Session im Dunkeln tappt oder der anderen
+in die Quere kommt. **Jede Session aktualisiert nur ihren eigenen Block**,
+committet das für sich (kleine, isolierte Doku-Änderung) und pusht sofort,
+um Konflikte mit der anderen Session zu vermeiden.
+
+**F-S (Server, `server/`)** — Session "Trafficnetwork Backend"
+- Branch: `rework/server-federation` (noch nicht nach `main` gemergt)
+- Stand: F-S1 abgeschlossen und gepusht — Docker-Paketierung, Installation
+  ohne Docker, `server/docs/threat-model.md` (Commit `e5e0592`, CI-Trigger
+  für `rework/*`-Branches ergänzt in `17c4518`)
+- Nächster Schritt: F-S2 (Identitäten & Kryptografie, gerätesignierte Auth,
+  signierte Netzwerk-Konfiguration)
+
+**F-C (Client-Bibliothek, `client-lib/`)** — Session "Client-Sync-Bibliothek Phase 2"
+- Branch: `rework/client-lib-federation`
+- Stand: wartet bewusst auf F-S-Fortschritt (F-C ist laut
+  `docs/prompt-rework-client-lib-federation.md` von der Server-Föderation
+  abhängig — Protokoll/API der Server-Seite müssen erst stehen); bislang nur
+  P2.0 (nicht-föderierte Server-Erweiterungen, siehe unten) umgesetzt, noch
+  kein Code in `client-lib/` selbst
+- Nächster Schritt: F-S-Fortschritt weiter beobachten; F-C0 (Stand prüfen,
+  Entscheidungen, Plan) beginnt, sobald F-S so weit steht, dass Protokoll/API
+  sich nicht mehr grundlegend ändern (spätestens nach F-S2, ggf. früher in
+  Absprache)
+
+_Zuletzt aktualisiert: 2026-09-17 von der F-C-Session._
+
 ## Vor der Prompt-Erstellung — offene Entscheidungen
 - [x] GitHub-Repo-Struktur: ein Monorepo für Server, Client-Bibliothek, Ingestion
 - [x] Geografischer Start-Scope: Europa, Architektur weltweit-fähig ausgelegt
