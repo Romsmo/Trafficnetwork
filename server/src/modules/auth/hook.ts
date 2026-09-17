@@ -9,8 +9,14 @@ declare module "fastify" {
   }
 }
 
-/** Routes that work without a client credential — infrastructure and the token exchange itself. */
-const PUBLIC_PATHS = new Set(["/v1/health", "/v1/auth/token"]);
+/**
+ * Routes exempt from this hook's header check: infrastructure, the token
+ * exchange itself, and the WebSocket upgrade — which still requires a valid
+ * credential, just via its own first-message handshake (see
+ * modules/realtime/plugin.ts and docs/api.md's "Real-time push" section)
+ * rather than a header, so bearer tokens don't end up in proxy/access logs.
+ */
+const PUBLIC_PATHS = new Set(["/v1/health", "/v1/auth/token", "/v1/ws"]);
 
 /**
  * Registered once, globally, in app.ts — per docs/prompt-phase1-server.md section 7
