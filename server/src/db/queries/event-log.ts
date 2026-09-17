@@ -1,6 +1,7 @@
 import { sql } from "drizzle-orm";
 import type { Queryable } from "../client.js";
 import type { EntityType, EventType } from "../../config/constants.js";
+import { pgArray } from "../pg-array.js";
 
 export interface EventLogEntryApi {
   sequence: number;
@@ -82,14 +83,14 @@ export async function getDeltaPage(
   const tiles = opts.tiles ?? [];
   const typeFilter =
     opts.types && opts.types.length > 0
-      ? sql`and (entity_type not in ('hazardReport', 'fixedSpeedCamera') or payload ->> 'type' = any(${opts.types}))`
+      ? sql`and (entity_type not in ('hazardReport', 'fixedSpeedCamera') or payload ->> 'type' = any(${pgArray(opts.types)}))`
       : sql``;
 
   const rows = await db.execute<Row>(sql`
     select sequence, occurred_at, type, entity_type, entity_id, payload, region_tile, source
     from event_log
     where sequence > ${since}
-      and (region_tile is null or region_tile = any(${tiles}))
+      and (region_tile is null or region_tile = any(${pgArray(tiles)}))
       ${typeFilter}
     order by sequence asc
     limit ${opts.limit + 1}

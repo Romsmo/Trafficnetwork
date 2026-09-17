@@ -2,6 +2,7 @@ import { sql } from "drizzle-orm";
 import type { Database } from "../../db/client.js";
 import type { Env } from "../../config/env.js";
 import type { FastifyBaseLogger } from "fastify";
+import { pgArray } from "../../db/pg-array.js";
 
 const DYNAMIC_EVENT_TYPES = ["ReportCreated", "ReportConfirmed", "ReportDenied", "ReportExpired"] as const;
 const STATIC_EVENT_TYPES = ["StaticDataUpdated", "StaticDataRemoved"] as const;
@@ -27,12 +28,12 @@ export async function runRetentionCleanup(db: Database["db"], env: Env): Promise
 
   const dynamicDeleted = await db.execute<{ id: number } & Record<string, unknown>>(sql`
     delete from event_log
-    where type = any(${DYNAMIC_EVENT_TYPES}::event_type[]) and occurred_at < ${dynamicCutoff}
+    where type = any(${pgArray(DYNAMIC_EVENT_TYPES)}::event_type[]) and occurred_at < ${dynamicCutoff}
     returning sequence as id
   `);
   const staticDeleted = await db.execute<{ id: number } & Record<string, unknown>>(sql`
     delete from event_log
-    where type = any(${STATIC_EVENT_TYPES}::event_type[]) and occurred_at < ${staticCutoff}
+    where type = any(${pgArray(STATIC_EVENT_TYPES)}::event_type[]) and occurred_at < ${staticCutoff}
     returning sequence as id
   `);
   const staleReports = await db.execute<{ id: string } & Record<string, unknown>>(sql`

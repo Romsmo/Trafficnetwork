@@ -1,6 +1,7 @@
 import { sql } from "drizzle-orm";
 import type { Queryable } from "../client.js";
 import type { ClientScope } from "../../config/constants.js";
+import { pgArray } from "../pg-array.js";
 
 export interface ClientRow {
   id: string;
@@ -46,7 +47,7 @@ export async function insertClient(
 ): Promise<ClientRow> {
   const rows = await db.execute<Row>(sql`
     insert into clients (client_id, client_secret_hash, scopes, name)
-    values (${input.clientId}, ${input.clientSecretHash}, ${input.scopes}::client_scope[], ${input.name})
+    values (${input.clientId}, ${input.clientSecretHash}, ${pgArray(input.scopes)}::client_scope[], ${input.name})
     returning id, client_id, client_secret_hash, scopes, name, revoked_at
   `);
   const row = rows[0];

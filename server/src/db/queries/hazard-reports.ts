@@ -1,6 +1,7 @@
 import { sql } from "drizzle-orm";
 import type { Queryable } from "../client.js";
 import type { HazardType } from "../../config/constants.js";
+import { pgArray } from "../pg-array.js";
 
 export interface HazardReportApi {
   id: string;
@@ -70,11 +71,11 @@ export async function findHazardReportsByTiles(
   tiles: string[],
   types?: HazardType[],
 ): Promise<HazardReportApi[]> {
-  const typeFilter = types && types.length > 0 ? sql`and type = any(${types}::hazard_type[])` : sql``;
+  const typeFilter = types && types.length > 0 ? sql`and type = any(${pgArray(types)}::hazard_type[])` : sql``;
   const rows = await db.execute<Row>(sql`
     select ${SELECT_COLUMNS}
     from hazard_reports
-    where status = 'active' and region_tile = any(${tiles}) ${typeFilter}
+    where status = 'active' and region_tile = any(${pgArray(tiles)}) ${typeFilter}
   `);
   return rows.map(toApi);
 }
@@ -86,7 +87,7 @@ export async function findHazardReportsNearby(
   radiusM: number,
   types?: HazardType[],
 ): Promise<HazardReportApi[]> {
-  const typeFilter = types && types.length > 0 ? sql`and type = any(${types}::hazard_type[])` : sql``;
+  const typeFilter = types && types.length > 0 ? sql`and type = any(${pgArray(types)}::hazard_type[])` : sql``;
   const rows = await db.execute<Row>(sql`
     select ${SELECT_COLUMNS}
     from hazard_reports
