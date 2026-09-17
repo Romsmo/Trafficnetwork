@@ -2,7 +2,11 @@ name: server-ci
 
 on:
   push:
-    branches: [main]
+    # main plus any rework/* branch (e.g. rework/server-federation) — a
+    # feature branch needs its own CI signal per milestone, per
+    # docs/prompt-rework-server-federation.md's "nach jedem Meilenstein:
+    # Build + Tests (auch CI) grün" — not just once at PR time.
+    branches: [main, "rework/**"]
     paths:
       - "server/**"
       - ".github/workflows/server-ci.yml"
