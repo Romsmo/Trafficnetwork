@@ -6,13 +6,13 @@ Relay-/Moderator-Server: Ereignisprotokoll, materialisierter Zustand (PostGIS), 
 
 `client-lib/` (P2.1+) kann beginnen.
 
-**Geplante Überarbeitung (Phase F-Server):** Self-Hosting per Docker oder ohne Docker (Apache/nginx/Caddy) und Föderation mehrerer Server (offene Mitgliedschaft mit Reputation, signierte Daten, Server-Verzeichnis). Konzept: [`docs/federation.md`](../docs/federation.md), Auftrag: [`docs/prompt-rework-server-federation.md`](../docs/prompt-rework-server-federation.md). Hinweis: Das aktuelle Auth-Modell (gemeinsames `JWT_SECRET`) und Neon als empfohlene Plattform werden dabei abgelöst.
+**Laufende Überarbeitung (Phase F-Server, Branch `rework/server-federation`):** Self-Hosting per Docker oder ohne Docker (Apache/nginx/Caddy) und Föderation mehrerer Server (offene Mitgliedschaft mit Reputation, signierte Daten, Server-Verzeichnis). Konzept: [`docs/federation.md`](../docs/federation.md), Auftrag: [`docs/prompt-rework-server-federation.md`](../docs/prompt-rework-server-federation.md), Bedrohungsmodell: [`docs/threat-model.md`](docs/threat-model.md). **F-S1 (Docker/Compose, Installation ohne Docker, Multi-Arch-Build) ist umgesetzt** — Installation: [`docs/installation.md`](docs/installation.md). Ab F-S2 wird das aktuelle Auth-Modell (gemeinsames `JWT_SECRET`) um geräteseitig signierte Auth erweitert (rein additiv, siehe Migrationspfad im Plan); Neon bleibt als DB-Option vollständig unterstützt, PostgreSQL+PostGIS im Compose-Stack ist ab jetzt der Standardpfad für neue Selbsthoster.
 
 ## Tech-Stack
 
 Node.js + TypeScript + [Fastify](https://fastify.dev/) + [Drizzle ORM](https://orm.drizzle.team/) gegen Postgres/PostGIS (empfohlen: [Neon](https://neon.com/)). WebSocket-Push über [`@fastify/websocket`](https://github.com/fastify/fastify-websocket), Auth über clientseitige JWTs ([`jose`](https://github.com/panva/jose)). Begründung der Plattform-/Protokoll-/Tiling-Entscheidungen: siehe Plan-Dokument dieser Session bzw. `docs/prompt-phase1-server.md` Abschnitt 2.
 
-## Setup
+## Setup (lokale Entwicklung)
 
 ```bash
 npm install
@@ -24,6 +24,17 @@ npm run dev
 ```
 
 `GET /v1/health` prüft Erreichbarkeit der Datenbank (kein Auth nötig). Jeder andere `/v1/*`-Endpunkt braucht einen Bearer-Token — siehe [`docs/api.md`](docs/api.md) Abschnitt "Auth".
+
+## Selbst hosten (Docker oder ohne Docker)
+
+Vollständige Anleitung: [`docs/installation.md`](docs/installation.md). Kurzfassung:
+
+```bash
+cp .env.example .env   # POSTGRES_PASSWORD + JWT_SECRET setzen
+docker compose up -d
+```
+
+Startet Server + PostgreSQL/PostGIS in einem Stack, Migrationen laufen automatisch beim Start (siehe `Dockerfile`). Multi-Arch-Image (amd64 + arm64, per CI validiert — läuft also auch auf Raspberry Pi/ARM-VPS). Reverse-Proxy-Beispiele für Apache (inkl. `mod_proxy_wstunnel` für `/v1/ws`), nginx und Caddy liegen in [`deploy/`](deploy/) — auch für die Installation ohne Docker (Node.js + eigenes PostgreSQL+PostGIS, systemd-Unit in `deploy/trafficnetwork-server.service`).
 
 ## Umgebungsvariablen
 
@@ -103,3 +114,9 @@ Integrationstests laufen automatisch in CI (`.github/workflows/server-ci.yml`, G
 | P1.4 | Blitzer-Namensraum, separat, standardmäßig deaktiviert | ✅ |
 | P1.5 | Auth, Bulk-Import, WebSocket-Push, Retention-Cleanup, API-/Schema-Doku, vollständige Testsuite — **Phase-1-Abschluss** | ✅ |
 | P2.0 | client-lib-Server-Erweiterungen: Geräteregistrierung, partitionierte/versionierte statische Datenpakete + Manifest, Config-Endpunkt | ✅ |
+| F-S0 | Bedrohungsmodell, Entscheidungen zu Replikation/Transport/Signaturen/Verzeichnis/Subdomains/DB-Anbieter, Protokoll-Skizze, Migrationspfad, Plan vorgelegt | ✅ |
+| F-S1 | Docker-Image (Multi-Arch), Compose-Stack, Installation ohne Docker (Apache/nginx/Caddy, systemd), Installations-CI, `docs/threat-model.md` | ✅ |
+| F-S2 | Node-/Wurzel-/Delegationsschlüssel, geräteseitig signierte Auth, signierte Netzwerk-Konfiguration | ⬜ |
+| F-S3 | Föderation: Beitritt, Push/Pull-Replikation, netzwerkweites Moderationsgate | ⬜ |
+| F-S4 | Reputation, Ausschluss, Überlast-Signal, Verzeichnis + Discovery | ⬜ |
+| F-S5 | Mehrknoten-Testnetz, Betreiber-Doku, finale Föderations-Protokollspezifikation — **Abschluss, Pull Request** | ⬜ |

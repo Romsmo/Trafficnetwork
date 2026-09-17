@@ -1,0 +1,12 @@
+# Example Caddy config for a natively-installed (non-Docker) server process
+# listening on 127.0.0.1:3000 (see server/README.md's "Installation ohne
+# Docker" section). Unlike Apache/nginx, Caddy needs no special directive for
+# the /v1/ws WebSocket upgrade — reverse_proxy handles it automatically — and
+# provisions/renews its Let's Encrypt certificate automatically too.
+#
+# Copy to /etc/caddy/Caddyfile, replace the placeholder domain, then:
+#   systemctl reload caddy
+
+your-server.example.com {
+	reverse_proxy 127.0.0.1:3000
+}

@@ -1,0 +1,34 @@
+# Example systemd unit for a natively-installed (non-Docker) server.
+# Install:
+#   sudo cp deploy/trafficnetwork-server.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now trafficnetwork-server
+#
+# Assumes the repo is checked out at /opt/trafficnetwork, built with
+# `npm ci && npm run build`, and /opt/trafficnetwork/server/.env holds the
+# real configuration (see .env.example) — adjust WorkingDirectory/User/paths
+# to match your actual install location and the unprivileged user you create
+# to run this (never run it as root).
+
+[Unit]
+Description=Trafficnetwork server
+After=network.target postgresql.service
+
+[Service]
+Type=simple
+User=trafficnetwork
+WorkingDirectory=/opt/trafficnetwork/server
+EnvironmentFile=/opt/trafficnetwork/server/.env
+ExecStartPre=/usr/bin/node dist/db/migrate.js
+ExecStart=/usr/bin/node dist/server.js
+Restart=on-failure
+RestartSec=5
+
+# Basic sandboxing — tighten further per your distro's systemd version.
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/trafficnetwork/server
+
+[Install]
+WantedBy=multi-user.target

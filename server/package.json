@@ -10,8 +10,9 @@
   },
   "scripts": {
     "dev": "tsx watch src/server.ts",
-    "build": "tsc -p tsconfig.json",
+    "build": "tsc -p tsconfig.build.json && node scripts/copy-build-assets.mjs",
     "start": "node dist/server.js",
+    "db:migrate:prod": "node dist/db/migrate.js",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint src tests",
     "test": "vitest run",

@@ -1,0 +1,89 @@
+name: trafficnetwork-server
+
+services:
+  postgres:
+    # Same image tag used by the integration test suite (tests/integration/setup.ts)
+    # — what's validated in CI is exactly what self-hosters get by default.
+    image: postgis/postgis:16-3.4
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-trafficnetwork}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set (see .env.example)}
+      POSTGRES_DB: ${POSTGRES_DB:-trafficnetwork}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-trafficnetwork} -d ${POSTGRES_DB:-trafficnetwork}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    # Not published to the host by default — only the server container talks
+    # to it. Uncomment to reach it directly from the host (e.g. a GUI client).
+    # ports:
+    #   - "5432:5432"
+
+  server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      # DATABASE_URL is composed from the same POSTGRES_* vars as the postgres
+      # service above, so the two can never drift apart — override DATABASE_URL
+      # directly only if you're pointing at an external database instead (e.g.
+      # Neon), in which case drop the postgres service/depends_on entirely.
+      DATABASE_URL: ${DATABASE_URL:-postgres://${POSTGRES_USER:-trafficnetwork}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-trafficnetwork}}
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be set (see .env.example)}
+      PORT: ${PORT:-3000}
+      HOST: 0.0.0.0
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      SPEED_CAMERA_NAMESPACE_ENABLED: ${SPEED_CAMERA_NAMESPACE_ENABLED:-false}
+      EVENT_LOG_RETENTION_DAYS_DYNAMIC: ${EVENT_LOG_RETENTION_DAYS_DYNAMIC:-3}
+      EVENT_LOG_RETENTION_DAYS_STATIC: ${EVENT_LOG_RETENTION_DAYS_STATIC:-30}
+      REPORT_RATE_LIMIT_MAX: ${REPORT_RATE_LIMIT_MAX:-10}
+      REPORT_RATE_LIMIT_WINDOW_MINUTES: ${REPORT_RATE_LIMIT_WINDOW_MINUTES:-10}
+      DUPLICATE_MERGE_RADIUS_METERS: ${DUPLICATE_MERGE_RADIUS_METERS:-500}
+      SPEED_KMH_MIN: ${SPEED_KMH_MIN:-0}
+      SPEED_KMH_MAX: ${SPEED_KMH_MAX:-300}
+      CAMERA_REMOVAL_THRESHOLD: ${CAMERA_REMOVAL_THRESHOLD:-3}
+      JWT_TTL_SECONDS: ${JWT_TTL_SECONDS:-3600}
+      SPEED_LIMIT_LOOKUP_MAX_DISTANCE_METERS: ${SPEED_LIMIT_LOOKUP_MAX_DISTANCE_METERS:-200}
+      REGION_TILE_H3_RESOLUTION: ${REGION_TILE_H3_RESOLUTION:-7}
+      STATIC_DATA_PARTITION_H3_RESOLUTION: ${STATIC_DATA_PARTITION_H3_RESOLUTION:-2}
+      DEVICE_REGISTRATION_RATE_LIMIT_MAX_PER_DAY: ${DEVICE_REGISTRATION_RATE_LIMIT_MAX_PER_DAY:-50}
+    ports:
+      - "${PORT:-3000}:${PORT:-3000}"
+
+  # Optional reverse proxy with automatic Let's Encrypt TLS — only useful once
+  # you have a real domain pointed at this host (see docs/installation.md).
+  # Start it explicitly with:
+  #   docker compose --profile with-caddy up -d
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    profiles: ["with-caddy"]
+    depends_on:
+      - server
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+
+volumes:
+  postgres-data:
+  caddy-data:
+  caddy-config:
+
+networks:
+  default:
+    # Fixed name (rather than Compose's default derived name) so other
+    # tooling — e.g. the CI Apache reverse-proxy smoke test — can join this
+    # network by a stable name instead of guessing Compose's naming
+    # convention for the given project name.
+    name: trafficnetwork

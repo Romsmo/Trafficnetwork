@@ -45,8 +45,8 @@
 ## Überarbeitung F — Self-Hosting & Föderation (nach Phase 2, vor Phase 3)
 - [x] Konzept erstellt (`docs/federation.md`), Entscheidung: offene Mitgliedschaft mit Reputation
 - [x] Claude-Code-Prompts erstellt (`docs/prompt-rework-server-federation.md`, `docs/prompt-rework-client-lib-federation.md`)
-- [ ] Stand von Phase 2 im Repo klären (auf GitHub ist `client-lib/` noch ohne Code — ggf. lokale Arbeit pushen)
-- [ ] F-S: Server-Überarbeitung (Docker/Apache/nginx/Caddy, Signaturen, Föderation, Reputation, Verzeichnis)
+- [x] Stand von Phase 2 im Repo klären: P2.0 (Server-Erweiterungen für client-lib) ist auf GitHub; `client-lib/` selbst enthält bewusst noch keinen Code — das ist die eigentliche Phase-2-Client-Bibliothek, eigener, noch nicht gestarteter Auftrag
+- [ ] F-S: Server-Überarbeitung (Docker/Apache/nginx/Caddy, Signaturen, Föderation, Reputation, Verzeichnis) — F-S0 (Plan) und F-S1 (Docker/Compose/Installation ohne Docker, siehe `server/docs/installation.md`) fertig, F-S2–F-S5 offen, Branch `rework/server-federation`
 - [ ] F-C: Client-Bibliothek-Überarbeitung (Discovery, Failover, Signaturprüfung, gerätesignierte Meldungen)
 - [ ] Projekt-Domain registrieren, Platzhalter `trafficnetwork.example` ersetzen
 - [ ] Netzwerk-Wurzelschlüssel erzeugen und offline sicher aufbewahren
