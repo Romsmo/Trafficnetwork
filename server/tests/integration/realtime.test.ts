@@ -71,6 +71,13 @@ describe("realtime WebSocket push", () => {
     const tile = positionToRegionTile(52.52, 13.405, { REGION_TILE_H3_RESOLUTION: 7 });
     ws.send(JSON.stringify({ type: "subscribe", tile, k: 0 }));
 
+    // Registered before the POST, not after — the server pushes this over the
+    // WebSocket while still handling that request, synchronously before it
+    // responds. Awaiting the fetch first would risk the message arriving with
+    // no listener attached yet (nextMessage's `.once` doesn't retroactively
+    // catch events emitted before it was registered).
+    const pushedPromise = nextMessage(ws);
+
     const res = await fetch(`${baseUrl}/v1/hazard-reports`, {
       method: "POST",
       headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
@@ -79,7 +86,7 @@ describe("realtime WebSocket push", () => {
     expect(res.status).toBe(201);
     const created = (await res.json()) as { report: { id: string } };
 
-    const pushed = await nextMessage(ws);
+    const pushed = await pushedPromise;
     expect(pushed.type).toBe("event");
     expect(pushed.event?.type).toBe("ReportCreated");
     expect(pushed.event?.entityId).toBe(created.report.id);
