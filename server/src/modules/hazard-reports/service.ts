@@ -71,6 +71,10 @@ export async function createOrMergeReport(db: Queryable, env: Env, input: Create
       regionTile,
       expiresAt,
     });
+    // Records the creator's own implicit "stillThere" so a later nearby
+    // resubmission from this same reporter is recognized as already-confirmed
+    // by insertConfirmationIfAbsent above, instead of double-counting it.
+    await insertConfirmationIfAbsent(tx, created.id, input.reporterId, "stillThere");
     const event = await appendEvent(tx, {
       type: "ReportCreated",
       entityType: "hazardReport",
