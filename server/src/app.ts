@@ -56,6 +56,15 @@ export async function buildApp(deps: AppDependencies): Promise<FastifyInstance> 
       });
       return;
     }
+    // Fastify itself (or a plugin, e.g. @fastify/rate-limit's 429) throws plain
+    // Errors carrying their own statusCode rather than an ApiError — respect it
+    // instead of flattening every non-ApiError into a 500.
+    if (err.statusCode && err.statusCode < 500) {
+      reply.status(err.statusCode).send({
+        error: { code: err.code ?? "REQUEST_ERROR", message: err.message },
+      });
+      return;
+    }
     app.log.error(err);
     reply.status(500).send({ error: { code: "INTERNAL_ERROR", message: "Internal server error" } });
   });
