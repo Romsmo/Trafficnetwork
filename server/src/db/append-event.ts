@@ -1,6 +1,9 @@
 import type { PgTransaction } from "drizzle-orm/pg-core";
 import { eventLog } from "./schema/index.js";
 import type { EntityType, EventType } from "../config/constants.js";
+import { bumpStaticDataVersion } from "./queries/sync-state.js";
+
+const STATIC_DATA_EVENT_TYPES: readonly EventType[] = ["StaticDataUpdated", "StaticDataRemoved"];
 
 export interface AppendEventInput {
   type: EventType;
@@ -40,6 +43,10 @@ export async function appendEvent(
 
   if (!row) {
     throw new Error("appendEvent: insert into event_log returned no row");
+  }
+
+  if (STATIC_DATA_EVENT_TYPES.includes(input.type)) {
+    await bumpStaticDataVersion(tx);
   }
 
   return row;

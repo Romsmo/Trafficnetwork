@@ -13,6 +13,8 @@ import { registerCameraRoutes } from "./modules/cameras/routes.js";
 import { registerAuthRoutes } from "./modules/auth/routes.js";
 import { registerAuthHook } from "./modules/auth/hook.js";
 import { registerBulkImportRoutes } from "./modules/bulk-import/routes.js";
+import { registerDeviceRoutes } from "./modules/devices/routes.js";
+import { registerConfigRoutes } from "./modules/config/routes.js";
 import { registerRealtimeModule } from "./modules/realtime/plugin.js";
 import type { SubscriptionRegistry } from "./modules/realtime/registry.js";
 
@@ -37,10 +39,10 @@ export async function buildApp(deps: AppDependencies): Promise<FastifyInstance> 
 
   await app.register(cors, { origin: true });
   // global: false — only routes that opt in via `config: { rateLimit: {...} }`
-  // are limited (currently just POST /v1/auth/token, to blunt credential
-  // brute-forcing; everything else is already protected by the per-reporter
-  // moderation-gate rate limit, which is a different concern — see
-  // modules/moderation/rate-limit.ts).
+  // are limited (POST /v1/auth/token and POST /v1/devices/register, both
+  // credential-issuing endpoints worth blunting brute-forcing/abuse on;
+  // everything else is already protected by the per-reporter moderation-gate
+  // rate limit, which is a different concern — see modules/moderation/rate-limit.ts).
   await app.register(rateLimit, { global: false });
 
   app.setErrorHandler((err: FastifyError | ApiError, _req, reply) => {
@@ -80,6 +82,8 @@ export async function buildApp(deps: AppDependencies): Promise<FastifyInstance> 
   await registerCameraRoutes(app);
   await registerSyncRoutes(app);
   await registerBulkImportRoutes(app);
+  await registerDeviceRoutes(app);
+  await registerConfigRoutes(app);
 
   return app;
 }

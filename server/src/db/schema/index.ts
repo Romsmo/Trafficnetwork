@@ -4,3 +4,4 @@ export * from "./cameras.js";
 export * from "./hazards.js";
 export * from "./events.js";
 export * from "./auth.js";
+export * from "./sync-state.js";

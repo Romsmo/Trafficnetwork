@@ -2,9 +2,9 @@
 
 Relay-/Moderator-Server: Ereignisprotokoll, materialisierter Zustand (PostGIS), Snapshot-/Delta-API, Moderationsgate, Blitzer-Namensraum (standardmäßig deaktiviert), Client-Credential-Auth, Bulk-Import, WebSocket-Push.
 
-**Status**: Phase 1 abgeschlossen (P1.0–P1.5). API vollständig, dokumentiert (siehe [`docs/api.md`](docs/api.md), [`docs/schema.md`](docs/schema.md)) und getestet. Details zum Architekturkonzept siehe [`docs/concept.md`](../docs/concept.md) und [`docs/prompt-phase1-server.md`](../docs/prompt-phase1-server.md).
+**Status**: Phase 1 abgeschlossen (P1.0–P1.5). Meilenstein P2.0 (Server-Erweiterungen für `client-lib/`: Geräteregistrierung, partitionierte statische Datenpakete, Config-Endpunkt) ebenfalls umgesetzt. API vollständig, dokumentiert (siehe [`docs/api.md`](docs/api.md), [`docs/schema.md`](docs/schema.md)) und getestet. Details zum Architekturkonzept siehe [`docs/concept.md`](../docs/concept.md), [`docs/prompt-phase1-server.md`](../docs/prompt-phase1-server.md) und [`docs/prompt-phase2-client-lib.md`](../docs/prompt-phase2-client-lib.md).
 
-Phase 2 (`client-lib/`) kann beginnen.
+`client-lib/` (P2.1+) kann beginnen.
 
 ## Tech-Stack
 
@@ -31,15 +31,17 @@ Siehe [`.env.example`](.env.example) — alle Werte sind dokumentiert und haben 
 - `EVENT_LOG_RETENTION_DAYS_DYNAMIC` / `_STATIC` — Aufbewahrungsfenster für das Ereignisprotokoll, durchgesetzt vom stündlichen Cleanup-Job (`modules/expiry/retention.ts`).
 - Moderationsgate-Parameter (`REPORT_RATE_LIMIT_*`, `DUPLICATE_MERGE_RADIUS_METERS`, `SPEED_KMH_*`, `CAMERA_REMOVAL_THRESHOLD`).
 - `JWT_SECRET` / `JWT_TTL_SECONDS` — Signierschlüssel und Gültigkeitsdauer für Client-Tokens.
+- `STATIC_DATA_PARTITION_H3_RESOLUTION` / `DEVICE_REGISTRATION_RATE_LIMIT_MAX_PER_DAY` — client-lib-P2.0-Tuning (Paket-Kachelgröße bzw. Geräteregistrierungen pro App-Schlüssel und Tag).
 
 ## API
 
 Vollständige Referenz: [`docs/api.md`](docs/api.md). Kurzfassung:
 
 - **Auth**: `POST /v1/auth/token` (Client-Credentials → JWT). Jeder `/v1/*`-Endpunkt außer `/v1/health` und `/v1/auth/token` braucht `Authorization: Bearer <token>`. `reporterId` kommt bei Schreibzugriffen immer aus dem Token, nie aus dem Body.
-- **Lesen**: `GET /v1/speed-limit`, `/v1/speed-limit-segments/nearby`, `/v1/static-signs/nearby`, `/v1/hazard-reports/{nearby,by-tile}`, `/v1/speed-cameras/{nearby,by-tile}` (leer, solange das Blitzer-Flag aus ist), `/v1/snapshot`, `/v1/delta`.
+- **Lesen**: `GET /v1/speed-limit`, `/v1/speed-limit-segments/nearby`, `/v1/static-signs/nearby`, `/v1/hazard-reports/{nearby,by-tile}`, `/v1/speed-cameras/{nearby,by-tile}` (leer, solange das Blitzer-Flag aus ist), `/v1/snapshot`, `/v1/delta`, `/v1/config`, `/v1/static-data/{manifest,partitions/:tile}`.
 - **Schreiben**: `POST /v1/hazard-reports` (läuft durchs Moderationsgate: Plausibilität, Rate-Limit, Duplikat-Merge; `type: "fixedSpeedCamera"` wird in den Blitzer-Namensraum umgeleitet), `POST /v1/hazard-reports/:id/confirmations`, `POST /v1/speed-cameras/:id/removal-reports`. Schreibzugriffe auf den Blitzer-Namensraum funktionieren unabhängig vom Flag — nur Lesezugriffe sind gegated.
-- **Bulk-Import** (Scope `bulk-import`): `POST /v1/bulk-import/{speed-limit-segments,static-signs,speed-cameras}`, max. 5000 Zeilen/Aufruf, erzeugt bewusst keine Event-Log-Einträge (Abholung nur über `/v1/snapshot`, siehe `docs/api.md`).
+- **Bulk-Import** (Scope `bulk-import`): `POST /v1/bulk-import/{speed-limit-segments,static-signs,speed-cameras}`, max. 5000 Zeilen/Aufruf, erzeugt bewusst keine Event-Log-Einträge (Abholung nur über `/v1/snapshot` bzw. die Paket-Endpunkte, siehe `docs/api.md`).
+- **Geräteregistrierung** (Scope `device-registration`, client-lib P2.0): `POST /v1/devices/register` — App-Schlüssel → frisches, pseudonymes Geräte-Credential.
 - **Realtime**: `GET /v1/ws` (WebSocket) — Auth per erster Nachricht (nicht per Query-String-Token), danach `subscribe`/`unsubscribe` auf H3-Tiles.
 
 ## Datenbank / Migrations
@@ -60,7 +62,14 @@ Kein Admin-HTTP-API in Phase 1 (bewusste Vereinfachung für Einzelbetreiber). Cl
 ```bash
 npm run create-client -- --name "mein-erster-client" --scope client
 npm run create-client -- --name "ingestion-worker" --scope bulk-import
+npm run create-client -- --name "meine-app" --scope device-registration
 ```
+
+Der `device-registration`-Scope provisioniert einen "App-Schlüssel": eine App
+tauscht ihn gegen ein JWT und ruft damit `POST /v1/devices/register` auf, um
+sich selbst ein frisches, pseudonymes Geräte-Credential auszustellen (siehe
+`docs/api.md`) — kein Admin-HTTP-API nötig, da das Gerät sein eigenes
+Credential erzeugt, nicht der Betreiber.
 
 Das `clientSecret` wird nur einmal ausgegeben (gehasht gespeichert, siehe `modules/auth/credentials.ts`) — sofort sichern.
 
@@ -91,3 +100,4 @@ Integrationstests laufen automatisch in CI (`.github/workflows/server-ci.yml`, G
 | P1.3 | Moderationsgate, Schreib-Endpunkte für Hazard-Reports | ✅ |
 | P1.4 | Blitzer-Namensraum, separat, standardmäßig deaktiviert | ✅ |
 | P1.5 | Auth, Bulk-Import, WebSocket-Push, Retention-Cleanup, API-/Schema-Doku, vollständige Testsuite — **Phase-1-Abschluss** | ✅ |
+| P2.0 | client-lib-Server-Erweiterungen: Geräteregistrierung, partitionierte/versionierte statische Datenpakete + Manifest, Config-Endpunkt | ✅ |

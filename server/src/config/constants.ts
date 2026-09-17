@@ -105,5 +105,5 @@ export const ENTITY_TYPES = [
 ] as const;
 export type EntityType = (typeof ENTITY_TYPES)[number];
 
-export const CLIENT_SCOPES = ["client", "bulk-import"] as const;
+export const CLIENT_SCOPES = ["client", "bulk-import", "device-registration"] as const;
 export type ClientScope = (typeof CLIENT_SCOPES)[number];

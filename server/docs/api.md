@@ -36,10 +36,30 @@ Response: { "accessToken": "<jwt>", "tokenType": "Bearer", "expiresIn": 3600, "s
 Credentials are provisioned out-of-band via `npm run create-client` (see
 `server/README.md`) — there is no self-service signup endpoint in Phase 1.
 
-Scopes: `client` (normal read/write access) and `bulk-import` (grants the
-`/v1/bulk-import/*` endpoints). A client credential maps 1:1 to a reporter
-identity — every write endpoint derives `reporterId` from the token's
-subject, never from the request body.
+Scopes: `client` (normal read/write access), `bulk-import` (grants the
+`/v1/bulk-import/*` endpoints), and `device-registration` (grants
+`POST /v1/devices/register` — see "Device registration" below). A client
+credential maps 1:1 to a reporter identity — every write endpoint derives
+`reporterId` from the token's subject, never from the request body.
+
+### `POST /v1/devices/register`
+
+Anonymous device registration for client-lib integrators (requires the
+`device-registration` scope, i.e. an "app key" provisioned via
+`create-client --scope device-registration`). Mints a fresh, ordinary
+`client`-scoped credential — the device then calls `POST /v1/auth/token` with
+it exactly like any other client, getting its own reporter identity.
+
+```
+Response: { "clientId": "client_...", "clientSecret": "..." }
+```
+
+IP-rate-limited (10/minute, like `/v1/auth/token`) plus a per-app-key daily
+cap (`DEVICE_REGISTRATION_RATE_LIMIT_MAX_PER_DAY`, default 50) — both return
+429. The minted credential's `registeredByClientId` (internal, not returned
+in the response) traces it back to the app key that requested it, so an
+app's devices can be looked up or bulk-revoked if the app key itself is
+revoked.
 
 ## Reads
 
@@ -55,8 +75,11 @@ one.
 | GET | `/v1/hazard-reports/by-tile?tile&k&types` | `k` = ring radius (0–5) around `tile`, an H3 resolution-7 cell id |
 | GET | `/v1/speed-cameras/nearby?lat&lng&radiusM&types` | Empty unless `SPEED_CAMERA_NAMESPACE_ENABLED` |
 | GET | `/v1/speed-cameras/by-tile?tile&k&types` | Dynamic camera types only (fixed cameras are globally synced, not tiled) |
-| GET | `/v1/snapshot?tiles&types` | See "Sync" below |
+| GET | `/v1/snapshot?tiles&types&staticData` | See "Sync" below |
 | GET | `/v1/delta?since&tiles&types&limit` | See "Sync" below |
+| GET | `/v1/config` | See "Client config" below |
+| GET | `/v1/static-data/manifest` | See "Static data packages" below |
+| GET | `/v1/static-data/partitions/:tile` | See "Static data packages" below |
 
 `radiusM` is capped at 50,000 (50 km). `types` is a comma-separated list of
 hazard types; unsupported/disallowed values are dropped rather than rejected.
@@ -151,6 +174,10 @@ snapshot's `snapshotSequence` as a starting point.
 - Generated inside a single `REPEATABLE READ` transaction, so
   `snapshotSequence` and the returned rows are always mutually consistent —
   no event landing between the two reads can be silently missing from both.
+- `staticData=false` omits `speedLimitSegments`/`staticSigns`/
+  `fixedSpeedCameras` entirely (client-lib P2.0) — for a client that already
+  has the static dataset via the partition/manifest endpoints below and only
+  wants `snapshotSequence` plus tile-filtered hazard reports.
 
 ### `GET /v1/delta?since=<sequence>&tiles&types&limit`
 
@@ -168,6 +195,53 @@ snapshot's `snapshotSequence` as a starting point.
 - Static-entity events (`speedLimitSegment`/`staticSign` updates) always pass
   through regardless of `types` — that filter only ever restricts
   hazard/camera-type events, matched against each event's payload.
+
+## Static data packages (client-lib P2.0)
+
+Partitioned, versioned alternative to fetching all static data through
+`/v1/snapshot` in one response — for large datasets, lets a client download
+only the partitions covering the regions it cares about, and re-download only
+what actually changed.
+
+### `GET /v1/static-data/manifest`
+
+```json
+{
+  "staticDataVersion": 7,
+  "generatedAt": "2026-01-01T00:00:00.000Z",
+  "partitions": [ { "tile": "<h3 id>", "hash": "<sha256 hex>", "sizeBytes": 1234 } ]
+}
+```
+
+Partitions are keyed by a coarse H3 cell (`STATIC_DATA_PARTITION_H3_RESOLUTION`,
+default 2 — much coarser than the resolution-7 tiles used for dynamic data),
+computed from each entity's geometry, not stored. Only partitions that
+actually contain data are listed; a `LineString` segment that straddles a
+partition boundary is listed (and returned) under every partition one of its
+vertices falls into. `staticDataVersion` bumps on every `StaticDataUpdated`/
+`StaticDataRemoved` event (fixed-camera create/removal) and on every
+successful bulk import — compare it against what a client last saw before
+even fetching the manifest.
+
+### `GET /v1/static-data/partitions/:tile`
+
+```json
+{ "tile": "<h3 id>", "speedLimitSegments": [...], "staticSigns": [...], "fixedSpeedCameras": [...] }
+```
+
+404 if `tile` isn't in the current manifest (no data for it). Compare a
+partition's `hash` from the manifest against what's already stored locally to
+decide whether it's worth re-fetching at all.
+
+## Client config
+
+### `GET /v1/config`
+
+Curated subset of server tunables a client-lib instance mirrors locally
+(expiry rules, tiling resolution, camera-namespace flag, moderation limits) so
+client and server never diverge — normal auth like any other read, no
+dedicated scope. See `modules/config/routes.ts` for the exact field list;
+every value here also exists as an env var documented in `.env.example`.
 
 ## Bulk import
 

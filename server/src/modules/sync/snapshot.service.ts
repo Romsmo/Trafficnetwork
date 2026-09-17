@@ -36,18 +36,24 @@ export interface SnapshotResult {
  * Phase 1, where the static dataset is empty pending Phase 3 ingestion. Revisit
  * with server-side cursor streaming before the static dataset actually reaches
  * the "low single-digit GB" scale docs/concept.md section 6 anticipates.
+ *
+ * `includeStaticData: false` (client-lib P2.0) omits the three static-entity
+ * reads entirely — for a client that already has them all via the partition/
+ * manifest endpoints (modules/static-data/manifest.service.ts) and just wants
+ * the current snapshotSequence plus tile-filtered hazard reports.
  */
 export async function generateSnapshot(
   db: Queryable,
-  opts: { tiles?: string[]; types?: HazardType[]; cameraNamespaceEnabled: boolean },
+  opts: { tiles?: string[]; types?: HazardType[]; cameraNamespaceEnabled: boolean; includeStaticData?: boolean },
 ): Promise<SnapshotResult> {
+  const includeStaticData = opts.includeStaticData ?? true;
   return db.transaction(
     async (tx) => {
       const [sequenceRows, speedLimitSegments, staticSigns, fixedSpeedCameras] = await Promise.all([
         tx.execute<{ max: number | null }>(sql`select max(sequence) as max from event_log`),
-        findAllSpeedLimitSegments(tx),
-        findAllStaticSigns(tx),
-        opts.cameraNamespaceEnabled ? findAllActiveFixedSpeedCameras(tx) : Promise.resolve([]),
+        includeStaticData ? findAllSpeedLimitSegments(tx) : Promise.resolve([]),
+        includeStaticData ? findAllStaticSigns(tx) : Promise.resolve([]),
+        includeStaticData && opts.cameraNamespaceEnabled ? findAllActiveFixedSpeedCameras(tx) : Promise.resolve([]),
       ]);
       const snapshotSequence = sequenceRows[0]?.max ?? 0;
 

@@ -1,5 +1,6 @@
 import { sql } from "drizzle-orm";
 import type { Queryable } from "../client.js";
+import { bumpStaticDataVersion } from "./sync-state.js";
 
 /**
  * Bulk-import writes go straight to the materialized tables without appending
@@ -9,7 +10,9 @@ import type { Queryable } from "../client.js";
  * relevance for everyone else. Static data catch-up after a bulk import is via
  * a fresh /v1/snapshot, not /v1/delta — acceptable since bulk-import is an
  * infrequent, mostly one-time operation (docs/concept.md section 7), not a
- * steady stream of individually-relevant changes.
+ * steady stream of individually-relevant changes. Each call still bumps
+ * static_data_state (see bumpStaticDataVersion) so the client-lib partition
+ * manifest (P2.0) can tell a bulk import happened without an event-log entry.
  *
  * Rows are inserted one at a time inside a single transaction rather than one
  * multi-row statement — simpler code, and fine at the row-count cap used here;
@@ -38,6 +41,7 @@ export async function bulkInsertSpeedLimitSegments(db: Queryable, rows: SpeedLim
         )
       `);
     }
+    await bumpStaticDataVersion(tx);
     return rows.length;
   });
 }
@@ -62,6 +66,7 @@ export async function bulkInsertStaticSigns(db: Queryable, rows: StaticSignImpor
         )
       `);
     }
+    await bumpStaticDataVersion(tx);
     return rows.length;
   });
 }
@@ -85,6 +90,7 @@ export async function bulkInsertFixedSpeedCameras(db: Queryable, rows: FixedSpee
         )
       `);
     }
+    await bumpStaticDataVersion(tx);
     return rows.length;
   });
 }

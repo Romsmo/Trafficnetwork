@@ -117,9 +117,26 @@ window directly.
 `client_id` (public, e.g. `client_a1b2c3d4...`), `client_secret_hash`
 (salted scrypt, format `"<saltHex>:<hashHex>"` — see
 `modules/auth/credentials.ts`; the plaintext secret is never stored),
-`scopes` (`client_scope[]` — `client` and/or `bulk-import`), `name`,
-`revoked_at`. Provisioned via `npm run create-client`, never via an HTTP
-endpoint (see `server/README.md`).
+`scopes` (`client_scope[]` — `client`, `bulk-import`, and/or
+`device-registration`), `name`, `revoked_at`. Provisioned via
+`npm run create-client`, or, for `device-registration`-scoped "app key"
+clients, self-service by any device via `POST /v1/devices/register` (see
+`docs/api.md`) — the one case where a `clients` row is created via an HTTP
+endpoint rather than the operator CLI.
+
+`registered_by_client_id` (nullable, self-referencing FK to `clients.id`):
+set only on rows created via `POST /v1/devices/register`, pointing at the
+app-key client that requested them — lets an app's devices be looked up or
+rate-limited (`DEVICE_REGISTRATION_RATE_LIMIT_MAX_PER_DAY`) by app key. Null
+for every client provisioned via `create-client`.
+
+### `static_data_state`
+Single-row table (`id` is always `1`) holding `version`, a monotonically
+increasing counter bumped transactionally by `appendEvent()` (for
+`StaticDataUpdated`/`StaticDataRemoved`) and by every bulk-import insert
+(client-lib P2.0's `/v1/static-data/manifest` calls this `staticDataVersion`
+— see `docs/api.md`). A row `UPDATE`, not a `SEQUENCE`, so the bump rolls
+back with the rest of its transaction if that transaction fails.
 
 ## Migrations
 

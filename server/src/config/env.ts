@@ -40,6 +40,17 @@ const envSchema = z.object({
   SPEED_LIMIT_LOOKUP_MAX_DISTANCE_METERS: z.coerce.number().int().positive().default(200),
 
   REGION_TILE_H3_RESOLUTION: z.coerce.number().int().min(0).max(15).default(7),
+
+  // Coarse H3 resolution used to partition the static-data package/manifest
+  // endpoints (client-lib P2.0) — deliberately much coarser than
+  // REGION_TILE_H3_RESOLUTION, since these packages carry the full static
+  // dataset per partition, not per-request filtering.
+  STATIC_DATA_PARTITION_H3_RESOLUTION: z.coerce.number().int().min(0).max(15).default(2),
+
+  // Anonymous device registration (client-lib P2.0): max devices a single app
+  // key may register per rolling day, on top of the per-IP @fastify/rate-limit
+  // on the route itself.
+  DEVICE_REGISTRATION_RATE_LIMIT_MAX_PER_DAY: z.coerce.number().int().positive().default(50),
 });
 
 export type Env = z.infer<typeof envSchema>;

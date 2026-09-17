@@ -1,4 +1,4 @@
-import { pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
+import { type AnyPgColumn, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
 import { clientScopeEnum } from "./enums.js";
 
 /**
@@ -17,4 +17,11 @@ export const clients = pgTable("clients", {
   name: text("name").notNull(),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   revokedAt: timestamp("revoked_at", { withTimezone: true }),
+  /**
+   * Set only for device credentials minted via POST /v1/devices/register
+   * (client-lib P2.0) — points at the app-key client that registered them, so
+   * an app's devices can be looked up/rate-limited by app key. Null for every
+   * client provisioned directly via create-client.
+   */
+  registeredByClientId: uuid("registered_by_client_id").references((): AnyPgColumn => clients.id),
 });

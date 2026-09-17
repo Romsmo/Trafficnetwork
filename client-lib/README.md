@@ -4,6 +4,4 @@ Client-Sync-Bibliothek: einbettbarer, maximal portabler Adapter für beliebige A
 
 Zielplattformen: Android (Kotlin), iOS/macOS (Swift), Flutter (Dart), React Native, Desktop/Server über C-ABI (inkl. Python, Node.js), Web-Browser (WASM).
 
-**Status**: Phase 2 gestartet — Umsetzungsauftrag in [`docs/prompt-phase2-client-lib.md`](../docs/prompt-phase2-client-lib.md). Noch kein Code. Details siehe [`docs/concept.md`](../docs/concept.md) (Abschnitt 6) und [`docs/todo.md`](../docs/todo.md).
-
-Hängt von der API aus `server/` ab (inkl. der Erweiterungen aus Meilenstein P2.0).
+**Status**: Meilenstein P2.0 (Server-Erweiterungen in `server/`: Geräteregistrierung, partitionierte statische Datenpakete, Config-Endpunkt) ist umgesetzt — siehe `server/docs/api.md`. P2.1 (Kern-Grundgerüst dieser Bibliothek) startet als Nächstes; noch kein Code hier in `client-lib/`. Details siehe [`docs/concept.md`](../docs/concept.md) (Abschnitt 6), [`docs/prompt-phase2-client-lib.md`](../docs/prompt-phase2-client-lib.md) und [`docs/todo.md`](../docs/todo.md).
