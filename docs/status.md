@@ -2,23 +2,29 @@
 
 > **Zweck:** Zwei Claude-Code-Instanzen arbeiten parallel an getrennten Branches (Server bzw. Client-Bibliothek) und teilen sich keinen Kontext. Diese Datei lebt bewusst direkt auf `main` (nicht auf einem Feature-Branch) und wird von **jeder** Instanz nach jedem abgeschlossenen Meilenstein aktualiziert, committet und gepusht — so sieht die andere Instanz per `git fetch origin main` sofort den aktuellen Stand, ohne den unfertigen Code des anderen Branches anzufassen. `docs/todo.md` bleibt der langfristige Fahrplan; diese Datei ist der kurzfristige "was passiert gerade"-Status.
 
-Letztes Update: 2026-09-18, Client-Instanz.
+Letztes Update: 2026-09-18, Server-Instanz.
 
 ---
 
 ## Server (`server/`)
 
 - **Branch:** `rework/server-federation`
-- **Letzter Commit:** `17c4518` — "ci: trigger server-ci on rework/* branch pushes, not just main/PRs"
-- **CI:** grün (`server-ci` Run #13, alle drei Jobs: `test`, `docker-build`, `install-smoke`)
+- **Letzter Commit:** `7000529` — "server: milestone F-S2 (node/root keys, device-signed auth, signed config)"
+- **CI:** Push gerade erfolgt, Ergebnis wird noch geprüft (neue Integrationstests für gerätesignierte Auth + Netzwerk-Konfiguration laufen erstmals gegen echtes Testcontainers-Postgres in CI, lokal ohne Docker nicht ausführbar — nur Unit-Tests lokal verifiziert: 69/69 grün).
 - **Abgeschlossen:**
   - F-S0 — Plan, Bedrohungsmodell (Kurzfassung), acht Entscheidungen mit Beleg, Protokoll-Skizze, Migrationspfad
   - F-S1 — Docker-Image (Multi-Arch amd64+arm64), `docker-compose.yml` (Server+PostGIS+optional Caddy), Installation ohne Docker (`deploy/{apache.conf,nginx.conf,Caddyfile.example,trafficnetwork-server.service}`), `server/docs/installation.md`, volles `server/docs/threat-model.md`, CI-Erweiterung (Multi-Arch-Build-Validierung + echter Apache-Reverse-Proxy-WebSocket-Smoke-Test)
-- **Gerade in Arbeit:** F-S2 — Node-/Wurzel-/Delegationsschlüssel, geräteseitig signierte Auth (additiv zum bestehenden JWT-Modell), signierte Netzwerk-Konfiguration über `/v1/config`
+  - F-S2 — Krypto-Grundlage (`src/modules/crypto/`: Ed25519 über Node's natives `crypto`, RFC-8785-kanonisches JSON via `canonicalize`, `SignedEnvelope<T>`); Node-Identität (auto-generiert beim ersten Boot, `node_identity`-Tabelle, öffentlich unter `GET /v1/network/node-info`); Wurzelschlüssel-Tooling nur offline (`npm run network:generate-root-key`, `npm run network:sign-config` — der Wurzelschlüssel berührt nie einen laufenden Server); geräteseitig signierte Auth rein additiv (`POST /v1/devices/bind-key`, `POST /v1/auth/device-token` — bestehende `clientSecret`-Clients funktionieren unverändert weiter); signierte Netzwerk-Konfiguration (`NETWORK_CONFIG_PATH`/`NETWORK_ROOT_PUBLIC_KEY`, AND-gated Blitzer-Flag — ein signiertes Netz-Config kann das lokale Flag nur abschalten, nie einschalten), `GET /v1/config` liefert jetzt `federationEnabled` + das volle signierte `networkConfig`-Envelope zur eigenständigen Prüfung durch den Client.
+- **Gerade in Arbeit:** als Nächstes F-S3 — Föderations-Endpunkte (Push/Pull), Beitritt über Seeds, netzwerkweites Moderationsgate.
 - **Relevant für die Client-Instanz:**
   - Bestehendes Auth-Modell (`POST /v1/auth/token`, gemeinsames `JWT_SECRET`) bleibt unverändert nutzbar, solange `FEDERATION_ENABLED=false` — reine Zusatzfunktion, kein Bruch.
-  - `server/docs/api.md` und `server/docs/schema.md` sind der aktuelle Stand der Server-API (Phase 1 + P2.0) — noch ohne die neuen Föderations-/Signatur-Endpunkte aus F-S2/F-S3, die folgen inkrementell.
-  - Der in `docs/federation.md` beschriebene Wechsel zu geräteseitig erzeugten Ed25519-Schlüsseln betrifft die Geräte-Registrierung (`POST /v1/devices/register`, P2.0) — Details/genaue Endpunkt-Form folgen mit F-S2, hier aktualisiert, sobald implementiert.
+  - **Neue Endpunkte aus F-S2 (Details: `server/docs/api.md`, Schema: `server/docs/schema.md`):**
+    - `GET /v1/network/node-info` (öffentlich, kein Auth) — Node-ID + öffentlicher Node-Schlüssel dieses Servers.
+    - `POST /v1/devices/bind-key` (Bearer-Auth) — bindet einen geräteseitig erzeugten Ed25519-Public-Key einmalig an den bereits authentifizierten Client (Proof-of-Possession per signierter Assertion `{payload:{publicKey,timestamp}, keyId, signature}`).
+    - `POST /v1/auth/device-token` (öffentlich, ersetzt/ergänzt `POST /v1/auth/token`) — Body `{clientId, assertion:{payload:{clientId,timestamp}, keyId, signature}}`, signiert mit dem via `bind-key` gebundenen Geräteschlüssel, liefert exakt dasselbe JWT-Format wie `POST /v1/auth/token`.
+    - `GET /v1/config` — jetzt zusätzlich `federationEnabled: boolean` und `networkConfig: SignedEnvelope<NetworkConfigPayload> | null` im Response.
+  - Das ist noch **nicht** das in `docs/federation.md` beschriebene Node-Verzeichnis (`GET /v1/network/nodes` o.ä.) — das kommt erst mit F-S4 (Reputation/Verzeichnis). F-S2 liefert nur die Krypto-Bausteine (Signaturformat, Node-Identität, ein Node), noch kein Mehr-Server-Verzeichnis.
+  - `SignedEnvelope`-Format (gilt für alle künftigen signierten Payloads, nicht nur die zwei obigen): `{ payload: T, keyId: string, signature: string }`, Signatur = Ed25519 über RFC-8785-kanonisiertem `payload`. `keyId` ist nur ein Lookup-Hinweis (erste 16 Hex-Zeichen von sha256(publicKeyRaw)), niemals selbst die Vertrauensquelle — Verifikation braucht immer den unabhängig bekannten Public Key.
 
 ## Client-Bibliothek (`client-lib/`)
 
