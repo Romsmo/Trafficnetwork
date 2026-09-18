@@ -43,6 +43,13 @@
       "when": 1789745702574,
       "tag": "0005_solid_vindicator",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1789746727541,
+      "tag": "0006_warm_tomas",
+      "breakpoints": true
     }
   ]
 }

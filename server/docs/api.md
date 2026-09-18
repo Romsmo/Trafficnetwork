@@ -131,7 +131,7 @@ reason to trust (a client's stored `devicePublicKey`, the configured
 
 Public (no auth — has to be fetchable before any credential exchange can
 happen, and carries nothing confidential). This server's own identity, not
-the multi-server directory (`GET /v1/network/nodes`, planned for F-S4).
+the multi-server directory (`GET /v1/network/directory`, below).
 
 ```json
 { "nodeId": "<16 hex chars>", "publicKey": "<base64url Ed25519>", "federationEnabled": false }
@@ -141,21 +141,50 @@ the multi-server directory (`GET /v1/network/nodes`, planned for F-S4).
 `server/docs/schema.md`'s `node_identity` table) — stable for the life of
 this server's database.
 
-## Federation (F-S3)
+### `GET /v1/network/directory` (F-S4)
+
+Public, always registered (unlike `/v1/federation/*` below — a non-federating
+server just returns an empty `peers` array, since nothing can ever join it).
+The reputation-scored, network-wide directory: this server's own peer
+directory, each entry tagged with a computed reputation tier. Also
+exportable as a static file for mirroring — see "Network directory export"
+in `server/README.md`.
+
+```json
+{
+  "self": { "nodeId", "publicKey", "address": "https://..." | null, "federationEnabled": true },
+  "peers": [ { "nodeId", "publicKey", "address", "tier": "probation"|"active"|"trusted",
+               "discoveredVia", "joinedAt", "lastSeenAt", "lastKnownVersion" } ],
+  "generatedAt": "<ISO 8601>"
+}
+```
+
+`tier` is computed on every request from signals *this server itself
+measured* about each peer (successful/failed active health checks, invalid
+signatures observed in its pushes) — never anything a peer claims about
+itself; see `server/docs/threat-model.md` and
+`modules/federation/reputation.ts`. Probation-tier entries are capped at
+`REPUTATION_DIRECTORY_PROBATION_MAX_SHARE` (default 50%) of the returned
+list — a new server stays discoverable without being able to flood the
+directory with unproven identities.
+
+## Federation (F-S3, reputation signals added in F-S4)
 
 Only registered when `FEDERATION_ENABLED=true` — with the default `false`,
 none of these routes exist at all (404), exactly like today. All five
 authenticate themselves rather than via `Authorization: Bearer` (see the base
-path note above); see `server/docs/threat-model.md`'s "F-S3 implementation
-notes" for what's built so far versus deliberately deferred (confirm/deny
-replication isn't wired up yet).
+path note above); see `server/docs/threat-model.md`'s "F-S3/F-S4
+implementation notes" for what's built so far versus deliberately deferred
+(confirm/deny replication isn't wired up yet).
 
 ### `POST /v1/federation/join`
 
 A server introduces itself to another. Self-signed with the joining server's
 own node key — per `docs/federation.md`, the network doesn't vouch for a
-server's identity at join time, only (later, F-S4) for its behavior via
-reputation.
+server's identity at join time, only for its behavior via reputation
+afterward (F-S4, `GET /v1/network/directory` below). IP-rate-limited
+(30/minute) — a fresh keypair is free to generate, so nothing else here is
+expensive to spam.
 
 ```
 Request:  SignedEnvelope<{ nodeId, publicKey, address: "https://...", requestedAt: "<ISO 8601>" }>
@@ -172,14 +201,18 @@ current full peer list is returned — this is the entire gossip mechanism
 response.
 
 ```
-NetworkPeer: { "nodeId", "publicKey", "address", "discoveredVia": "seed"|"gossip"|"join", "joinedAt", "lastSeenAt" }
+NetworkPeer: { "nodeId", "publicKey", "address", "discoveredVia": "seed"|"gossip"|"join", "joinedAt", "lastSeenAt",
+                "successfulHealthChecks", "consecutiveHealthCheckFailures", "invalidSignatureCount", "lastKnownVersion" }
 ```
 
 ### `GET /v1/federation/peers`
 
 Returns this server's current peer directory (same `NetworkPeer` shape as
-above). Not the reputation-scored, network-wide directory planned for F-S4 —
-just "who this one server currently knows how to reach."
+above, plus the raw reputation counters — `successfulHealthChecks`,
+`consecutiveHealthCheckFailures`, `invalidSignatureCount`,
+`lastKnownVersion`). Not the reputation-*scored* view — for the computed
+tier, use `GET /v1/network/directory` above; this is the raw "who this one
+server currently knows how to reach" list its own workers operate on.
 
 ### `POST /v1/federation/heartbeat`
 
@@ -205,7 +238,8 @@ not what makes an event trustworthy — each event's own device signature is
 
 ```
 Request:  { "senderNodeId": "...", "events": [SignedEnvelope<DeviceCreateEvent>, ...] }   (max 100 events)
-Response: { "results": [ { "federationEventId": "<sha256 hex>", "status": "created"|"merged"|"duplicate"|"rejected", "reason"?: "..." } ] }
+Response: { "results": [ { "federationEventId": "<sha256 hex>", "status": "created"|"merged"|"duplicate"|"rejected",
+                            "reason"?: "...", "code"?: "invalid_signature"|"stale_timestamp"|"camera_out_of_scope"|"implausible" } ] }
 
 DeviceCreateEvent: { "kind": "create", "type": "<hazard type, not fixedSpeedCamera>",
                      "lat", "lng", "speedKmh"?, "devicePublicKey", "timestamp" }
@@ -224,6 +258,23 @@ the envelope's own `(payload, signature)` — a cross-server-stable id
 independent of any one server's local storage. Newly created/merged events
 are published to this server's own WebSocket subscribers and best-effort
 re-forwarded (gossiped) to its other known peers.
+
+A rejection with `code: "invalid_signature"` is recorded against the
+*sending* peer's reputation (F-S4) — the plan's "jede ungültige Signatur von
+S ist ein starkes Negativsignal" — and demotes it to `probation` in
+`GET /v1/network/directory` immediately, regardless of prior standing. The
+other rejection codes are ordinary bad input, not evidence the peer is
+misbehaving.
+
+**Overload signal (F-S4):** once `FEDERATION_OVERLOAD_MAX_CONCURRENT_PUSHES`
+pushes are being processed concurrently by this process, further calls get
+`503` with a `Retry-After` header and `{ "error": { "code": "OVERLOADED", ... } }`
+instead of being queued — a concurrency cap, not a per-sender rate limit (see
+the separate 60/minute IP-based rate limit on this same route). This
+server's own outbound heartbeats also carry a self-reported `capacityHint`
+(0–1) reflecting the same gauge, so a well-behaved peer can back off before
+it starts actually seeing 503s — but see `server/docs/threat-model.md` for
+why that field is never trusted for reputation scoring on its own.
 
 ### `GET /v1/federation/events?after=<sequence>&limit=<n>`
 

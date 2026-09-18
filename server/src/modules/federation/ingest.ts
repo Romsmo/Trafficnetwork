@@ -13,10 +13,19 @@ import {
 } from "./device-event.js";
 import type { appendEvent } from "../../db/append-event.js";
 
+/**
+ * `invalid_signature` is singled out from the other rejection reasons
+ * because it's the one the F-S0 plan calls a "starkes Negativsignal" about
+ * *whoever pushed it* (modules/federation/reputation.ts) — the others
+ * (a stale timestamp, an implausible report, an out-of-scope type) are just
+ * ordinary rejected input, not evidence the sender is misbehaving.
+ */
+export type RejectionCode = "invalid_signature" | "stale_timestamp" | "camera_out_of_scope" | "implausible";
+
 export type IngestOutcome =
   | { status: "created" | "merged"; federationEventId: string; event: Awaited<ReturnType<typeof appendEvent>> }
   | { status: "duplicate"; federationEventId: string }
-  | { status: "rejected"; federationEventId: string; reason: string };
+  | { status: "rejected"; federationEventId: string; reason: string; code: RejectionCode };
 
 /**
  * The one path both the local capture point (POST /v1/hazard-reports'
@@ -40,15 +49,30 @@ export async function ingestDeviceCreateEvent(
   const federationEventId = computeFederationEventId(envelope);
 
   if (!verifyDeviceCreateEnvelope(envelope)) {
-    return { status: "rejected", federationEventId, reason: "Signature does not verify against the envelope's own claimed devicePublicKey" };
+    return {
+      status: "rejected",
+      federationEventId,
+      reason: "Signature does not verify against the envelope's own claimed devicePublicKey",
+      code: "invalid_signature",
+    };
   }
   if (!isWithinFederationEventWindow(envelope.payload.timestamp, env.FEDERATION_EVENT_MAX_AGE_HOURS)) {
-    return { status: "rejected", federationEventId, reason: "Event timestamp is outside the accepted window (too old, or too far in the future)" };
+    return {
+      status: "rejected",
+      federationEventId,
+      reason: "Event timestamp is outside the accepted window (too old, or too far in the future)",
+      code: "stale_timestamp",
+    };
   }
   if (envelope.payload.type === "fixedSpeedCamera") {
     // Not a hazard_reports row at all (see config/constants.ts) — fixed-camera
     // federation is out of scope for this milestone (see device-event.ts).
-    return { status: "rejected", federationEventId, reason: "fixedSpeedCamera events are not federated in this milestone" };
+    return {
+      status: "rejected",
+      federationEventId,
+      reason: "fixedSpeedCamera events are not federated in this milestone",
+      code: "camera_out_of_scope",
+    };
   }
 
   try {
@@ -57,7 +81,7 @@ export async function ingestDeviceCreateEvent(
       env,
     );
   } catch (err) {
-    return { status: "rejected", federationEventId, reason: err instanceof Error ? err.message : "Implausible report" };
+    return { status: "rejected", federationEventId, reason: err instanceof Error ? err.message : "Implausible report", code: "implausible" };
   }
 
   if (await federationEventExists(db, federationEventId)) {

@@ -23,7 +23,8 @@
     "db:migrate": "tsx src/db/migrate.ts",
     "create-client": "tsx scripts/create-client.mts",
     "network:generate-root-key": "tsx scripts/network-generate-root-key.mts",
-    "network:sign-config": "tsx scripts/network-sign-config.mts"
+    "network:sign-config": "tsx scripts/network-sign-config.mts",
+    "network:export-directory": "tsx scripts/network-export-directory.mts"
   },
   "dependencies": {
     "@fastify/cors": "^10.0.1",

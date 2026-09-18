@@ -5,9 +5,17 @@ import type { NodeIdentity } from "../network/node-identity.js";
 import type { SubscriptionRegistry } from "../realtime/registry.js";
 import { publishEvent } from "../realtime/publisher.js";
 import { signEnvelope } from "../crypto/envelope.js";
-import { listPeers, listPeersWithCursor, setPeerLastPulledSequence, upsertPeer } from "../../db/queries/network-peers.js";
+import {
+  listPeers,
+  listPeersWithCursor,
+  recordHealthCheckFailure,
+  recordHealthCheckSuccess,
+  setPeerLastPulledSequence,
+  upsertPeer,
+} from "../../db/queries/network-peers.js";
 import { requestJoin, sendHeartbeat, pullEvents } from "./http-client.js";
 import { ingestDeviceCreateEvent } from "./ingest.js";
+import { getCapacityHint } from "./load.js";
 import { FEDERATION_PROTOCOL_VERSION, type HeartbeatPayload, type JoinRequestPayload } from "./protocol.js";
 
 /**
@@ -70,6 +78,13 @@ async function sendHeartbeats(deps: Deps): Promise<void> {
       nodeId: deps.nodeIdentity.nodeId,
       address: deps.env.FEDERATION_PUBLIC_ADDRESS!,
       version: FEDERATION_PROTOCOL_VERSION,
+      // Self-reported, like any heartbeat field — a receiving peer's own
+      // reputation scoring (modules/federation/reputation.ts) never trusts
+      // this on its own, only what it measures itself (see that module's
+      // header comment). Still useful as an early, honest-by-default signal
+      // for a well-behaved peer to back off before this server starts
+      // actually returning 503s.
+      capacityHint: getCapacityHint(deps.env),
       timestamp: new Date().toISOString(),
     };
     const envelope = signEnvelope(payload, deps.nodeIdentity);
@@ -78,8 +93,10 @@ async function sendHeartbeats(deps: Deps): Promise<void> {
       // A successful send is itself evidence this peer is reachable — see
       // db/queries/network-peers.ts's upsertPeer comment.
       await upsertPeer(deps.db, { nodeId: peer.nodeId, publicKey: peer.publicKey, address: peer.address, discoveredVia: peer.discoveredVia });
+      await recordHealthCheckSuccess(deps.db, peer.nodeId);
     } catch (err) {
       deps.log.warn({ err, peer: peer.nodeId }, "federation: heartbeat to peer failed");
+      await recordHealthCheckFailure(deps.db, peer.nodeId);
     }
   }
 }
@@ -101,8 +118,12 @@ async function pullFromPeers(deps: Deps): Promise<void> {
       if (page.events.length > 0) {
         deps.log.info({ peer: peer.nodeId, count: page.events.length }, "federation: anti-entropy pull ingested events");
       }
+      // A response at all (even an empty page) is a successful reachability
+      // check — same "active check, not self-report" signal as a heartbeat.
+      await recordHealthCheckSuccess(deps.db, peer.nodeId);
     } catch (err) {
       deps.log.warn({ err, peer: peer.nodeId }, "federation: anti-entropy pull from peer failed");
+      await recordHealthCheckFailure(deps.db, peer.nodeId);
     }
   }
 }

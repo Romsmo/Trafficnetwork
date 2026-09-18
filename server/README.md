@@ -6,7 +6,7 @@ Relay-/Moderator-Server: Ereignisprotokoll, materialisierter Zustand (PostGIS), 
 
 `client-lib/` (P2.1+) kann beginnen.
 
-**Laufende Überarbeitung (Phase F-Server, Branch `rework/server-federation`):** Self-Hosting per Docker oder ohne Docker (Apache/nginx/Caddy) und Föderation mehrerer Server (offene Mitgliedschaft mit Reputation, signierte Daten, Server-Verzeichnis). Konzept: [`docs/federation.md`](../docs/federation.md), Auftrag: [`docs/prompt-rework-server-federation.md`](../docs/prompt-rework-server-federation.md), Bedrohungsmodell: [`docs/threat-model.md`](docs/threat-model.md). **F-S1 (Docker/Compose, Installation ohne Docker, Multi-Arch-Build), F-S2 (Ed25519-Schlüssel, geräteseitig signierte Auth, signierte Netzwerk-Konfiguration) und F-S3 (Beitritt über Seeds, Peer-Verzeichnis + Gossip, signierte Heartbeats, Ereignis-Replikation per Push/Pull) sind umgesetzt** — Installation: [`docs/installation.md`](docs/installation.md). Das bestehende Auth-Modell (gemeinsames `JWT_SECRET`) bleibt vollständig erhalten — geräteseitig signierte Auth ist eine rein additive Alternative (Migrationspfad im Plan). Neon bleibt als DB-Option vollständig unterstützt, PostgreSQL+PostGIS im Compose-Stack ist der Standardpfad für neue Selbsthoster. Laufender Cross-Instanz-Status (parallel arbeitende Client-Bibliothek-Instanz): [`docs/status.md`](../docs/status.md).
+**Laufende Überarbeitung (Phase F-Server, Branch `rework/server-federation`):** Self-Hosting per Docker oder ohne Docker (Apache/nginx/Caddy) und Föderation mehrerer Server (offene Mitgliedschaft mit Reputation, signierte Daten, Server-Verzeichnis). Konzept: [`docs/federation.md`](../docs/federation.md), Auftrag: [`docs/prompt-rework-server-federation.md`](../docs/prompt-rework-server-federation.md), Bedrohungsmodell: [`docs/threat-model.md`](docs/threat-model.md). **F-S1 (Docker/Compose, Installation ohne Docker, Multi-Arch-Build), F-S2 (Ed25519-Schlüssel, geräteseitig signierte Auth, signierte Netzwerk-Konfiguration), F-S3 (Beitritt über Seeds, Peer-Verzeichnis + Gossip, signierte Heartbeats, Ereignis-Replikation per Push/Pull) und F-S4 (Reputationsstufen, Verzeichnisdienst + Export, Überlast-Signal) sind umgesetzt** — Installation: [`docs/installation.md`](docs/installation.md). Das bestehende Auth-Modell (gemeinsames `JWT_SECRET`) bleibt vollständig erhalten — geräteseitig signierte Auth ist eine rein additive Alternative (Migrationspfad im Plan). Neon bleibt als DB-Option vollständig unterstützt, PostgreSQL+PostGIS im Compose-Stack ist der Standardpfad für neue Selbsthoster. Laufender Cross-Instanz-Status (parallel arbeitende Client-Bibliothek-Instanz): [`docs/status.md`](../docs/status.md).
 
 ## Tech-Stack
 
@@ -47,6 +47,7 @@ Siehe [`.env.example`](.env.example) — alle Werte sind dokumentiert und haben 
 - `STATIC_DATA_PARTITION_H3_RESOLUTION` / `DEVICE_REGISTRATION_RATE_LIMIT_MAX_PER_DAY` — client-lib-P2.0-Tuning (Paket-Kachelgröße bzw. Geräteregistrierungen pro App-Schlüssel und Tag).
 - `FEDERATION_ENABLED` / `NETWORK_ROOT_PUBLIC_KEY` / `NETWORK_CONFIG_PATH` — Föderation (F-S2), siehe "Network keys & signed config" unten.
 - `FEDERATION_PUBLIC_ADDRESS` / `FEDERATION_SEEDS` / `FEDERATION_HEARTBEAT_INTERVAL_SECONDS` / `FEDERATION_ANTI_ENTROPY_INTERVAL_SECONDS` / `FEDERATION_EVENT_MAX_AGE_HOURS` / `FEDERATION_PEER_TIMEOUT_MS` — Föderationsprotokoll (F-S3), siehe "Föderation: Beitritt, Peers, Replikation" unten.
+- `REPUTATION_PROBATION_MIN_HOURS` / `REPUTATION_MIN_SUCCESSFUL_HEALTH_CHECKS` / `REPUTATION_TRUSTED_MIN_HOURS` / `REPUTATION_TRUSTED_MIN_SUCCESSFUL_HEALTH_CHECKS` / `REPUTATION_DEMOTE_AFTER_CONSECUTIVE_FAILURES` / `REPUTATION_DIRECTORY_PROBATION_MAX_SHARE` / `FEDERATION_OVERLOAD_MAX_CONCURRENT_PUSHES` — Reputation & Überlast-Signal (F-S4), siehe "Reputation, Verzeichnis & Überlast-Signal" unten.
 
 ## Network keys & signed config (F-S2)
 
@@ -78,12 +79,24 @@ Mit gesetztem `FEDERATION_SEEDS` tritt der Server beim Start jedem Seed bei (sel
 
 Repliziert werden aktuell **nur geräteseitig signierte Meldungserstellungen** (`POST /v1/hazard-reports`' optionales `deviceAssertion`-Feld, siehe `docs/api.md`) — Confirm/Deny-Replikation ist bewusst zurückgestellt (siehe Bedrohungsmodell-Link oben). Ein nicht-föderierender Betreiber merkt von alldem nichts: `FEDERATION_ENABLED=false` ist exakt das Verhalten von vor diesem Meilenstein.
 
+## Reputation, Verzeichnis & Überlast-Signal (F-S4)
+
+**Reputation** (`modules/federation/reputation.ts`) läuft in drei Stufen — `probation` → `active` → `trusted` — und wird bei jeder Anfrage frisch aus rohen Signalen berechnet, nie als eigener Wert gespeichert. Die Signale kommen ausschließlich aus diesem Server selbst gemessenen aktiven Prüfungen (Heartbeat-Versand, Anti-Entropy-Pull) und beobachtetem Verhalten (ungültige Signaturen in einem Push) — nie aus Selbstauskünften eines Peers. Eine ungültige Signatur stuft sofort auf `probation` zurück, unabhängig vom bisherigen Stand. Schwellenwerte: `REPUTATION_PROBATION_MIN_HOURS`/`REPUTATION_MIN_SUCCESSFUL_HEALTH_CHECKS` (Aufstieg zu `active`), `REPUTATION_TRUSTED_MIN_HOURS`/`REPUTATION_TRUSTED_MIN_SUCCESSFUL_HEALTH_CHECKS` (Aufstieg zu `trusted`), `REPUTATION_DEMOTE_AFTER_CONSECUTIVE_FAILURES` (Rückstufung). Netzwerkweiter Ausschluss bleibt davon unberührt — der ist und bleibt wurzelschlüssel-gebunden (`excludedNodeIds` in der signierten Netz-Config, siehe oben); lokale Reputation kann nur zurückstufen, nie einen Peer entfernen oder netzwerkweit sperren.
+
+**Verzeichnis**: `GET /v1/network/directory` (öffentlich, immer registriert — auch ohne Föderation, dann mit leerer Peer-Liste) liefert die eigene Selbstauskunft plus die bewertete Peer-Liste. Probezeit-Peers sind auf `REPUTATION_DIRECTORY_PROBATION_MAX_SHARE` (Standard 50 %) der zurückgegebenen Liste gedeckelt. Als statische Datei exportierbar (für Spiegel, z. B. GitHub Pages):
+
+```bash
+npm run network:export-directory -- --url https://mein-server.example --out ./directory.json
+```
+
+**Überlast-Signal**: `POST /v1/federation/events` liefert `503` + `Retry-After`, sobald `FEDERATION_OVERLOAD_MAX_CONCURRENT_PUSHES` gleichzeitig verarbeitete Pushes erreicht sind — eine Nebenläufigkeits-Bremse, kein Ersatz für den bestehenden IP-basierten Rate-Limit auf derselben Route. Der Heartbeat-Versand trägt zusätzlich einen selbstberichteten `capacityHint` (0–1), damit sich wohlverhaltende Peers proaktiv zurückhalten können — für die eigene Reputationsberechnung wird dieser Wert aber nie vertraut (siehe `docs/threat-model.md`).
+
 ## API
 
 Vollständige Referenz: [`docs/api.md`](docs/api.md). Kurzfassung:
 
 - **Auth**: `POST /v1/auth/token` (Client-Credentials → JWT) oder, additiv seit F-S2, `POST /v1/auth/device-token` (geräteseitig signierte Assertion → JWT, für Clients mit gebundenem Ed25519-Schlüssel). Jeder `/v1/*`-Endpunkt außer `/v1/health`, beiden Token-Endpunkten, `/v1/ws`, `/v1/network/node-info` und den `/v1/federation/*`-Endpunkten (F-S3, nur bei `FEDERATION_ENABLED=true`) braucht `Authorization: Bearer <token>`. `reporterId` kommt bei Schreibzugriffen immer aus dem Token, nie aus dem Body.
-- **Lesen**: `GET /v1/speed-limit`, `/v1/speed-limit-segments/nearby`, `/v1/static-signs/nearby`, `/v1/hazard-reports/{nearby,by-tile}`, `/v1/speed-cameras/{nearby,by-tile}` (leer, solange das Blitzer-Flag aus ist), `/v1/snapshot`, `/v1/delta`, `/v1/config`, `/v1/static-data/{manifest,partitions/:tile}`, `/v1/network/node-info` (öffentlich, kein Auth).
+- **Lesen**: `GET /v1/speed-limit`, `/v1/speed-limit-segments/nearby`, `/v1/static-signs/nearby`, `/v1/hazard-reports/{nearby,by-tile}`, `/v1/speed-cameras/{nearby,by-tile}` (leer, solange das Blitzer-Flag aus ist), `/v1/snapshot`, `/v1/delta`, `/v1/config`, `/v1/static-data/{manifest,partitions/:tile}`, `/v1/network/node-info` und `/v1/network/directory` (beide öffentlich, kein Auth).
 - **Schreiben**: `POST /v1/hazard-reports` (läuft durchs Moderationsgate: Plausibilität, Rate-Limit, Duplikat-Merge; `type: "fixedSpeedCamera"` wird in den Blitzer-Namensraum umgeleitet; optionales `deviceAssertion`-Feld seit F-S3 macht die Meldung föderationsfähig), `POST /v1/hazard-reports/:id/confirmations`, `POST /v1/speed-cameras/:id/removal-reports`. Schreibzugriffe auf den Blitzer-Namensraum funktionieren unabhängig vom Flag — nur Lesezugriffe sind gegated.
 - **Bulk-Import** (Scope `bulk-import`): `POST /v1/bulk-import/{speed-limit-segments,static-signs,speed-cameras}`, max. 5000 Zeilen/Aufruf, erzeugt bewusst keine Event-Log-Einträge (Abholung nur über `/v1/snapshot` bzw. die Paket-Endpunkte, siehe `docs/api.md`).
 - **Geräteregistrierung** (Scope `device-registration`, client-lib P2.0): `POST /v1/devices/register` — App-Schlüssel → frisches, pseudonymes Geräte-Credential. Additiv seit F-S2: `POST /v1/devices/bind-key` bindet einen selbst erzeugten Ed25519-Schlüssel an die eigene, bestehende Identität (jeder Client, nicht nur `device-registration`).
@@ -152,5 +165,5 @@ Integrationstests laufen automatisch in CI (`.github/workflows/server-ci.yml`, G
 | F-S1 | Docker-Image (Multi-Arch), Compose-Stack, Installation ohne Docker (Apache/nginx/Caddy, systemd), Installations-CI, `docs/threat-model.md` | ✅ |
 | F-S2 | Node-/Wurzelschlüssel + CLI, geräteseitig signierte Auth (additiv), signierte Netzwerk-Konfiguration | ✅ |
 | F-S3 | Föderation: Beitritt über Seeds, Peer-Verzeichnis + Gossip, signierte Heartbeats, Push/Pull-Replikation geräteseitig signierter Meldungserstellungen | ✅ |
-| F-S4 | Reputation, Ausschluss, Überlast-Signal, Verzeichnis + Discovery | ⬜ |
+| F-S4 | Reputationsstufen (probation/active/trusted), Verzeichnisdienst (`GET /v1/network/directory`) + Export-Skript, Überlast-Signal (503+Retry-After) | ✅ |
 | F-S5 | Mehrknoten-Testnetz, Betreiber-Doku, finale Föderations-Protokollspezifikation — **Abschluss, Pull Request** | ⬜ |

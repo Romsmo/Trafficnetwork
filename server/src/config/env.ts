@@ -107,6 +107,30 @@ const envSchema = z.object({
   // — an unreachable peer must never hang this server's own request handling
   // or background workers indefinitely.
   FEDERATION_PEER_TIMEOUT_MS: z.coerce.number().int().positive().default(5000),
+
+  // Reputation (F-S4, modules/federation/reputation.ts) — thresholds for the
+  // three-tier probation → active → trusted ladder, all measured from this
+  // server's own active health checks of a peer (never self-reported). See
+  // the F-S0 plan's decision 5 for the reasoning; these are the "konkrete
+  // Zahlen als Vorschlag" it deferred to this milestone.
+  REPUTATION_PROBATION_MIN_HOURS: z.coerce.number().int().positive().default(24),
+  REPUTATION_MIN_SUCCESSFUL_HEALTH_CHECKS: z.coerce.number().int().positive().default(5),
+  REPUTATION_TRUSTED_MIN_HOURS: z.coerce.number().int().positive().default(24 * 7),
+  REPUTATION_TRUSTED_MIN_SUCCESSFUL_HEALTH_CHECKS: z.coerce.number().int().positive().default(50),
+  // Consecutive failed health checks (heartbeat send or anti-entropy pull)
+  // before a peer is demoted back to probation — reset to 0 by any success.
+  REPUTATION_DEMOTE_AFTER_CONSECUTIVE_FAILURES: z.coerce.number().int().positive().default(5),
+  // Directory listing cap for probation-tier peers (GET /v1/network/directory)
+  // — a fraction of the *total* listed peers, not of probation peers alone.
+  // Keeps a brand-new server discoverable without letting a flood of unproven
+  // servers dominate the list (the F-S0 plan's "gedeckelter Verzeichnis-Anteil
+  // für Probezeit-Server").
+  REPUTATION_DIRECTORY_PROBATION_MAX_SHARE: z.coerce.number().min(0).max(1).default(0.5),
+
+  // Overload signal (F-S4): POST /v1/federation/events returns 503 +
+  // Retry-After once this many pushes are being processed concurrently by
+  // this process, rather than degrading everyone's latency under load.
+  FEDERATION_OVERLOAD_MAX_CONCURRENT_PUSHES: z.coerce.number().int().positive().default(20),
 }).refine((env) => !env.NETWORK_CONFIG_PATH || env.NETWORK_ROOT_PUBLIC_KEY, {
   message: "NETWORK_ROOT_PUBLIC_KEY is required whenever NETWORK_CONFIG_PATH is set — a signed config can't be verified without it",
   path: ["NETWORK_ROOT_PUBLIC_KEY"],

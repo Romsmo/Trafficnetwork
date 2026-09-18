@@ -41,8 +41,8 @@ from the party that's supposed to vouch for that fact.
 |---|---|---|
 | Forged device report/confirmation | Every server and client verifies the device's Ed25519 signature over the canonical (RFC 8785) payload before accepting it | None — an invalid signature is unconditionally rejected |
 | Server withholds or delays data | Anti-entropy hash comparison between peers surfaces "event X has been known elsewhere for N minutes, absent here" | Detection, not prevention — a server can still delay briefly before being caught; reputation drop is the consequence, not an undo |
-| Server lies about its own capacity/health in heartbeats | Peers independently measure latency/error rate over time rather than trusting the self-report | Self-reported metrics are inherently gameable in any open system; academic consensus is that Sybil/self-report resistance is never fully solved in permissionless networks — accepted, not "fixed" |
-| Sybil flood of fake servers | Join-rate-limiting per IP/ASN, reputation starts at zero and ramps slowly, directory listing weight is capped for probation-tier servers | Bounded, not eliminated — a sufficiently patient/distributed attacker can still slowly build reputation across many identities; the cap limits how much traffic-share any single low-reputation identity can capture in the meantime |
+| Server lies about its own capacity/health in heartbeats | A heartbeat's `capacityHint` is self-reported and never trusted directly; reputation (F-S4) is instead built from *this server's own* measured success/failure rate reaching that peer | Self-reported metrics are inherently gameable in any open system; academic consensus is that Sybil/self-report resistance is never fully solved in permissionless networks — accepted, not "fixed" |
+| Sybil flood of fake servers | Join-rate-limiting per IP (F-S4, `POST /v1/federation/join`, 30/minute); reputation starts at `probation` and ramps slowly (F-S4, `modules/federation/reputation.ts`); directory listing weight is capped for probation-tier servers (F-S4, `REPUTATION_DIRECTORY_PROBATION_MAX_SHARE`) | Bounded, not eliminated — a sufficiently patient/distributed attacker can still slowly build reputation across many identities; the cap limits how much directory visibility any single low-reputation identity can capture in the meantime. IP-based only, not ASN-level (no GeoIP/ASN infrastructure in this project) |
 | MITM / server impersonation | Mandatory valid TLS (no self-signed certs accepted); a server's node public key is bound to its advertised address at directory registration, and changing the address requires a freshly signed proof from the same key | An attacker who compromises a server's *actual* TLS cert/private key can still impersonate it — outside this project's control, standard TLS operational hygiene applies |
 | Root key compromise or loss | Root key never touches a running server or the internet — used offline, only to sign delegation certs and network-config updates | Loss is unrecoverable by design (no backdoor); the documented outcome is a fork with a new root key, which is a deliberate, accepted trade-off (`docs/federation.md` §2), not a gap to close later |
 | Legacy P1/P2 device credential (symmetric secret) | Purely additive migration — see `server/README.md`'s federation section; nothing breaks for a non-federating operator | None specific to this rework — the existing symmetric-secret model's own properties (already true today) carry over unchanged for single-server use |
@@ -81,10 +81,46 @@ versus the target design above:
   "this is a real device") — nothing about signature verification alone
   stops a peer from generating throwaway keys and signing arbitrary garbage.
   `POST /v1/federation/events` carries a coarse, IP-based request rate limit
-  (60/minute, `modules/federation/routes.ts`) as a stopgap; a real defense
-  (per-peer reputation, ability to eject a misbehaving peer's traffic
-  without excluding it from the network entirely) is F-S4 scope, not solved
-  here.
+  (60/minute, `modules/federation/routes.ts`) as a stopgap; per-peer
+  reputation (below, F-S4) adds a second layer for the narrower case of
+  *invalid* signatures specifically, but doesn't defend against a peer
+  flooding *validly*-signed garbage from throwaway device keys — that's
+  still an open, accepted gap (see "What this rework does not attempt").
+
+## F-S4 implementation notes
+
+Reputation tiers (`probation` → `active` → `trusted`,
+`modules/federation/reputation.ts`), the directory endpoint
+(`GET /v1/network/directory`), and the overload signal
+(`POST /v1/federation/events` → 503 + `Retry-After`) are built. What this
+narrows versus the full picture the threats table above describes:
+
+- **Reputation is computed only from signals this server can cheaply and
+  honestly measure itself**: active health-check success/failure (heartbeat
+  send, anti-entropy pull) and invalid signatures observed in a peer's
+  pushes. The table's "Server withholds or delays data" mitigation — anti-
+  entropy *hash comparison* surfacing "event X is known elsewhere, absent
+  here" — is **not** implemented; that needs comparing what multiple peers
+  each know, which is a materially larger piece (some kind of shared or
+  pairwise-comparable event-set summary across the whole peer graph) than
+  what F-S4 scoped. A withholding server currently only shows up as
+  "reachable and signature-clean," not as suspicious. Documented gap, not a
+  silent one — a candidate for a later milestone.
+- **Demotion only ever returns a peer to `probation` on *this* server's own
+  view of it** — it never removes a peer from the list, never propagates to
+  other servers, and is trivially reversible (a peer's own next successful
+  health check starts rebuilding standing again, aside from
+  `invalidSignatureCount`, which is cumulative and never decreases). This is
+  deliberate: per the F-S0 plan's binding decision, actual network-wide
+  exclusion stays root-key-gated (the table above, "An algorithm unilaterally
+  excludes a legitimate operator") — local reputation can *demote*, never
+  *exclude*.
+- **The overload signal is a blunt concurrency cap** (a single
+  process-wide counter, not per-peer, not weighted by a pushing peer's own
+  reputation) — a `trusted` peer and a `probation` peer competing for the
+  last available slot are treated identically. Reputation-weighted admission
+  under load (e.g. always reserving headroom for `trusted` peers) is a
+  natural follow-on, not built here.
 
 ## What this rework does *not* attempt
 

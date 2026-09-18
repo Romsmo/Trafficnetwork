@@ -179,9 +179,22 @@ contact). `last_pulled_sequence` is local-only bookkeeping for the
 anti-entropy pull worker — the highest `event_log.sequence` this server has
 already pulled *from this specific peer*; never sent to or compared against
 any other server, since sequence numbers aren't comparable across servers
-(each is its own per-process bigserial). Not the reputation-scored,
-network-wide directory planned for F-S4 (`GET /v1/network/nodes`) — just
-"who this server currently knows how to reach."
+(each is its own per-process bigserial).
+
+**Reputation columns (F-S4, `modules/federation/reputation.ts`):**
+`successful_health_checks` / `consecutive_health_check_failures` — updated
+only by *this* server's own active checks (a heartbeat send or anti-entropy
+pull it initiated), never by anything the peer claims about itself.
+`invalid_signature_count` — cumulative, bumped whenever a push from this
+peer contained an event whose signature didn't verify; per the F-S0 plan,
+any nonzero value alone is disqualifying (immediate demotion), not a
+threshold to cross. `last_known_version` — self-reported by the peer in a
+heartbeat *it* sends us, recorded as plain metadata, not a trust signal.
+None of these four columns are queried directly by API responses — the
+reputation *tier* (`probation`/`active`/`trusted`) shown in
+`GET /v1/network/directory` is always derived from them fresh on read
+(`computeReputationTier`), never stored, so it can't drift out of sync with
+the signals it summarizes.
 
 ### `static_data_state`
 Single-row table (`id` is always `1`) holding `version`, a monotonically

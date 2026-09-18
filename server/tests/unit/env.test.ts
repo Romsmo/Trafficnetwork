@@ -86,4 +86,14 @@ describe("loadEnv", () => {
     expect(env.FEDERATION_ANTI_ENTROPY_INTERVAL_SECONDS).toBe(300);
     expect(env.FEDERATION_EVENT_MAX_AGE_HOURS).toBe(72);
   });
+
+  it("applies reputation and overload defaults", () => {
+    resetEnvCache();
+    const env = loadEnv(validEnv);
+    expect(env.REPUTATION_PROBATION_MIN_HOURS).toBe(24);
+    expect(env.REPUTATION_MIN_SUCCESSFUL_HEALTH_CHECKS).toBe(5);
+    expect(env.REPUTATION_TRUSTED_MIN_HOURS).toBe(168);
+    expect(env.REPUTATION_DIRECTORY_PROBATION_MAX_SHARE).toBe(0.5);
+    expect(env.FEDERATION_OVERLOAD_MAX_CONCURRENT_PUSHES).toBe(20);
+  });
 });
