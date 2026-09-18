@@ -10,12 +10,13 @@ committet das für sich (kleine, isolierte Doku-Änderung) und pusht sofort,
 um Konflikte mit der anderen Session zu vermeiden.
 
 **F-S (Server, `server/`)** — Session "Trafficnetwork Backend"
-- Branch: `rework/server-federation` (noch nicht nach `main` gemergt)
-- Stand: F-S1 abgeschlossen und gepusht — Docker-Paketierung, Installation
-  ohne Docker, `server/docs/threat-model.md` (Commit `e5e0592`, CI-Trigger
-  für `rework/*`-Branches ergänzt in `17c4518`)
-- Nächster Schritt: F-S2 (Identitäten & Kryptografie, gerätesignierte Auth,
-  signierte Netzwerk-Konfiguration)
+- Branch: `rework/server-federation` — Pull Request nach `main` eingereicht,
+  noch nicht gemergt (wartet auf Freigabe)
+- Stand: F-S0–F-S5 vollständig abgeschlossen und gepusht. Laufender,
+  detaillierter Stand steht ab jetzt in [`docs/status.md`](status.md) statt
+  hier (dieser Abschnitt wird nicht mehr laufend aktualisiert)
+- Nächster Schritt: wartet auf PR-Review/Merge-Freigabe; danach ggf. F-C
+  (Client-Bibliothek) gegen die jetzt stabile, gemergte API weiterführen
 
 **F-C (Client-Bibliothek, `client-lib/`)** — Session "Client-Sync-Bibliothek Phase 2"
 - Branch: `rework/client-lib-federation`
@@ -77,7 +78,7 @@ _Zuletzt aktualisiert: 2026-09-17 von der F-C-Session._
 - [x] Konzept erstellt (`docs/federation.md`), Entscheidung: offene Mitgliedschaft mit Reputation
 - [x] Claude-Code-Prompts erstellt (`docs/prompt-rework-server-federation.md`, `docs/prompt-rework-client-lib-federation.md`)
 - [x] Stand von Phase 2 im Repo klären: P2.0 (Server-Erweiterungen für client-lib) ist auf GitHub; `client-lib/` selbst enthält bewusst noch keinen Code — das ist die eigentliche Phase-2-Client-Bibliothek, eigener, noch nicht gestarteter Auftrag
-- [ ] F-S: Server-Überarbeitung (Docker/Apache/nginx/Caddy, Signaturen, Föderation, Reputation, Verzeichnis) — F-S0 (Plan), F-S1 (Docker/Compose/Installation ohne Docker), F-S2 (Node-/Wurzelschlüssel + CLI, geräteseitig signierte Auth additiv, signierte Netzwerk-Konfiguration), F-S3 (Beitritt über Seeds, Peer-Verzeichnis + Gossip, signierte Heartbeats, Push/Pull-Replikation geräteseitig signierter Meldungserstellungen) und F-S4 (Reputationsstufen probation/active/trusted, `GET /v1/network/directory` + Export-Skript, Überlast-Signal 503+Retry-After, siehe `server/docs/installation.md`/`api.md`/`schema.md`/`threat-model.md`) fertig, F-S5 offen, Branch `rework/server-federation`
+- [x] F-S: Server-Überarbeitung (Docker/Apache/nginx/Caddy, Signaturen, Föderation, Reputation, Verzeichnis) — F-S0–F-S5 vollständig umgesetzt (Docker/Compose/Installation ohne Docker, Node-/Wurzelschlüssel + CLI, geräteseitig signierte Auth, signierte Netzwerk-Konfiguration, Beitritt über Seeds, Peer-Verzeichnis + Gossip, signierte Heartbeats, Push/Pull-Replikation geräteseitig signierter Meldungserstellungen, Reputationsstufen, `GET /v1/network/directory` + Export-Skript, Überlast-Signal, echtes Mehrknoten-Testnetz), Doku vollständig (`server/docs/{installation,operating,api,schema,threat-model,federation-protocol}.md`), Branch `rework/server-federation`, Pull Request nach `main` eingereicht
 - [ ] F-C: Client-Bibliothek-Überarbeitung (Discovery, Failover, Signaturprüfung, gerätesignierte Meldungen)
 - [ ] Projekt-Domain registrieren, Platzhalter `trafficnetwork.example` ersetzen
 - [ ] Netzwerk-Wurzelschlüssel erzeugen und offline sicher aufbewahren

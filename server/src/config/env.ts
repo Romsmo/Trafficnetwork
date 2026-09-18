@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { isAcceptableFederationAddress } from "../modules/federation/address.js";
 
 const envSchema = z.object({
   DATABASE_URL: z.string().min(1, "DATABASE_URL is required"),
@@ -137,8 +138,8 @@ const envSchema = z.object({
 }).refine((env) => !env.FEDERATION_ENABLED || env.FEDERATION_PUBLIC_ADDRESS, {
   message: "FEDERATION_PUBLIC_ADDRESS is required whenever FEDERATION_ENABLED=true — peers need a reachable address to join/heartbeat back to",
   path: ["FEDERATION_PUBLIC_ADDRESS"],
-}).refine((env) => !env.FEDERATION_PUBLIC_ADDRESS || env.FEDERATION_PUBLIC_ADDRESS.startsWith("https://"), {
-  message: "FEDERATION_PUBLIC_ADDRESS must be an https:// URL (docs/threat-model.md: no self-hosted server identity over plain HTTP)",
+}).refine((env) => !env.FEDERATION_PUBLIC_ADDRESS || isAcceptableFederationAddress(env.FEDERATION_PUBLIC_ADDRESS), {
+  message: "FEDERATION_PUBLIC_ADDRESS must be an https:// URL (docs/threat-model.md: no self-hosted server identity over plain HTTP; a bare http://127.0.0.1 or http://localhost loopback literal is the one exception, for local testing)",
   path: ["FEDERATION_PUBLIC_ADDRESS"],
 });
 

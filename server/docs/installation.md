@@ -1,8 +1,10 @@
 # Installation
 
 Two equally-supported paths — pick one. Both need a public HTTPS address if
-you intend to federate (`FEDERATION_ENABLED=true`, landing in F-S3); for a
-private single-server setup neither TLS nor a domain is required.
+you intend to federate (`FEDERATION_ENABLED=true`); for a private
+single-server setup neither TLS nor a domain is required. Once you're up and
+federating, see [`operating.md`](operating.md) for day-to-day operation and
+[`federation-protocol.md`](federation-protocol.md) for how it all works.
 
 ## Docker (recommended)
 

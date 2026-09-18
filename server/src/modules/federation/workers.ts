@@ -32,15 +32,24 @@ export interface FederationWorkersHandle {
   stop: () => void;
 }
 
-interface Deps {
+export interface FederationWorkerDeps {
   db: Database["db"];
   env: Env;
   nodeIdentity: NodeIdentity;
   realtime: SubscriptionRegistry;
   log: FastifyBaseLogger;
 }
+type Deps = FederationWorkerDeps;
 
-async function joinSeeds(deps: Deps): Promise<void> {
+/**
+ * The three cycle functions below (joinSeeds, sendHeartbeats,
+ * pullFromPeers) are exported alongside startFederationWorkers so F-S5's
+ * multi-node integration test can trigger one deterministically instead of
+ * waiting on real setInterval timers (FEDERATION_HEARTBEAT_INTERVAL_SECONDS
+ * etc. default to tens of seconds — far too slow for a test to simply wait
+ * out). Production code (src/server.ts) only ever calls startFederationWorkers.
+ */
+export async function joinSeeds(deps: Deps): Promise<void> {
   const seeds = (deps.env.FEDERATION_SEEDS ?? "")
     .split(",")
     .map((s) => s.trim())
@@ -71,7 +80,7 @@ async function joinSeeds(deps: Deps): Promise<void> {
   }
 }
 
-async function sendHeartbeats(deps: Deps): Promise<void> {
+export async function sendHeartbeats(deps: Deps): Promise<void> {
   const peers = await listPeers(deps.db);
   for (const peer of peers) {
     const payload: HeartbeatPayload = {
@@ -101,7 +110,7 @@ async function sendHeartbeats(deps: Deps): Promise<void> {
   }
 }
 
-async function pullFromPeers(deps: Deps): Promise<void> {
+export async function pullFromPeers(deps: Deps): Promise<void> {
   const peers = await listPeersWithCursor(deps.db);
   for (const peer of peers) {
     try {

@@ -6,7 +6,7 @@ Relay-/Moderator-Server: Ereignisprotokoll, materialisierter Zustand (PostGIS), 
 
 `client-lib/` (P2.1+) kann beginnen.
 
-**Laufende Überarbeitung (Phase F-Server, Branch `rework/server-federation`):** Self-Hosting per Docker oder ohne Docker (Apache/nginx/Caddy) und Föderation mehrerer Server (offene Mitgliedschaft mit Reputation, signierte Daten, Server-Verzeichnis). Konzept: [`docs/federation.md`](../docs/federation.md), Auftrag: [`docs/prompt-rework-server-federation.md`](../docs/prompt-rework-server-federation.md), Bedrohungsmodell: [`docs/threat-model.md`](docs/threat-model.md). **F-S1 (Docker/Compose, Installation ohne Docker, Multi-Arch-Build), F-S2 (Ed25519-Schlüssel, geräteseitig signierte Auth, signierte Netzwerk-Konfiguration), F-S3 (Beitritt über Seeds, Peer-Verzeichnis + Gossip, signierte Heartbeats, Ereignis-Replikation per Push/Pull) und F-S4 (Reputationsstufen, Verzeichnisdienst + Export, Überlast-Signal) sind umgesetzt** — Installation: [`docs/installation.md`](docs/installation.md). Das bestehende Auth-Modell (gemeinsames `JWT_SECRET`) bleibt vollständig erhalten — geräteseitig signierte Auth ist eine rein additive Alternative (Migrationspfad im Plan). Neon bleibt als DB-Option vollständig unterstützt, PostgreSQL+PostGIS im Compose-Stack ist der Standardpfad für neue Selbsthoster. Laufender Cross-Instanz-Status (parallel arbeitende Client-Bibliothek-Instanz): [`docs/status.md`](../docs/status.md).
+**Überarbeitung F-Server (Branch `rework/server-federation`) abgeschlossen:** Self-Hosting per Docker oder ohne Docker (Apache/nginx/Caddy) und Föderation mehrerer Server (offene Mitgliedschaft mit Reputation, signierte Daten, Server-Verzeichnis). Konzept: [`docs/federation.md`](../docs/federation.md), Auftrag: [`docs/prompt-rework-server-federation.md`](../docs/prompt-rework-server-federation.md), Bedrohungsmodell: [`docs/threat-model.md`](docs/threat-model.md), vollständige Protokollspezifikation: [`docs/federation-protocol.md`](docs/federation-protocol.md). **F-S0–F-S5 sind umgesetzt** — Installation: [`docs/installation.md`](docs/installation.md), Betrieb: [`docs/operating.md`](docs/operating.md). Das bestehende Auth-Modell (gemeinsames `JWT_SECRET`) bleibt vollständig erhalten — geräteseitig signierte Auth ist eine rein additive Alternative (Migrationspfad im Plan). Neon bleibt als DB-Option vollständig unterstützt, PostgreSQL+PostGIS im Compose-Stack ist der Standardpfad für neue Selbsthoster. Laufender Cross-Instanz-Status (parallel arbeitende Client-Bibliothek-Instanz): [`docs/status.md`](../docs/status.md).
 
 ## Tech-Stack
 
@@ -148,7 +148,7 @@ npm run test:integration   # startet einen postgis/postgis-Container über Testc
 npm test                   # beides
 ```
 
-Integrationstests laufen automatisch in CI (`.github/workflows/server-ci.yml`, GitHub-Actions-Runner bringt Docker mit). Lokal ohne Docker Desktop lassen sich nur die Unit-Tests ausführen. WebSocket-Tests starten einen echten horchenden Server plus einen echten `ws`-Client (Fastifys `app.inject()` unterstützt kein WS-Upgrade).
+Integrationstests laufen automatisch in CI (`.github/workflows/server-ci.yml`, GitHub-Actions-Runner bringt Docker mit). Lokal ohne Docker Desktop lassen sich nur die Unit-Tests ausführen. WebSocket-Tests starten einen echten horchenden Server plus einen echten `ws`-Client (Fastifys `app.inject()` unterstützt kein WS-Upgrade). `tests/integration/federation-multi-node.test.ts` (F-S5) ist die einzige Suite, die mehrere echte, horchende Server-Instanzen (je mit eigenem Postgres-Container) tatsächlich über echtes HTTP miteinander reden lässt, statt jeden Server isoliert über `app.inject()` zu prüfen — Beitritt+Gossip, Replikation, Partition+Wiedervereinigung, ein böswillig signierender Peer und pro-Server-Rate-Limiting werden dort end-to-end durchgespielt.
 
 ## Meilensteine
 
@@ -166,4 +166,4 @@ Integrationstests laufen automatisch in CI (`.github/workflows/server-ci.yml`, G
 | F-S2 | Node-/Wurzelschlüssel + CLI, geräteseitig signierte Auth (additiv), signierte Netzwerk-Konfiguration | ✅ |
 | F-S3 | Föderation: Beitritt über Seeds, Peer-Verzeichnis + Gossip, signierte Heartbeats, Push/Pull-Replikation geräteseitig signierter Meldungserstellungen | ✅ |
 | F-S4 | Reputationsstufen (probation/active/trusted), Verzeichnisdienst (`GET /v1/network/directory`) + Export-Skript, Überlast-Signal (503+Retry-After) | ✅ |
-| F-S5 | Mehrknoten-Testnetz, Betreiber-Doku, finale Föderations-Protokollspezifikation — **Abschluss, Pull Request** | ⬜ |
+| F-S5 | Mehrknoten-Testnetz (3 echte Server über Testcontainers), Betreiber-Doku (`docs/operating.md`), finale Föderations-Protokollspezifikation (`docs/federation-protocol.md`) — **Abschluss, Pull Request** | ✅ |

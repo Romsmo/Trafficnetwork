@@ -11,6 +11,7 @@ import { ingestDeviceCreateEvent } from "./ingest.js";
 import type { DeviceCreateEventPayload } from "./device-event.js";
 import { broadcastFederationEvents } from "./broadcast.js";
 import { beginPush, endPush, getConcurrentPushes } from "./load.js";
+import { isAcceptableFederationAddress } from "./address.js";
 import { HAZARD_TYPES } from "../../config/constants.js";
 
 const JOIN_REQUEST_FRESHNESS_SECONDS = 300;
@@ -76,7 +77,7 @@ export async function registerFederationRoutes(app: FastifyInstance) {
       if (!isFreshTimestamp(envelope.payload.requestedAt, JOIN_REQUEST_FRESHNESS_SECONDS)) {
         throw badRequest("requestedAt is stale or invalid");
       }
-      if (!envelope.payload.address.startsWith("https://")) {
+      if (!isAcceptableFederationAddress(envelope.payload.address)) {
         throw badRequest("address must be an https:// URL (docs/threat-model.md: no self-hosted server identity over plain HTTP)");
       }
       if (envelope.payload.nodeId === app.nodeIdentity.nodeId) {
