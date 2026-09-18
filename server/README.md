@@ -6,7 +6,7 @@ Relay-/Moderator-Server: Ereignisprotokoll, materialisierter Zustand (PostGIS), 
 
 `client-lib/` (P2.1+) kann beginnen.
 
-**Laufende Überarbeitung (Phase F-Server, Branch `rework/server-federation`):** Self-Hosting per Docker oder ohne Docker (Apache/nginx/Caddy) und Föderation mehrerer Server (offene Mitgliedschaft mit Reputation, signierte Daten, Server-Verzeichnis). Konzept: [`docs/federation.md`](../docs/federation.md), Auftrag: [`docs/prompt-rework-server-federation.md`](../docs/prompt-rework-server-federation.md), Bedrohungsmodell: [`docs/threat-model.md`](docs/threat-model.md). **F-S1 (Docker/Compose, Installation ohne Docker, Multi-Arch-Build) und F-S2 (Ed25519-Schlüssel, geräteseitig signierte Auth, signierte Netzwerk-Konfiguration) sind umgesetzt** — Installation: [`docs/installation.md`](docs/installation.md). Das bestehende Auth-Modell (gemeinsames `JWT_SECRET`) bleibt vollständig erhalten — geräteseitig signierte Auth ist eine rein additive Alternative (Migrationspfad im Plan). Neon bleibt als DB-Option vollständig unterstützt, PostgreSQL+PostGIS im Compose-Stack ist der Standardpfad für neue Selbsthoster. Laufender Cross-Instanz-Status (parallel arbeitende Client-Bibliothek-Instanz): [`docs/status.md`](../docs/status.md).
+**Laufende Überarbeitung (Phase F-Server, Branch `rework/server-federation`):** Self-Hosting per Docker oder ohne Docker (Apache/nginx/Caddy) und Föderation mehrerer Server (offene Mitgliedschaft mit Reputation, signierte Daten, Server-Verzeichnis). Konzept: [`docs/federation.md`](../docs/federation.md), Auftrag: [`docs/prompt-rework-server-federation.md`](../docs/prompt-rework-server-federation.md), Bedrohungsmodell: [`docs/threat-model.md`](docs/threat-model.md). **F-S1 (Docker/Compose, Installation ohne Docker, Multi-Arch-Build), F-S2 (Ed25519-Schlüssel, geräteseitig signierte Auth, signierte Netzwerk-Konfiguration) und F-S3 (Beitritt über Seeds, Peer-Verzeichnis + Gossip, signierte Heartbeats, Ereignis-Replikation per Push/Pull) sind umgesetzt** — Installation: [`docs/installation.md`](docs/installation.md). Das bestehende Auth-Modell (gemeinsames `JWT_SECRET`) bleibt vollständig erhalten — geräteseitig signierte Auth ist eine rein additive Alternative (Migrationspfad im Plan). Neon bleibt als DB-Option vollständig unterstützt, PostgreSQL+PostGIS im Compose-Stack ist der Standardpfad für neue Selbsthoster. Laufender Cross-Instanz-Status (parallel arbeitende Client-Bibliothek-Instanz): [`docs/status.md`](../docs/status.md).
 
 ## Tech-Stack
 
@@ -46,6 +46,7 @@ Siehe [`.env.example`](.env.example) — alle Werte sind dokumentiert und haben 
 - `JWT_SECRET` / `JWT_TTL_SECONDS` — Signierschlüssel und Gültigkeitsdauer für Client-Tokens.
 - `STATIC_DATA_PARTITION_H3_RESOLUTION` / `DEVICE_REGISTRATION_RATE_LIMIT_MAX_PER_DAY` — client-lib-P2.0-Tuning (Paket-Kachelgröße bzw. Geräteregistrierungen pro App-Schlüssel und Tag).
 - `FEDERATION_ENABLED` / `NETWORK_ROOT_PUBLIC_KEY` / `NETWORK_CONFIG_PATH` — Föderation (F-S2), siehe "Network keys & signed config" unten.
+- `FEDERATION_PUBLIC_ADDRESS` / `FEDERATION_SEEDS` / `FEDERATION_HEARTBEAT_INTERVAL_SECONDS` / `FEDERATION_ANTI_ENTROPY_INTERVAL_SECONDS` / `FEDERATION_EVENT_MAX_AGE_HOURS` / `FEDERATION_PEER_TIMEOUT_MS` — Föderationsprotokoll (F-S3), siehe "Föderation: Beitritt, Peers, Replikation" unten.
 
 ## Network keys & signed config (F-S2)
 
@@ -63,15 +64,30 @@ npm run network:sign-config -- --root-key ./network-root-key.json --out ./networ
 
 Die signierte `network-config.json` wird verteilt; jeder Server, der sie einbinden soll, bekommt `NETWORK_CONFIG_PATH` (Pfad zur Datei) und `NETWORK_ROOT_PUBLIC_KEY` (der öffentliche Wurzelschlüssel, von `network:generate-root-key` ausgegeben) gesetzt. Der Server verweigert den Start, wenn die Datei fehlt, unlesbar ist oder nicht gegen den konfigurierten Schlüssel verifiziert — nie ein unauthentifiziertes Konfigurationsdokument stillschweigend übernehmen. Das Blitzer-Flag ist **UND-verknüpft**: die Netzwerk-Konfiguration kann ein lokal aktiviertes Flag abschalten, aber nie ein lokal deaktiviertes einschalten (siehe `docs/api.md`).
 
+## Föderation: Beitritt, Peers, Replikation (F-S3)
+
+Nur relevant, wenn `FEDERATION_ENABLED=true` — mit dem Standardwert `false` existieren die `/v1/federation/*`-Endpunkte gar nicht erst (404), exakt wie vor diesem Meilenstein. Volle Endpunkt-Referenz: [`docs/api.md`](docs/api.md#federation-f-s3); Sicherheitsmodell/bewusst zurückgestellte Stücke (Confirm/Deny-Replikation): [`docs/threat-model.md`](docs/threat-model.md#f-s3-implementation-notes).
+
+```bash
+FEDERATION_ENABLED=true
+FEDERATION_PUBLIC_ADDRESS=https://mein-server.example   # Pflicht, sobald FEDERATION_ENABLED=true
+FEDERATION_SEEDS=https://seed1.example,https://seed2.example   # optional — der erste Server im Netz hat keinen Seed
+```
+
+Mit gesetztem `FEDERATION_SEEDS` tritt der Server beim Start jedem Seed bei (selbstsigniert mit dem eigenen, automatisch erzeugten Node-Schlüssel — siehe "Network keys" oben) und übernimmt dessen aktuelle Peer-Liste (Gossip reitet auf der Beitritts-Antwort mit, kein separates Gossip-Protokoll). Danach laufen zwei Hintergrund-Jobs (wie Expiry-Sweep/Retention-Cleanup): signierte Heartbeats an alle bekannten Peers (`FEDERATION_HEARTBEAT_INTERVAL_SECONDS`, Standard 60s) und Anti-Entropy-Pull (`FEDERATION_ANTI_ENTROPY_INTERVAL_SECONDS`, Standard 300s) — schließt Lücken, falls ein Push verpasst wurde.
+
+Repliziert werden aktuell **nur geräteseitig signierte Meldungserstellungen** (`POST /v1/hazard-reports`' optionales `deviceAssertion`-Feld, siehe `docs/api.md`) — Confirm/Deny-Replikation ist bewusst zurückgestellt (siehe Bedrohungsmodell-Link oben). Ein nicht-föderierender Betreiber merkt von alldem nichts: `FEDERATION_ENABLED=false` ist exakt das Verhalten von vor diesem Meilenstein.
+
 ## API
 
 Vollständige Referenz: [`docs/api.md`](docs/api.md). Kurzfassung:
 
-- **Auth**: `POST /v1/auth/token` (Client-Credentials → JWT) oder, additiv seit F-S2, `POST /v1/auth/device-token` (geräteseitig signierte Assertion → JWT, für Clients mit gebundenem Ed25519-Schlüssel). Jeder `/v1/*`-Endpunkt außer `/v1/health`, beiden Token-Endpunkten, `/v1/ws` und `/v1/network/node-info` braucht `Authorization: Bearer <token>`. `reporterId` kommt bei Schreibzugriffen immer aus dem Token, nie aus dem Body.
+- **Auth**: `POST /v1/auth/token` (Client-Credentials → JWT) oder, additiv seit F-S2, `POST /v1/auth/device-token` (geräteseitig signierte Assertion → JWT, für Clients mit gebundenem Ed25519-Schlüssel). Jeder `/v1/*`-Endpunkt außer `/v1/health`, beiden Token-Endpunkten, `/v1/ws`, `/v1/network/node-info` und den `/v1/federation/*`-Endpunkten (F-S3, nur bei `FEDERATION_ENABLED=true`) braucht `Authorization: Bearer <token>`. `reporterId` kommt bei Schreibzugriffen immer aus dem Token, nie aus dem Body.
 - **Lesen**: `GET /v1/speed-limit`, `/v1/speed-limit-segments/nearby`, `/v1/static-signs/nearby`, `/v1/hazard-reports/{nearby,by-tile}`, `/v1/speed-cameras/{nearby,by-tile}` (leer, solange das Blitzer-Flag aus ist), `/v1/snapshot`, `/v1/delta`, `/v1/config`, `/v1/static-data/{manifest,partitions/:tile}`, `/v1/network/node-info` (öffentlich, kein Auth).
-- **Schreiben**: `POST /v1/hazard-reports` (läuft durchs Moderationsgate: Plausibilität, Rate-Limit, Duplikat-Merge; `type: "fixedSpeedCamera"` wird in den Blitzer-Namensraum umgeleitet), `POST /v1/hazard-reports/:id/confirmations`, `POST /v1/speed-cameras/:id/removal-reports`. Schreibzugriffe auf den Blitzer-Namensraum funktionieren unabhängig vom Flag — nur Lesezugriffe sind gegated.
+- **Schreiben**: `POST /v1/hazard-reports` (läuft durchs Moderationsgate: Plausibilität, Rate-Limit, Duplikat-Merge; `type: "fixedSpeedCamera"` wird in den Blitzer-Namensraum umgeleitet; optionales `deviceAssertion`-Feld seit F-S3 macht die Meldung föderationsfähig), `POST /v1/hazard-reports/:id/confirmations`, `POST /v1/speed-cameras/:id/removal-reports`. Schreibzugriffe auf den Blitzer-Namensraum funktionieren unabhängig vom Flag — nur Lesezugriffe sind gegated.
 - **Bulk-Import** (Scope `bulk-import`): `POST /v1/bulk-import/{speed-limit-segments,static-signs,speed-cameras}`, max. 5000 Zeilen/Aufruf, erzeugt bewusst keine Event-Log-Einträge (Abholung nur über `/v1/snapshot` bzw. die Paket-Endpunkte, siehe `docs/api.md`).
 - **Geräteregistrierung** (Scope `device-registration`, client-lib P2.0): `POST /v1/devices/register` — App-Schlüssel → frisches, pseudonymes Geräte-Credential. Additiv seit F-S2: `POST /v1/devices/bind-key` bindet einen selbst erzeugten Ed25519-Schlüssel an die eigene, bestehende Identität (jeder Client, nicht nur `device-registration`).
+- **Föderation** (F-S3, nur bei `FEDERATION_ENABLED=true`): `POST /v1/federation/join`, `GET /v1/federation/peers`, `POST /v1/federation/heartbeat`, `POST`/`GET /v1/federation/events` — siehe "Föderation" oben und `docs/api.md`.
 - **Realtime**: `GET /v1/ws` (WebSocket) — Auth per erster Nachricht (nicht per Query-String-Token), danach `subscribe`/`unsubscribe` auf H3-Tiles.
 
 ## Datenbank / Migrations
@@ -109,6 +125,7 @@ Beide starten automatisch mit dem Server (`src/server.ts`), sauberer Shutdown ü
 
 - **Expiry-Sweep** (`modules/expiry/worker.ts`, standardmäßig jede Minute): setzt abgelaufene `hazard_reports` auf `expired`, publiziert `ReportExpired` an WebSocket-Abonnenten.
 - **Retention-Cleanup** (`modules/expiry/retention.ts`, standardmäßig stündlich): löscht Event-Log-Einträge außerhalb der Aufbewahrungsfenster sowie länger `expired`/`removed` `hazard_reports`-Zeilen.
+- **Föderations-Jobs** (`modules/federation/workers.ts`, nur bei `FEDERATION_ENABLED=true`): Seeds-Beitritt beim Start (einmalig, best-effort), signierte Heartbeats an alle bekannten Peers (Standard alle 60s), Anti-Entropy-Pull pro Peer (Standard alle 300s).
 
 ## Tests
 
@@ -134,6 +151,6 @@ Integrationstests laufen automatisch in CI (`.github/workflows/server-ci.yml`, G
 | F-S0 | Bedrohungsmodell, Entscheidungen zu Replikation/Transport/Signaturen/Verzeichnis/Subdomains/DB-Anbieter, Protokoll-Skizze, Migrationspfad, Plan vorgelegt | ✅ |
 | F-S1 | Docker-Image (Multi-Arch), Compose-Stack, Installation ohne Docker (Apache/nginx/Caddy, systemd), Installations-CI, `docs/threat-model.md` | ✅ |
 | F-S2 | Node-/Wurzelschlüssel + CLI, geräteseitig signierte Auth (additiv), signierte Netzwerk-Konfiguration | ✅ |
-| F-S3 | Föderation: Beitritt, Push/Pull-Replikation, netzwerkweites Moderationsgate | ⬜ |
+| F-S3 | Föderation: Beitritt über Seeds, Peer-Verzeichnis + Gossip, signierte Heartbeats, Push/Pull-Replikation geräteseitig signierter Meldungserstellungen | ✅ |
 | F-S4 | Reputation, Ausschluss, Überlast-Signal, Verzeichnis + Discovery | ⬜ |
 | F-S5 | Mehrknoten-Testnetz, Betreiber-Doku, finale Föderations-Protokollspezifikation — **Abschluss, Pull Request** | ⬜ |

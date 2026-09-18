@@ -119,6 +119,7 @@ describe("signed network config (F-S2)", () => {
       DATABASE_URL: testDb.container.getConnectionUri(),
       JWT_SECRET: "a".repeat(32),
       FEDERATION_ENABLED: "true",
+      FEDERATION_PUBLIC_ADDRESS: "https://node-under-test.example",
       NETWORK_CONFIG_PATH: configPath,
       NETWORK_ROOT_PUBLIC_KEY: root.publicKeyRaw,
     });

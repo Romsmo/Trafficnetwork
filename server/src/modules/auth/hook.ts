@@ -19,6 +19,15 @@ declare module "fastify" {
  * and this node's own public self-description, which by nature has to be
  * fetchable before any credential exchange can happen (a peer server
  * introducing itself, F-S3+) and carries nothing confidential.
+ *
+ * The federation endpoints (F-S3, only registered when FEDERATION_ENABLED —
+ * see app.ts) are public for the same reason as the token exchanges above: a
+ * peer server has no client JWT and never will (it isn't a client) — each
+ * endpoint authenticates itself instead, via a signed envelope
+ * (join/heartbeat/events) or admission-checked sender identity (events push).
+ * Omitting these here would silently require a Bearer token from every other
+ * server in the network, which none of them have — see the identical mistake
+ * caught for /v1/auth/device-token in F-S2.
  */
 const PUBLIC_PATHS = new Set([
   "/v1/health",
@@ -26,6 +35,10 @@ const PUBLIC_PATHS = new Set([
   "/v1/auth/device-token",
   "/v1/ws",
   "/v1/network/node-info",
+  "/v1/federation/join",
+  "/v1/federation/peers",
+  "/v1/federation/heartbeat",
+  "/v1/federation/events",
 ]);
 
 /**

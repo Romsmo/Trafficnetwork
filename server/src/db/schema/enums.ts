@@ -27,3 +27,6 @@ export const entityTypeEnum = pgEnum("entity_type", ENTITY_TYPES);
 export const moderationStatusEnum = pgEnum("moderation_status", ["accepted"]);
 
 export const clientScopeEnum = pgEnum("client_scope", CLIENT_SCOPES);
+
+/** How this server first learned about a federation peer — network_peers.discovered_via (F-S3). */
+export const peerDiscoverySourceEnum = pgEnum("peer_discovery_source", ["seed", "gossip", "join"]);

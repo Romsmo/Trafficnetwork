@@ -78,9 +78,44 @@ const envSchema = z.object({
   // bad/tampered config — see docs/threat-model.md's "Sicherheit vor
   // Bequemlichkeit" framing).
   NETWORK_CONFIG_PATH: z.string().optional(),
+
+  // Federation protocol (F-S3): join over seeds, signed heartbeats,
+  // event push/pull replication. All only relevant/read when
+  // FEDERATION_ENABLED=true — see modules/federation/*.
+  //
+  // This server's own externally-reachable https:// base URL, told to peers
+  // during join/heartbeat so they know how to reach back. Required whenever
+  // FEDERATION_ENABLED is true (enforced by the refine below) — there is no
+  // sensible default for "how the outside world reaches me".
+  FEDERATION_PUBLIC_ADDRESS: z.string().url().optional(),
+  // Comma-separated https:// base URLs of seed servers to join on startup.
+  // Optional even when federating — a server can also be *only* ever joined
+  // *to*, never itself initiate a join (e.g. the network's first server).
+  FEDERATION_SEEDS: z.string().optional(),
+  FEDERATION_HEARTBEAT_INTERVAL_SECONDS: z.coerce.number().int().positive().default(60),
+  FEDERATION_ANTI_ENTROPY_INTERVAL_SECONDS: z.coerce.number().int().positive().default(300),
+  FEDERATION_ANTI_ENTROPY_PAGE_SIZE: z.coerce.number().int().positive().default(200),
+  // How far in the past a replicated event's own timestamp may be and still
+  // be accepted — deliberately generous compared to the 60s freshness window
+  // used for short-lived auth assertions (modules/crypto/envelope.ts), since
+  // anti-entropy is explicitly meant to catch a server back up after being
+  // offline. Defaults to the same span as EVENT_LOG_RETENTION_DAYS_DYNAMIC's
+  // default (3 days = 72h) — an event older than that would be purged again
+  // immediately anyway.
+  FEDERATION_EVENT_MAX_AGE_HOURS: z.coerce.number().int().positive().default(72),
+  // Outbound HTTP timeout for calls to other servers (join/heartbeat/push/pull)
+  // — an unreachable peer must never hang this server's own request handling
+  // or background workers indefinitely.
+  FEDERATION_PEER_TIMEOUT_MS: z.coerce.number().int().positive().default(5000),
 }).refine((env) => !env.NETWORK_CONFIG_PATH || env.NETWORK_ROOT_PUBLIC_KEY, {
   message: "NETWORK_ROOT_PUBLIC_KEY is required whenever NETWORK_CONFIG_PATH is set — a signed config can't be verified without it",
   path: ["NETWORK_ROOT_PUBLIC_KEY"],
+}).refine((env) => !env.FEDERATION_ENABLED || env.FEDERATION_PUBLIC_ADDRESS, {
+  message: "FEDERATION_PUBLIC_ADDRESS is required whenever FEDERATION_ENABLED=true — peers need a reachable address to join/heartbeat back to",
+  path: ["FEDERATION_PUBLIC_ADDRESS"],
+}).refine((env) => !env.FEDERATION_PUBLIC_ADDRESS || env.FEDERATION_PUBLIC_ADDRESS.startsWith("https://"), {
+  message: "FEDERATION_PUBLIC_ADDRESS must be an https:// URL (docs/threat-model.md: no self-hosted server identity over plain HTTP)",
+  path: ["FEDERATION_PUBLIC_ADDRESS"],
 });
 
 export type Env = z.infer<typeof envSchema>;

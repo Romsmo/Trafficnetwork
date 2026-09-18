@@ -4,10 +4,35 @@ import { findHazardReportsByTiles, findHazardReportsNearby } from "../../db/quer
 import { HAZARD_TYPES, NON_CAMERA_HAZARD_TYPES, type HazardType } from "../../config/constants.js";
 import { expandTile } from "../../lib/h3.js";
 import { parseHazardTypes, parseLatLng, parseRadiusM } from "../../lib/query-params.js";
-import { badRequest } from "../../lib/errors.js";
+import { badRequest, conflict } from "../../lib/errors.js";
 import { confirmReport, createOrMergeReport } from "./service.js";
 import { createOrMergeFixedCamera } from "../cameras/service.js";
 import { publishEvent } from "../realtime/publisher.js";
+import { isFreshTimestamp, type SignedEnvelope } from "../crypto/envelope.js";
+import { computeFederationEventId, verifyDeviceCreateEnvelope, type DeviceCreateEventPayload } from "../federation/device-event.js";
+import { broadcastFederationEvents } from "../federation/broadcast.js";
+import { federationEventExists } from "../../db/queries/event-log.js";
+
+const DEVICE_ASSERTION_FRESHNESS_SECONDS = 60;
+
+// .passthrough(): same rationale as every signed-payload schema since F-S2
+// (see modules/auth/routes.ts's deviceTokenBodySchema comment) — reaches
+// verification exactly as the signing device canonicalized it.
+const deviceAssertionSchema = z.object({
+  payload: z
+    .object({
+      kind: z.literal("create"),
+      type: z.enum(HAZARD_TYPES),
+      lat: z.number().min(-90).max(90),
+      lng: z.number().min(-180).max(180),
+      speedKmh: z.number().optional(),
+      devicePublicKey: z.string().min(1),
+      timestamp: z.string(),
+    })
+    .passthrough(),
+  keyId: z.string(),
+  signature: z.string(),
+});
 
 /** Intersects the caller's requested types with what this endpoint is allowed to serve. */
 function resolveTypes(requested: HazardType[] | undefined): HazardType[] {
@@ -50,6 +75,14 @@ export async function registerHazardReportRoutes(app: FastifyInstance) {
     lat: z.number().min(-90).max(90),
     lng: z.number().min(-180).max(180),
     speedKmh: z.number().optional(),
+    // Optional (F-S3): a client whose device has bound a key (POST
+    // /v1/devices/bind-key) can additionally sign the report content itself,
+    // not just the transport/auth. This is what makes the resulting event
+    // eligible for federation replication (modules/federation/*) — see
+    // docs/threat-model.md's "Vertraue Signaturen, nicht Servern". Reports
+    // submitted without it are stored and served locally exactly as before,
+    // just never propagated to other servers.
+    deviceAssertion: deviceAssertionSchema.optional(),
   });
 
   app.post("/v1/hazard-reports", async (req, reply) => {
@@ -63,6 +96,8 @@ export async function registerHazardReportRoutes(app: FastifyInstance) {
     // fixedSpeedCamera is a valid input classification but is never stored as a
     // hazard_reports row — it's routed into fixed_speed_cameras instead (see
     // modules/cameras/service.ts and docs/prompt-phase1-server.md section 6).
+    // Also out of scope for device-content-signing/federation this milestone
+    // (see modules/federation/device-event.ts) — deviceAssertion is ignored here.
     if (input.type === "fixedSpeedCamera") {
       const cameraResult = await createOrMergeFixedCamera(app.deps.db, app.deps.env, {
         lat: input.lat,
@@ -74,14 +109,40 @@ export async function registerHazardReportRoutes(app: FastifyInstance) {
       return { camera: cameraResult.camera, merged: cameraResult.merged };
     }
 
-    const result = await createOrMergeReport(app.deps.db, app.deps.env, {
-      type: input.type,
-      lat: input.lat,
-      lng: input.lng,
-      speedKmh: input.speedKmh,
-      reporterId,
-    });
+    let federation: { federationEventId: string; federationEnvelope: unknown; originNodeId: null } | undefined;
+    let broadcastEnvelope: SignedEnvelope<DeviceCreateEventPayload> | undefined;
+    if (input.deviceAssertion) {
+      const envelope = input.deviceAssertion as SignedEnvelope<DeviceCreateEventPayload>;
+      const p = envelope.payload;
+      if (p.type !== input.type || p.lat !== input.lat || p.lng !== input.lng || (p.speedKmh ?? null) !== (input.speedKmh ?? null)) {
+        throw badRequest("deviceAssertion.payload does not match the submitted report fields");
+      }
+      if (!verifyDeviceCreateEnvelope(envelope)) {
+        throw badRequest("deviceAssertion signature does not verify against its own claimed devicePublicKey");
+      }
+      if (!isFreshTimestamp(p.timestamp, DEVICE_ASSERTION_FRESHNESS_SECONDS)) {
+        throw badRequest("deviceAssertion timestamp is stale or invalid");
+      }
+      const federationEventId = computeFederationEventId(envelope);
+      if (await federationEventExists(app.deps.db, federationEventId)) {
+        // Same signed content resubmitted (e.g. a client retrying after a
+        // dropped response) — the signature is deterministic, so it hashes
+        // to the same federationEventId every time. Reject as a conflict
+        // rather than letting the event_log UNIQUE constraint throw.
+        throw conflict("DUPLICATE_FEDERATION_EVENT", "This exact signed report has already been recorded");
+      }
+      federation = { federationEventId, federationEnvelope: envelope, originNodeId: null };
+      broadcastEnvelope = envelope;
+    }
+
+    const result = await createOrMergeReport(
+      app.deps.db,
+      app.deps.env,
+      { type: input.type, lat: input.lat, lng: input.lng, speedKmh: input.speedKmh, reporterId },
+      federation ? { federation } : undefined,
+    );
     publishEvent(app.realtime, result.event);
+    if (broadcastEnvelope) broadcastFederationEvents(app, [broadcastEnvelope], null);
     reply.status(result.merged ? 200 : 201);
     return { report: result.report, merged: result.merged };
   });

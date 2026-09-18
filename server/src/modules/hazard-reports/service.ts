@@ -27,6 +27,13 @@ export interface CreateReportResult {
   event: Awaited<ReturnType<typeof appendEvent>>;
 }
 
+export interface CreateReportOptions {
+  /** See modules/moderation/gate.ts's ModerationGateOptions — same rationale. */
+  skipRateLimit?: boolean;
+  /** Federation ingestion only (modules/federation/ingest.ts) — attaches the device-signed envelope to the resulting event_log row, whichever event type (Created or Confirmed) the merge-or-create decision produces. */
+  federation?: { federationEventId: string; federationEnvelope: unknown; originNodeId: string | null };
+}
+
 /**
  * docs/concept.md section 5.4: creates a new report, or — if an active report of
  * the same type already exists within DUPLICATE_MERGE_RADIUS_METERS — records this
@@ -34,9 +41,19 @@ export interface CreateReportResult {
  * existing report's expiry on a merge (a fresh "I see this too" is real signal
  * worth propagating to other clients via the emitted event), but only increments
  * confirmCount when this reporter hadn't already confirmed it.
+ *
+ * This same merge-or-create decision is also what makes federation ingestion
+ * (modules/federation/ingest.ts) converge: two servers independently applying
+ * this function to the same set of device events reach the same materialized
+ * state regardless of arrival order, per the F-S0 plan's CRDT-merge decision.
  */
-export async function createOrMergeReport(db: Queryable, env: Env, input: CreateReportInput): Promise<CreateReportResult> {
-  await runModerationGate(db, input.reporterId, input, env);
+export async function createOrMergeReport(
+  db: Queryable,
+  env: Env,
+  input: CreateReportInput,
+  opts?: CreateReportOptions,
+): Promise<CreateReportResult> {
+  await runModerationGate(db, input.reporterId, input, env, { skipRateLimit: opts?.skipRateLimit });
 
   return db.transaction(async (tx) => {
     const existing = await findDuplicateCandidate(tx, input.type, input.lat, input.lng, env.DUPLICATE_MERGE_RADIUS_METERS);
@@ -56,6 +73,7 @@ export async function createOrMergeReport(db: Queryable, env: Env, input: Create
         payload: updated,
         regionTile: updated.regionTile,
         source: "community",
+        ...opts?.federation,
       });
       return { report: updated, merged: true, event };
     }
@@ -82,6 +100,7 @@ export async function createOrMergeReport(db: Queryable, env: Env, input: Create
       payload: created,
       regionTile,
       source: "community",
+      ...opts?.federation,
     });
     return { report: created, merged: false, event };
   });

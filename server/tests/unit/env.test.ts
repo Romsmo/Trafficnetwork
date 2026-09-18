@@ -59,4 +59,31 @@ describe("loadEnv", () => {
     const env = loadEnv({ ...validEnv, NETWORK_CONFIG_PATH: "/tmp/config.json", NETWORK_ROOT_PUBLIC_KEY: "abc" });
     expect(env.NETWORK_CONFIG_PATH).toBe("/tmp/config.json");
   });
+
+  it("rejects FEDERATION_ENABLED=true without FEDERATION_PUBLIC_ADDRESS", () => {
+    resetEnvCache();
+    expect(() => loadEnv({ ...validEnv, FEDERATION_ENABLED: "true" })).toThrow(/FEDERATION_PUBLIC_ADDRESS/);
+  });
+
+  it("rejects a FEDERATION_PUBLIC_ADDRESS that isn't https://", () => {
+    resetEnvCache();
+    expect(() =>
+      loadEnv({ ...validEnv, FEDERATION_ENABLED: "true", FEDERATION_PUBLIC_ADDRESS: "http://insecure.example" }),
+    ).toThrow(/https/);
+  });
+
+  it("accepts FEDERATION_ENABLED=true with a valid https FEDERATION_PUBLIC_ADDRESS", () => {
+    resetEnvCache();
+    const env = loadEnv({ ...validEnv, FEDERATION_ENABLED: "true", FEDERATION_PUBLIC_ADDRESS: "https://node.example" });
+    expect(env.FEDERATION_ENABLED).toBe(true);
+    expect(env.FEDERATION_PUBLIC_ADDRESS).toBe("https://node.example");
+  });
+
+  it("applies federation worker interval defaults", () => {
+    resetEnvCache();
+    const env = loadEnv(validEnv);
+    expect(env.FEDERATION_HEARTBEAT_INTERVAL_SECONDS).toBe(60);
+    expect(env.FEDERATION_ANTI_ENTROPY_INTERVAL_SECONDS).toBe(300);
+    expect(env.FEDERATION_EVENT_MAX_AGE_HOURS).toBe(72);
+  });
 });

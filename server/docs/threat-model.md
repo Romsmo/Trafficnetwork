@@ -50,6 +50,42 @@ from the party that's supposed to vouch for that fact.
 | An algorithm unilaterally excludes a legitimate operator | Network-wide exclusion is only ever a signed network-config entry — no purely local/automatic process can produce it | A malicious *root key holder* could still exclude arbitrarily — out of scope; the root key holder is trusted by construction in this design |
 | Privacy leak via IP+tile correlation on a federated server | Coarse tiles, multi-server spreading (client-lib's responsibility), operator privacy notice requirement | Explicitly accepted residual risk per `docs/federation.md` §5 — not something a server-side change alone can close |
 
+## F-S3 implementation notes
+
+F-S3 built the actual join/gossip/heartbeat/push/pull machinery this
+document's mitigations assume (`modules/federation/*`). Two scoping
+decisions worth recording here, since they narrow what's actually true today
+versus the target design above:
+
+- **Only report *creation* is federated with a device signature so far**,
+  not confirm/deny. A confirm/deny needs to name *which* report it targets
+  by a cross-server-stable id — but that id (`federationEventId`, a hash of
+  the original create envelope) isn't yet exposed back to clients through
+  sync/snapshot/delta, so a device has no way to reference it. Building that
+  requires a coordinated client-lib API change (F-C), not something to guess
+  at from the server side alone. Until then, confirm/deny keeps working
+  exactly as before (locally, via the existing endpoint) but never
+  replicates — a real, documented gap, not a silent one.
+- **Peer admission to push/heartbeat is coarse (must have joined), not the
+  trust source.** Per the "Trust signatures, not servers" principle, a
+  pushed event's *validity* rests entirely on its own device signature —
+  requiring the sender to be a known peer first is anti-spam/rate-limiting,
+  not what makes the event trustworthy. An unknown, never-joined server
+  relaying a genuinely device-signed event would in principle be just as
+  trustworthy as a joined one; requiring a join anyway keeps the push/pull
+  surface from being open to arbitrary internet hosts, matching the join-
+  rate-limiting mitigation in the table above.
+- **A joined peer flooding fabricated-but-validly-self-signed events is a
+  real, distinct threat** from the ones in the table above (a self-signed
+  Ed25519 keypair proves "whoever holds this private key signed this," not
+  "this is a real device") — nothing about signature verification alone
+  stops a peer from generating throwaway keys and signing arbitrary garbage.
+  `POST /v1/federation/events` carries a coarse, IP-based request rate limit
+  (60/minute, `modules/federation/routes.ts`) as a stopgap; a real defense
+  (per-peer reputation, ability to eject a misbehaving peer's traffic
+  without excluding it from the network entirely) is F-S4 scope, not solved
+  here.
+
 ## What this rework does *not* attempt
 
 - Full Sybil resistance (see table above — not achievable in an open-membership system per current literature).

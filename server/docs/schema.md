@@ -99,6 +99,21 @@ the event and the materialized state can never diverge. WebSocket publish
 happens only after that transaction has committed (see
 `modules/realtime/publisher.ts`).
 
+**Federation columns (F-S3, all nullable):** `federation_event_id` (sha256
+hex of a device-signed `SignedEnvelope`'s own `(payload, signature)` — a
+cross-server-stable id, unlike `sequence`, which is a per-server bigserial;
+`UNIQUE`, so re-ingesting the same event twice is a plain insert conflict,
+not a silent duplicate), `federation_envelope` (the envelope itself, kept
+verbatim so the event can be re-broadcast or independently re-verified by
+anyone), `origin_node_id` (the peer this event was received from — `null`
+for a locally originated event; used only to avoid immediately gossiping an
+event back to whoever just sent it, never a trust signal). Set only for
+report-creation events whose reporting device signed the content itself —
+see `modules/federation/device-event.ts` and `docs/api.md`'s
+`POST /v1/hazard-reports` `deviceAssertion` field. Everything before this
+milestone, and every event from a device with no bound key, has all three
+`null`.
+
 **Bulk-import is the one exception**: rows inserted via `/v1/bulk-import/*`
 do not get event-log entries (see `docs/api.md`'s "Bulk import" section for
 why) — a fresh snapshot, not delta, is how clients pick those up.
@@ -151,6 +166,22 @@ not a device signing key — the "never leaves the device" rule in
 `docs/threat-model.md` is about device keys, not this one. Not yet used for
 anything beyond self-description (F-S3 signs heartbeats/join-requests with
 it).
+
+### `network_peers`
+
+Federation peer directory (F-S3, `modules/federation/*`): every other server
+this node has joined with or learned about via gossip (a joined peer's own
+peer list, returned alongside its join response). `node_id` (PK, =
+`keyId(public_key)`), `public_key`, `address` (its `https://` base URL),
+`discovered_via` (`seed`|`gossip`|`join`, set once at first insert),
+`joined_at`, `last_seen_at` (bumped on every successful join/heartbeat/gossip
+contact). `last_pulled_sequence` is local-only bookkeeping for the
+anti-entropy pull worker — the highest `event_log.sequence` this server has
+already pulled *from this specific peer*; never sent to or compared against
+any other server, since sequence numbers aren't comparable across servers
+(each is its own per-process bigserial). Not the reputation-scored,
+network-wide directory planned for F-S4 (`GET /v1/network/nodes`) — just
+"who this server currently knows how to reach."
 
 ### `static_data_state`
 Single-row table (`id` is always `1`) holding `version`, a monotonically

@@ -77,7 +77,7 @@ _Zuletzt aktualisiert: 2026-09-17 von der F-C-Session._
 - [x] Konzept erstellt (`docs/federation.md`), Entscheidung: offene Mitgliedschaft mit Reputation
 - [x] Claude-Code-Prompts erstellt (`docs/prompt-rework-server-federation.md`, `docs/prompt-rework-client-lib-federation.md`)
 - [x] Stand von Phase 2 im Repo klären: P2.0 (Server-Erweiterungen für client-lib) ist auf GitHub; `client-lib/` selbst enthält bewusst noch keinen Code — das ist die eigentliche Phase-2-Client-Bibliothek, eigener, noch nicht gestarteter Auftrag
-- [ ] F-S: Server-Überarbeitung (Docker/Apache/nginx/Caddy, Signaturen, Föderation, Reputation, Verzeichnis) — F-S0 (Plan), F-S1 (Docker/Compose/Installation ohne Docker) und F-S2 (Node-/Wurzelschlüssel + CLI, geräteseitig signierte Auth additiv, signierte Netzwerk-Konfiguration, siehe `server/docs/installation.md`/`api.md`/`schema.md`) fertig, F-S3–F-S5 offen, Branch `rework/server-federation`
+- [ ] F-S: Server-Überarbeitung (Docker/Apache/nginx/Caddy, Signaturen, Föderation, Reputation, Verzeichnis) — F-S0 (Plan), F-S1 (Docker/Compose/Installation ohne Docker), F-S2 (Node-/Wurzelschlüssel + CLI, geräteseitig signierte Auth additiv, signierte Netzwerk-Konfiguration) und F-S3 (Beitritt über Seeds, Peer-Verzeichnis + Gossip, signierte Heartbeats, Push/Pull-Replikation geräteseitig signierter Meldungserstellungen, siehe `server/docs/installation.md`/`api.md`/`schema.md`/`threat-model.md`) fertig, F-S4–F-S5 offen, Branch `rework/server-federation`
 - [ ] F-C: Client-Bibliothek-Überarbeitung (Discovery, Failover, Signaturprüfung, gerätesignierte Meldungen)
 - [ ] Projekt-Domain registrieren, Platzhalter `trafficnetwork.example` ersetzen
 - [ ] Netzwerk-Wurzelschlüssel erzeugen und offline sicher aufbewahren

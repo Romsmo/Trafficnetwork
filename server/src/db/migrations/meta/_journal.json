@@ -36,6 +36,13 @@
       "when": 1789744293906,
       "tag": "0004_cold_starbolt",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1789745702574,
+      "tag": "0005_solid_vindicator",
+      "breakpoints": true
     }
   ]
 }

@@ -6,3 +6,4 @@ export * from "./events.js";
 export * from "./auth.js";
 export * from "./sync-state.js";
 export * from "./node-identity.js";
+export * from "./network-peers.js";

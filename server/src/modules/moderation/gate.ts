@@ -12,7 +12,27 @@ import { checkRateLimit } from "./rate-limit.js";
  * modules/hazard-reports/service.ts) because it must lock the candidate row to
  * avoid a race between two concurrent submissions at the same spot.
  */
-export async function runModerationGate(db: Queryable, reporterId: string, input: HazardReportInput, env: Env): Promise<void> {
+export interface ModerationGateOptions {
+  /**
+   * Federation ingestion (F-S3, modules/federation/ingest.ts): a replicated
+   * device event already passed its origin server's moderation gate — the
+   * per-reporter rate limit exists to blunt *this server's own* API from
+   * being spammed, which doesn't apply to data arriving via replication.
+   * Plausibility is still enforced either way — a bad signed payload from a
+   * misbehaving device is still bad data, federated or not.
+   */
+  skipRateLimit?: boolean;
+}
+
+export async function runModerationGate(
+  db: Queryable,
+  reporterId: string,
+  input: HazardReportInput,
+  env: Env,
+  opts?: ModerationGateOptions,
+): Promise<void> {
   validatePlausibility(input, env);
-  await checkRateLimit(db, reporterId, env);
+  if (!opts?.skipRateLimit) {
+    await checkRateLimit(db, reporterId, env);
+  }
 }

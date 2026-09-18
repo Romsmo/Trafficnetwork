@@ -2,9 +2,11 @@
 
 Base path: `/v1`. All responses are JSON. All routes require authentication
 (`Authorization: Bearer <token>`) except `GET /v1/health`, `POST /v1/auth/token`,
-`POST /v1/auth/device-token`, `GET /v1/network/node-info`, and the `/v1/ws`
-WebSocket upgrade (which authenticates via its own first-message handshake
-instead — see "Real-time push" below).
+`POST /v1/auth/device-token`, `GET /v1/network/node-info`, the `/v1/federation/*`
+endpoints (F-S3, only registered when `FEDERATION_ENABLED=true` — see
+"Federation" below; each authenticates itself via a signed envelope, not a
+client Bearer token), and the `/v1/ws` WebSocket upgrade (which authenticates
+via its own first-message handshake instead — see "Real-time push" below).
 
 ## Error format
 
@@ -139,6 +141,105 @@ the multi-server directory (`GET /v1/network/nodes`, planned for F-S4).
 `server/docs/schema.md`'s `node_identity` table) — stable for the life of
 this server's database.
 
+## Federation (F-S3)
+
+Only registered when `FEDERATION_ENABLED=true` — with the default `false`,
+none of these routes exist at all (404), exactly like today. All five
+authenticate themselves rather than via `Authorization: Bearer` (see the base
+path note above); see `server/docs/threat-model.md`'s "F-S3 implementation
+notes" for what's built so far versus deliberately deferred (confirm/deny
+replication isn't wired up yet).
+
+### `POST /v1/federation/join`
+
+A server introduces itself to another. Self-signed with the joining server's
+own node key — per `docs/federation.md`, the network doesn't vouch for a
+server's identity at join time, only (later, F-S4) for its behavior via
+reputation.
+
+```
+Request:  SignedEnvelope<{ nodeId, publicKey, address: "https://...", requestedAt: "<ISO 8601>" }>
+Response: { "self": { "nodeId", "publicKey", "federationEnabled" }, "peers": [NetworkPeer, ...] }
+```
+
+Rejected (400) if `nodeId !== keyId(publicKey)`, the signature doesn't verify
+against `publicKey`, `requestedAt` is more than 5 minutes old, `address`
+isn't an `https://` URL, or the caller is joining to itself. 403 if the
+joining `nodeId` is in the signed network config's `excludedNodeIds`. On
+success, the peer is upserted into this server's peer directory and the
+current full peer list is returned — this is the entire gossip mechanism
+(no separate gossip protocol): a peer list rides along with every join
+response.
+
+```
+NetworkPeer: { "nodeId", "publicKey", "address", "discoveredVia": "seed"|"gossip"|"join", "joinedAt", "lastSeenAt" }
+```
+
+### `GET /v1/federation/peers`
+
+Returns this server's current peer directory (same `NetworkPeer` shape as
+above). Not the reputation-scored, network-wide directory planned for F-S4 —
+just "who this one server currently knows how to reach."
+
+### `POST /v1/federation/heartbeat`
+
+Signed with the sender's node key, verified against the **stored** public
+key for that `nodeId` (unlike join, a heartbeat doesn't get to assert its own
+identity) — the sender must already be a known peer.
+
+```
+Request:  SignedEnvelope<{ nodeId, address, version, capacityHint?, timestamp }>
+Response: { "acknowledged": true }
+```
+
+404 if `nodeId` isn't a known peer (join first). 400 if the signature doesn't
+verify against the stored key, or `timestamp` is more than 5 minutes stale.
+Updates the peer's `address` (a peer may move) and `lastSeenAt`.
+
+### `POST /v1/federation/events`
+
+Push: a peer forwards device-signed report-creation events. The **coarse**
+admission check (sender must be a known, non-excluded peer) is anti-spam,
+not what makes an event trustworthy — each event's own device signature is
+(`docs/threat-model.md`'s "Trust signatures, not servers").
+
+```
+Request:  { "senderNodeId": "...", "events": [SignedEnvelope<DeviceCreateEvent>, ...] }   (max 100 events)
+Response: { "results": [ { "federationEventId": "<sha256 hex>", "status": "created"|"merged"|"duplicate"|"rejected", "reason"?: "..." } ] }
+
+DeviceCreateEvent: { "kind": "create", "type": "<hazard type, not fixedSpeedCamera>",
+                     "lat", "lng", "speedKmh"?, "devicePublicKey", "timestamp" }
+```
+
+403 if `senderNodeId` isn't a known, non-excluded peer — otherwise every
+event in the batch is processed independently (one bad/forged event doesn't
+fail the others). Per event: signature must verify against its own claimed
+`devicePublicKey` (self-certifying — the receiving server never needs to
+have known this device beforehand), `timestamp` must be within
+`FEDERATION_EVENT_MAX_AGE_HOURS` (default 72h — deliberately much wider than
+the 60s window used for auth assertions, since anti-entropy is explicitly
+meant to catch a server up after being offline), and the report content
+still passes ordinary plausibility checks. `federationEventId` = sha256 of
+the envelope's own `(payload, signature)` — a cross-server-stable id
+independent of any one server's local storage. Newly created/merged events
+are published to this server's own WebSocket subscribers and best-effort
+re-forwarded (gossiped) to its other known peers.
+
+### `GET /v1/federation/events?after=<sequence>&limit=<n>`
+
+Pull: anti-entropy catch-up. `after` is always a cursor *this specific
+server* previously returned — never comparable across different peers (each
+server's `sequence` is its own local, per-process counter).
+
+```
+Response: { "events": [ { "sequence", "federationEventId", "envelope": SignedEnvelope<DeviceCreateEvent>, "occurredAt" } ], "nextAfter": number|null }
+```
+
+`limit` defaults to 200, capped at 500. Open to any caller (like `GET
+/v1/network/node-info`) — the data returned is exactly what's meant to be
+broadcast across the whole network anyway, so there's nothing to gate on a
+read.
+
 ## Reads
 
 All reads require a valid token; none require a specific scope beyond having
@@ -179,9 +280,27 @@ hazard-report response at all; it lives in its own table (see `schema.md`).
 ### `POST /v1/hazard-reports`
 
 ```
-Request:  { "type": "<hazard type>", "lat": number, "lng": number, "speedKmh"?: number }
+Request:  { "type": "<hazard type>", "lat": number, "lng": number, "speedKmh"?: number,
+             "deviceAssertion"?: SignedEnvelope<DeviceCreateEvent> }
 Response: { "report": {...}, "merged": boolean }   — 201 if new, 200 if merged
 ```
+
+`deviceAssertion` is optional (F-S3) — see "Federation" above for the
+`DeviceCreateEvent` shape. When a client's device has bound a key (`POST
+/v1/devices/bind-key`), including it lets the device sign the report content
+itself, not just prove which client is authenticated — this is what makes
+the resulting event eligible for federation replication to other servers
+(`docs/threat-model.md`: "Trust signatures, not servers"). Its `type`/`lat`/
+`lng`/`speedKmh` must exactly match the request body (400 otherwise — a
+device can't sign one thing and submit another), the signature must verify
+against its own claimed `devicePublicKey`, and `timestamp` must be within 60
+seconds. Resubmitting the identical signed assertion returns 409
+`DUPLICATE_FEDERATION_EVENT` rather than creating a second report. Reports
+submitted **without** it are stored and served exactly as before this
+milestone — just never propagated to other servers. Not available for
+`type: "fixedSpeedCamera"` (routed to the camera flow before this is even
+checked — see `server/docs/threat-model.md`'s F-S3 notes for why camera
+federation is out of scope this milestone).
 
 Runs the moderation gate (docs/concept.md section 5.4):
 
