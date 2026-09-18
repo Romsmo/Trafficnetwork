@@ -130,6 +130,28 @@ app-key client that requested them — lets an app's devices be looked up or
 rate-limited (`DEVICE_REGISTRATION_RATE_LIMIT_MAX_PER_DAY`) by app key. Null
 for every client provisioned via `create-client`.
 
+`device_public_key` (nullable, F-S2): an Ed25519 public key (raw base64url),
+set once via `POST /v1/devices/bind-key` — see `docs/api.md`. When set, this
+client can additionally authenticate via `POST /v1/auth/device-token` (a
+signed assertion) alongside the always-available symmetric `clientSecret`
+flow. One-shot — `bindDevicePublicKey()` in `db/queries/clients.ts` only ever
+sets this from `NULL`, never overwrites an existing key (rotation isn't
+built yet).
+
+### `node_identity`
+Single-row table (`id` is always `"self"`) holding this server's own Ed25519
+node identity (`public_key`, `private_key`, both raw base64url) — generated
+once on first boot (`modules/network/node-identity.ts`), unlike
+`static_data_state`'s migration-seeded row, since every server instance
+needs its own unique keypair. Stored in the database rather than a
+file+volume — one less persistence mechanism to operate, and it survives
+container recreation exactly as long as the database does. This is the
+server's *own* identity (exposed publicly at `GET /v1/network/node-info`),
+not a device signing key — the "never leaves the device" rule in
+`docs/threat-model.md` is about device keys, not this one. Not yet used for
+anything beyond self-description (F-S3 signs heartbeats/join-requests with
+it).
+
 ### `static_data_state`
 Single-row table (`id` is always `1`) holding `version`, a monotonically
 increasing counter bumped transactionally by `appendEvent()` (for

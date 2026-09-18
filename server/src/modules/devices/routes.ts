@@ -1,8 +1,17 @@
 import type { FastifyInstance } from "fastify";
-import { countDevicesRegisteredInLastDay, findClientByClientId, insertClient } from "../../db/queries/clients.js";
+import { z } from "zod";
+import { bindDevicePublicKey, countDevicesRegisteredInLastDay, findClientByClientId, insertClient } from "../../db/queries/clients.js";
 import { generateClientId, generateClientSecret, hashSecret } from "../auth/credentials.js";
 import { requireScope } from "../auth/hook.js";
-import { tooManyRequests } from "../../lib/errors.js";
+import { badRequest, conflict, tooManyRequests } from "../../lib/errors.js";
+import { isFreshTimestamp, verifySignedEnvelope, type SignedEnvelope } from "../crypto/envelope.js";
+
+const ASSERTION_FRESHNESS_WINDOW_SECONDS = 60;
+
+interface BindKeyAssertion {
+  publicKey: string;
+  timestamp: string;
+}
 
 /**
  * Anonymous device registration (client-lib P2.0, docs/concept.md section 6):
@@ -56,4 +65,52 @@ export async function registerDeviceRoutes(app: FastifyInstance) {
       return { clientId, clientSecret };
     },
   );
+
+  const bindKeyBodySchema = z.object({
+    // .passthrough() on payload: see the identical comment in
+    // modules/auth/routes.ts's deviceTokenBodySchema — the signed payload
+    // must reach verifySignedEnvelope() exactly as the signer canonicalized
+    // it, not with zod-stripped unrecognized keys.
+    assertion: z.object({
+      payload: z.object({
+        publicKey: z.string().min(1),
+        timestamp: z.string(),
+      }).passthrough(),
+      keyId: z.string(),
+      signature: z.string(),
+    }),
+  });
+
+  /**
+   * Additive migration path (F-S2, docs/threat-model.md): any existing
+   * client — symmetric-secret P1/P2 clients included — can bind a
+   * device-generated Ed25519 key to its own identity, preserving its
+   * clientId/history instead of needing to start over as a stranger.
+   * Authenticated normally (existing Bearer token proves *which* client is
+   * binding); the signed assertion proves possession of the new key's
+   * private half — the payload names its own signer (`publicKey`) and is
+   * verified against exactly that key, which is what actually proves
+   * possession, not the Bearer token. One-shot: see
+   * db/queries/clients.ts's bindDevicePublicKey for why rotation isn't this
+   * endpoint.
+   */
+  app.post("/v1/devices/bind-key", async (req) => {
+    const parsed = bindKeyBodySchema.safeParse(req.body);
+    if (!parsed.success) throw badRequest("Invalid request body", parsed.error.issues);
+
+    const assertion = parsed.data.assertion as SignedEnvelope<BindKeyAssertion>;
+    if (!isFreshTimestamp(assertion.payload.timestamp, ASSERTION_FRESHNESS_WINDOW_SECONDS)) {
+      throw badRequest("Assertion timestamp is stale or invalid");
+    }
+    if (!verifySignedEnvelope(assertion, assertion.payload.publicKey)) {
+      throw badRequest("Assertion signature does not verify against its own claimed publicKey");
+    }
+
+    const bound = await bindDevicePublicKey(app.deps.db, req.auth!.sub, assertion.payload.publicKey);
+    if (!bound) {
+      throw conflict("KEY_ALREADY_BOUND", "This client already has a device key bound, or no longer exists/is revoked");
+    }
+
+    return { bound: true, publicKey: assertion.payload.publicKey };
+  });
 }

@@ -10,20 +10,30 @@ declare module "fastify" {
 }
 
 /**
- * Routes exempt from this hook's header check: infrastructure, the token
- * exchange itself, and the WebSocket upgrade — which still requires a valid
- * credential, just via its own first-message handshake (see
+ * Routes exempt from this hook's header check: infrastructure, both token
+ * exchanges (symmetric and device-signed — a client with no token yet is
+ * exactly who needs to reach these), the WebSocket upgrade — which still
+ * requires a valid credential, just via its own first-message handshake (see
  * modules/realtime/plugin.ts and docs/api.md's "Real-time push" section)
- * rather than a header, so bearer tokens don't end up in proxy/access logs.
+ * rather than a header, so bearer tokens don't end up in proxy/access logs —
+ * and this node's own public self-description, which by nature has to be
+ * fetchable before any credential exchange can happen (a peer server
+ * introducing itself, F-S3+) and carries nothing confidential.
  */
-const PUBLIC_PATHS = new Set(["/v1/health", "/v1/auth/token", "/v1/ws"]);
+const PUBLIC_PATHS = new Set([
+  "/v1/health",
+  "/v1/auth/token",
+  "/v1/auth/device-token",
+  "/v1/ws",
+  "/v1/network/node-info",
+]);
 
 /**
  * Registered once, globally, in app.ts — per docs/prompt-phase1-server.md section 7
  * ("kein Sonderzugang am Auth-System vorbei") every /v1/* route requires a valid
- * client credential except the two paths above. Scope checks are a separate,
- * per-route concern (see requireScope below) since which scope is required varies
- * by endpoint.
+ * client credential except the paths in PUBLIC_PATHS above. Scope checks are a
+ * separate, per-route concern (see requireScope below) since which scope is
+ * required varies by endpoint.
  */
 export async function registerAuthHook(app: FastifyInstance) {
   app.decorateRequest("auth", null);

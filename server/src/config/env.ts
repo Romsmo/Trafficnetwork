@@ -51,6 +51,36 @@ const envSchema = z.object({
   // key may register per rolling day, on top of the per-IP @fastify/rate-limit
   // on the route itself.
   DEVICE_REGISTRATION_RATE_LIMIT_MAX_PER_DAY: z.coerce.number().int().positive().default(50),
+
+  // Self-hosting & federation (Phase F). false = isolated single server,
+  // exactly today's behavior — see docs/federation.md section 4's "Ein
+  // Betreiber kann den Beitritt abschalten" and the F-S0 plan's migration
+  // path. Actual peer-to-peer join/gossip lands in F-S3; this flag exists
+  // now because it already gates the signed-network-config precedence rule
+  // below (F-S2).
+  FEDERATION_ENABLED: z
+    .enum(["true", "false"])
+    .default("false")
+    .transform((v) => v === "true"),
+
+  // The project's network root public key (Ed25519, raw base64url — see
+  // modules/crypto/keys.ts), needed to verify a signed network config.
+  // Optional: a non-federating operator has no network to trust a root key
+  // for. Only ever the public half — the root private key never touches a
+  // running server (docs/threat-model.md).
+  NETWORK_ROOT_PUBLIC_KEY: z.string().optional(),
+
+  // Path to a root-signed network config JSON file (a SignedEnvelope — see
+  // modules/crypto/envelope.ts and modules/network/config.ts), produced
+  // offline by scripts/network-sign-config.mts. Optional; when set, the
+  // server refuses to start unless NETWORK_ROOT_PUBLIC_KEY is also set and
+  // the file verifies against it (fail loudly rather than silently ignore a
+  // bad/tampered config — see docs/threat-model.md's "Sicherheit vor
+  // Bequemlichkeit" framing).
+  NETWORK_CONFIG_PATH: z.string().optional(),
+}).refine((env) => !env.NETWORK_CONFIG_PATH || env.NETWORK_ROOT_PUBLIC_KEY, {
+  message: "NETWORK_ROOT_PUBLIC_KEY is required whenever NETWORK_CONFIG_PATH is set — a signed config can't be verified without it",
+  path: ["NETWORK_ROOT_PUBLIC_KEY"],
 });
 
 export type Env = z.infer<typeof envSchema>;

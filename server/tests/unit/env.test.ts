@@ -41,4 +41,22 @@ describe("loadEnv", () => {
     const second = loadEnv({ ...validEnv, PORT: "9999" });
     expect(second.PORT).toBe(3000);
   });
+
+  it("defaults FEDERATION_ENABLED to false (today's single-server behavior)", () => {
+    resetEnvCache();
+    expect(loadEnv(validEnv).FEDERATION_ENABLED).toBe(false);
+  });
+
+  it("rejects NETWORK_CONFIG_PATH without a matching NETWORK_ROOT_PUBLIC_KEY", () => {
+    resetEnvCache();
+    expect(() => loadEnv({ ...validEnv, NETWORK_CONFIG_PATH: "/tmp/config.json" })).toThrow(
+      /NETWORK_ROOT_PUBLIC_KEY/,
+    );
+  });
+
+  it("accepts NETWORK_CONFIG_PATH when NETWORK_ROOT_PUBLIC_KEY is also set", () => {
+    resetEnvCache();
+    const env = loadEnv({ ...validEnv, NETWORK_CONFIG_PATH: "/tmp/config.json", NETWORK_ROOT_PUBLIC_KEY: "abc" });
+    expect(env.NETWORK_CONFIG_PATH).toBe("/tmp/config.json");
+  });
 });

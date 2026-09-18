@@ -5,3 +5,4 @@ export * from "./hazards.js";
 export * from "./events.js";
 export * from "./auth.js";
 export * from "./sync-state.js";
+export * from "./node-identity.js";

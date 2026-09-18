@@ -1,7 +1,10 @@
 # Server API (Phase 1)
 
 Base path: `/v1`. All responses are JSON. All routes require authentication
-(`Authorization: Bearer <token>`) except `GET /v1/health` and `POST /v1/auth/token`.
+(`Authorization: Bearer <token>`) except `GET /v1/health`, `POST /v1/auth/token`,
+`POST /v1/auth/device-token`, `GET /v1/network/node-info`, and the `/v1/ws`
+WebSocket upgrade (which authenticates via its own first-message handshake
+instead — see "Real-time push" below).
 
 ## Error format
 
@@ -60,6 +63,81 @@ cap (`DEVICE_REGISTRATION_RATE_LIMIT_MAX_PER_DAY`, default 50) — both return
 in the response) traces it back to the app key that requested it, so an
 app's devices can be looked up or bulk-revoked if the app key itself is
 revoked.
+
+### `POST /v1/devices/bind-key` (F-S2)
+
+Binds a device-generated Ed25519 public key to the **caller's own** existing
+client identity (any scope, not just device-registration credentials) —
+authenticated normally via `Authorization: Bearer`. Purely additive: this is
+the "upgrade a P1/P2 symmetric-secret client to also support signed auth"
+step in the federation migration path (`server/docs/threat-model.md`),
+preserving the client's `clientId`/history rather than starting over.
+
+```
+Request:  { "assertion": { "payload": { "publicKey": "<base64url Ed25519>", "timestamp": "<ISO 8601>" },
+                            "keyId": "...", "signature": "<base64url>" } }
+Response: { "bound": true, "publicKey": "<base64url Ed25519>" }
+```
+
+`assertion` is a [`SignedEnvelope`](#signedenvelope) — signed by the **new**
+device key itself, over a payload that names that same key
+(`payload.publicKey`), which is what proves possession of the private half
+(not the Bearer token, which only proves *which* client is asking).
+`timestamp` must be within 60 seconds of server time (replay protection —
+see [`isFreshTimestamp`](#signedenvelope)). One-shot: 409 `KEY_ALREADY_BOUND`
+if the client already has a key bound (key rotation isn't built yet).
+
+### `POST /v1/auth/device-token` (F-S2)
+
+Additive alternative to `POST /v1/auth/token` for a client that has bound a
+device key — same response shape, same downstream scope/auth handling, just
+proved by a signature instead of a shared secret. This is the actual point of
+asymmetric device identity (`docs/federation.md` section 2): any server that
+has this client's *public* key — not just the one that originally issued its
+credential — can verify it, with no secret ever transmitted between servers.
+
+```
+Request:  { "clientId": "...", "assertion": { "payload": { "clientId": "...", "timestamp": "<ISO 8601>" },
+                                                "keyId": "...", "signature": "<base64url>" } }
+Response: { "accessToken": "<jwt>", "tokenType": "Bearer", "expiresIn": 3600, "scopes": [...] }
+```
+
+Verified against the public key stored on that `clientId`'s row (never a key
+supplied in the request) — 401 if the client doesn't exist, is revoked, has
+no bound key, the assertion's `clientId` doesn't match the request's, the
+timestamp is stale, or the signature doesn't verify. All of these return the
+same generic error, deliberately, so the endpoint can't be used to enumerate
+valid client ids (same pattern `/v1/auth/token` already uses).
+
+### `SignedEnvelope`
+
+The one signed-payload shape everything in the federation protocol uses
+(device assertions above; heartbeats, join requests and package manifests in
+F-S3+): `{ "payload": <canonical JSON>, "keyId": "<16 hex chars>", "signature": "<base64url>" }`.
+`payload` is signed as its [RFC 8785](https://www.rfc-editor.org/rfc/rfc8785.xml)
+canonical form (deterministic regardless of key order/whitespace) using
+Ed25519 (Node's native `crypto`, no third-party crypto primitive — see
+`server/docs/threat-model.md`). `keyId` is a short fingerprint of the
+*claimed* signing key, used only as a lookup hint — verification always
+checks the signature against a key the verifier already has an independent
+reason to trust (a client's stored `devicePublicKey`, the configured
+`NETWORK_ROOT_PUBLIC_KEY`, ...), never against `keyId` itself.
+
+## Network
+
+### `GET /v1/network/node-info`
+
+Public (no auth — has to be fetchable before any credential exchange can
+happen, and carries nothing confidential). This server's own identity, not
+the multi-server directory (`GET /v1/network/nodes`, planned for F-S4).
+
+```json
+{ "nodeId": "<16 hex chars>", "publicKey": "<base64url Ed25519>", "federationEnabled": false }
+```
+
+`nodeId`/`publicKey` are generated once on first boot and persisted (see
+`server/docs/schema.md`'s `node_identity` table) — stable for the life of
+this server's database.
 
 ## Reads
 
@@ -242,6 +320,32 @@ Curated subset of server tunables a client-lib instance mirrors locally
 client and server never diverge — normal auth like any other read, no
 dedicated scope. See `modules/config/routes.ts` for the exact field list;
 every value here also exists as an env var documented in `.env.example`.
+
+**F-S2 additions:** `federationEnabled` mirrors `FEDERATION_ENABLED`.
+`networkConfig` is the full [`SignedEnvelope`](#signedenvelope)`<NetworkConfigPayload>`
+(not just its values) when `NETWORK_CONFIG_PATH` is configured, `null`
+otherwise — so a client can independently re-verify it against the network
+root public key it already trusts, rather than taking this server's word for
+`speedCameraNamespaceEnabled` above (which already reflects the network
+config's value if one is loaded — see "Signed network configuration" below).
+
+### Signed network configuration (F-S2)
+
+Set `NETWORK_CONFIG_PATH` to a file produced by `npm run network:sign-config`
+(see `server/README.md`'s "Network keys & signed config" section) and
+`NETWORK_ROOT_PUBLIC_KEY` to the matching root public key, and this server
+verifies and applies it at startup — **refusing to start** if the file is
+missing, unreadable, or doesn't verify (fail loudly rather than silently run
+on an unauthenticated config; `server/docs/threat-model.md`). With neither
+set (the default), a server just uses its own local env config exactly as
+before this milestone.
+
+The **camera-namespace flag is AND-gated, never OR-gated**: a signed config's
+`blitzerEnabled: false` can turn off a server's own locally-enabled flag, but
+`blitzerEnabled: true` can never turn on a server's own locally-disabled one.
+The network can restrict, never grant — per
+`docs/prompt-rework-server-federation.md`'s binding decision "ein lokales
+Env-Flag darf die Netzwerkvorgabe nicht aufheben."
 
 ## Bulk import
 

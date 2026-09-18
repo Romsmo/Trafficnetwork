@@ -22,6 +22,20 @@
       "when": 1789632272825,
       "tag": "0002_sleepy_steve_rogers",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1789743953075,
+      "tag": "0003_marvelous_christian_walker",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1789744293906,
+      "tag": "0004_cold_starbolt",
+      "breakpoints": true
     }
   ]
 }

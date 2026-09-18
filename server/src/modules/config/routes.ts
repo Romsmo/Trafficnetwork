@@ -27,6 +27,13 @@ export async function registerConfigRoutes(app: FastifyInstance) {
       reportRateLimitWindowMinutes: env.REPORT_RATE_LIMIT_WINDOW_MINUTES,
       cameraRemovalThreshold: env.CAMERA_REMOVAL_THRESHOLD,
       staticDataVersion: await getStaticDataVersion(app.deps.db),
+      federationEnabled: env.FEDERATION_ENABLED,
+      // Full signed envelope (payload + keyId + signature), not just the
+      // values — so a client can independently re-verify it against the
+      // network root public key it already trusts, rather than taking this
+      // server's word for speedCameraNamespaceEnabled etc. above. null for a
+      // server with no NETWORK_CONFIG_PATH configured (today's default).
+      networkConfig: app.networkConfig,
     };
   });
 }
