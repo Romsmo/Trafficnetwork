@@ -53,15 +53,30 @@
 - [ ] Mindestens zwei Seed-Server bei unterschiedlichen Anbietern bereitstellen
 - [ ] Betreiberbedingungen für Server-Betreiber + `docs/privacy.md` um Föderation erweitern und rechtlich prüfen lassen
 
-## Phase 3 — Ingestion-Programm (Grundstock-Befüllung) — startet erst nach Phase 2 und Überarbeitung F
-- [ ] Claude-Code-Prompt generieren
+## Phase 3 — Ingestion-Programm (Grundstock-Befüllung) — nach Überarbeitung F
+- [x] Claude-Code-Prompt erstellt (`docs/prompt-phase3-ingestion.md`)
+- [x] Umfang der Erstbefüllung entschieden: **zuerst eine einzelne Region** (Bundesland-Extrakt, ~100 MB); Deutschland/Europa später per Konfiguration
 - [ ] Quellenkatalog vervollständigen, Limits/Lizenzen mit Beleg dokumentieren
-- [ ] OSM-Worker regionsparametrisiert bauen (Start: Europa-Extrakt, weitere Kontinente später per Konfiguration ergänzbar)
-- [ ] API-Keys besorgen (HERE, TomTom, ggf. weitere)
-- [ ] Kill-Switches gegen unerwartete Kosten einbauen
+- [ ] OSM-Worker regionsparametrisiert bauen, Wiederaufnahme nach Abbruch
+- [ ] Weitere Quellen hinter Schaltern inkl. Kill-Switches (HERE/TomTom standardmäßig aus)
 - [ ] Ausschließlich über die öffentliche Bulk-Import-API anbinden (kein privilegierter Zugriff)
 - [ ] Grundbefüllung durchführen, danach Ingestion optional abschalten
 
+## Launch L — Lokaler Testbetrieb auf dem Windows-PC (Docker)
+- [x] Claude-Code-Prompt erstellt (`docs/prompt-launch-local-test.md`)
+- [ ] L1: Docker Desktop (WSL2) einrichten, Compose-Stack starten
+- [ ] L2: Testschlüssel, signierte Netzwerk-Konfiguration, Client-Zugänge (Blitzer-Flag bleibt aus)
+- [ ] L3: Region importieren und verifizieren
+- [ ] L4: Testwerkzeug `tools/test-client/` (Kommandozeile + kleine Weboberfläche) auf Basis der Client-Bibliothek
+- [ ] L5: Abnahmetest inkl. zweitem lokalen Knoten und Failover, Ergebnis in `docs/launch-checklist.md`
+
+## Launch P — Öffentlicher Betrieb (gemieteter Server + Domain)
+- [x] Claude-Code-Prompt erstellt (`docs/prompt-launch-public-server.md`)
+- [ ] Server und Domain besorgen
+- [ ] Echten Netzwerk-Wurzelschlüssel offline erzeugen und verwahren
+- [ ] Knoten öffentlich betreiben, zweiten Knoten beitreten lassen
+- [ ] Backups mit belegtem Wiederherstellungstest, Überwachung, Update-Weg
+- [ ] Betreiberbedingungen + `docs/privacy.md` fertig und rechtlich geprüft — **vor der ersten echten Nutzermeldung**
 ## Danach / separate Projekte
 - [ ] Flutter-App (eigenes Projekt, startet erst wenn Backend steht)
 - [ ] ESP32-Firmware — bereits spezifiziert (`prompt-esp32-blitzer-display.md`), unverändert eigenständig
