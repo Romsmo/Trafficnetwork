@@ -13,6 +13,10 @@ export interface AppendEventInput {
   payload: unknown;
   regionTile?: string | null;
   source: string;
+  /** Federation (F-S3, all optional/null by default) — see db/schema/events.ts's column comments. */
+  federationEventId?: string | null;
+  federationEnvelope?: unknown;
+  originNodeId?: string | null;
 }
 
 /**
@@ -38,6 +42,9 @@ export async function appendEvent(
       payload: input.payload,
       regionTile: input.regionTile ?? null,
       source: input.source,
+      federationEventId: input.federationEventId ?? null,
+      federationEnvelope: input.federationEnvelope ?? null,
+      originNodeId: input.originNodeId ?? null,
     })
     .returning();
 

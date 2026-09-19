@@ -10,20 +10,55 @@ declare module "fastify" {
 }
 
 /**
- * Routes exempt from this hook's header check: infrastructure, the token
- * exchange itself, and the WebSocket upgrade — which still requires a valid
- * credential, just via its own first-message handshake (see
+ * Routes exempt from this hook's header check: infrastructure, both token
+ * exchanges (symmetric and device-signed — a client with no token yet is
+ * exactly who needs to reach these), the WebSocket upgrade — which still
+ * requires a valid credential, just via its own first-message handshake (see
  * modules/realtime/plugin.ts and docs/api.md's "Real-time push" section)
- * rather than a header, so bearer tokens don't end up in proxy/access logs.
+ * rather than a header, so bearer tokens don't end up in proxy/access logs —
+ * and this node's own public self-description, which by nature has to be
+ * fetchable before any credential exchange can happen (a peer server
+ * introducing itself, F-S3+) and carries nothing confidential.
+ *
+ * The federation endpoints (F-S3, only registered when FEDERATION_ENABLED —
+ * see app.ts) are public for the same reason as the token exchanges above: a
+ * peer server has no client JWT and never will (it isn't a client) — each
+ * endpoint authenticates itself instead, via a signed envelope
+ * (join/heartbeat/events) or admission-checked sender identity (events push).
+ * Omitting these here would silently require a Bearer token from every other
+ * server in the network, which none of them have — see the identical mistake
+ * caught for /v1/auth/device-token in F-S2.
+ *
+ * /v1/network/directory (F-S4) is the same "public self-description" case as
+ * node-info, just a bigger payload (self + peer list) — always registered,
+ * even when FEDERATION_ENABLED=false. This one was missed here when it was
+ * built and only caught by CI going red (server-ci #16/#17) — the third
+ * occurrence of this exact class of mistake (device-token in F-S2, the
+ * /v1/federation/* endpoints in F-S3, now this), which is worth naming
+ * plainly rather than writing another comment that quietly repeats it: any
+ * new route that isn't meant to require a client Bearer token needs to be
+ * added here explicitly, and reviewed for at the time it's added, not
+ * discovered later by a failing test.
  */
-const PUBLIC_PATHS = new Set(["/v1/health", "/v1/auth/token", "/v1/ws"]);
+const PUBLIC_PATHS = new Set([
+  "/v1/health",
+  "/v1/auth/token",
+  "/v1/auth/device-token",
+  "/v1/ws",
+  "/v1/network/node-info",
+  "/v1/network/directory",
+  "/v1/federation/join",
+  "/v1/federation/peers",
+  "/v1/federation/heartbeat",
+  "/v1/federation/events",
+]);
 
 /**
  * Registered once, globally, in app.ts — per docs/prompt-phase1-server.md section 7
  * ("kein Sonderzugang am Auth-System vorbei") every /v1/* route requires a valid
- * client credential except the two paths above. Scope checks are a separate,
- * per-route concern (see requireScope below) since which scope is required varies
- * by endpoint.
+ * client credential except the paths in PUBLIC_PATHS above. Scope checks are a
+ * separate, per-route concern (see requireScope below) since which scope is
+ * required varies by endpoint.
  */
 export async function registerAuthHook(app: FastifyInstance) {
   app.decorateRequest("auth", null);

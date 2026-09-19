@@ -17,6 +17,11 @@ import { registerDeviceRoutes } from "./modules/devices/routes.js";
 import { registerConfigRoutes } from "./modules/config/routes.js";
 import { registerRealtimeModule } from "./modules/realtime/plugin.js";
 import type { SubscriptionRegistry } from "./modules/realtime/registry.js";
+import { loadOrCreateNodeIdentity, type NodeIdentity } from "./modules/network/node-identity.js";
+import { registerNetworkRoutes } from "./modules/network/routes.js";
+import { applyNetworkConfigCameraOverride, loadSignedNetworkConfig, type NetworkConfigPayload } from "./modules/network/config.js";
+import type { SignedEnvelope } from "./modules/crypto/envelope.js";
+import { registerFederationRoutes } from "./modules/federation/routes.js";
 
 export interface AppDependencies {
   env: Env;
@@ -27,6 +32,9 @@ declare module "fastify" {
   interface FastifyInstance {
     deps: AppDependencies;
     realtime: SubscriptionRegistry;
+    nodeIdentity: NodeIdentity;
+    /** Full signed envelope (not just the payload) so /v1/config can expose the raw signature for independent client verification. */
+    networkConfig: SignedEnvelope<NetworkConfigPayload> | null;
   }
 }
 
@@ -36,6 +44,15 @@ export async function buildApp(deps: AppDependencies): Promise<FastifyInstance> 
   });
 
   app.decorate("deps", deps);
+
+  // Load and apply the signed network config (if any) before anything else
+  // reads deps.env.SPEED_CAMERA_NAMESPACE_ENABLED, so every downstream call
+  // site (routes, snapshot/delta, static-data manifest) automatically sees
+  // the already-AND-gated effective value without each needing its own
+  // network-config-awareness — see modules/network/config.ts.
+  const networkConfig = await loadSignedNetworkConfig(deps.env);
+  applyNetworkConfigCameraOverride(deps.env, networkConfig?.payload ?? null);
+  app.decorate("networkConfig", networkConfig);
 
   await app.register(cors, { origin: true });
   // global: false — only routes that opt in via `config: { rateLimit: {...} }`
@@ -71,6 +88,8 @@ export async function buildApp(deps: AppDependencies): Promise<FastifyInstance> 
     reply.status(500).send({ error: { code: "INTERNAL_ERROR", message: "Internal server error" } });
   });
 
+  app.decorate("nodeIdentity", await loadOrCreateNodeIdentity(deps.db));
+
   await registerAuthHook(app);
   app.decorate("realtime", await registerRealtimeModule(app));
 
@@ -84,6 +103,14 @@ export async function buildApp(deps: AppDependencies): Promise<FastifyInstance> 
   await registerBulkImportRoutes(app);
   await registerDeviceRoutes(app);
   await registerConfigRoutes(app);
+  await registerNetworkRoutes(app);
+  // Only registered when federating (F-S3) — an isolated server (the
+  // default) has no join/heartbeat/push/pull endpoints at all, exactly like
+  // before this milestone, rather than exposing them but rejecting every
+  // call. See docs/status.md's migration-path note.
+  if (deps.env.FEDERATION_ENABLED) {
+    await registerFederationRoutes(app);
+  }
 
   return app;
 }

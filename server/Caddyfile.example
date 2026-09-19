@@ -1,0 +1,11 @@
+# Example Caddy config for the optional `caddy` service in docker-compose.yml.
+# Copy to `Caddyfile`, replace the placeholder domain, then:
+#   docker compose --profile with-caddy up -d
+#
+# Caddy issues and renews the Let's Encrypt certificate automatically — no
+# separate certbot/ACME client needed. Requires ports 80 and 443 reachable
+# from the internet (for the HTTP-01 challenge and normal traffic).
+
+your-server.example.com {
+	reverse_proxy server:3000
+}

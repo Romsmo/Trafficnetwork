@@ -99,6 +99,21 @@ the event and the materialized state can never diverge. WebSocket publish
 happens only after that transaction has committed (see
 `modules/realtime/publisher.ts`).
 
+**Federation columns (F-S3, all nullable):** `federation_event_id` (sha256
+hex of a device-signed `SignedEnvelope`'s own `(payload, signature)` — a
+cross-server-stable id, unlike `sequence`, which is a per-server bigserial;
+`UNIQUE`, so re-ingesting the same event twice is a plain insert conflict,
+not a silent duplicate), `federation_envelope` (the envelope itself, kept
+verbatim so the event can be re-broadcast or independently re-verified by
+anyone), `origin_node_id` (the peer this event was received from — `null`
+for a locally originated event; used only to avoid immediately gossiping an
+event back to whoever just sent it, never a trust signal). Set only for
+report-creation events whose reporting device signed the content itself —
+see `modules/federation/device-event.ts` and `docs/api.md`'s
+`POST /v1/hazard-reports` `deviceAssertion` field. Everything before this
+milestone, and every event from a device with no bound key, has all three
+`null`.
+
 **Bulk-import is the one exception**: rows inserted via `/v1/bulk-import/*`
 do not get event-log entries (see `docs/api.md`'s "Bulk import" section for
 why) — a fresh snapshot, not delta, is how clients pick those up.
@@ -129,6 +144,57 @@ set only on rows created via `POST /v1/devices/register`, pointing at the
 app-key client that requested them — lets an app's devices be looked up or
 rate-limited (`DEVICE_REGISTRATION_RATE_LIMIT_MAX_PER_DAY`) by app key. Null
 for every client provisioned via `create-client`.
+
+`device_public_key` (nullable, F-S2): an Ed25519 public key (raw base64url),
+set once via `POST /v1/devices/bind-key` — see `docs/api.md`. When set, this
+client can additionally authenticate via `POST /v1/auth/device-token` (a
+signed assertion) alongside the always-available symmetric `clientSecret`
+flow. One-shot — `bindDevicePublicKey()` in `db/queries/clients.ts` only ever
+sets this from `NULL`, never overwrites an existing key (rotation isn't
+built yet).
+
+### `node_identity`
+Single-row table (`id` is always `"self"`) holding this server's own Ed25519
+node identity (`public_key`, `private_key`, both raw base64url) — generated
+once on first boot (`modules/network/node-identity.ts`), unlike
+`static_data_state`'s migration-seeded row, since every server instance
+needs its own unique keypair. Stored in the database rather than a
+file+volume — one less persistence mechanism to operate, and it survives
+container recreation exactly as long as the database does. This is the
+server's *own* identity (exposed publicly at `GET /v1/network/node-info`),
+not a device signing key — the "never leaves the device" rule in
+`docs/threat-model.md` is about device keys, not this one. Not yet used for
+anything beyond self-description (F-S3 signs heartbeats/join-requests with
+it).
+
+### `network_peers`
+
+Federation peer directory (F-S3, `modules/federation/*`): every other server
+this node has joined with or learned about via gossip (a joined peer's own
+peer list, returned alongside its join response). `node_id` (PK, =
+`keyId(public_key)`), `public_key`, `address` (its `https://` base URL),
+`discovered_via` (`seed`|`gossip`|`join`, set once at first insert),
+`joined_at`, `last_seen_at` (bumped on every successful join/heartbeat/gossip
+contact). `last_pulled_sequence` is local-only bookkeeping for the
+anti-entropy pull worker — the highest `event_log.sequence` this server has
+already pulled *from this specific peer*; never sent to or compared against
+any other server, since sequence numbers aren't comparable across servers
+(each is its own per-process bigserial).
+
+**Reputation columns (F-S4, `modules/federation/reputation.ts`):**
+`successful_health_checks` / `consecutive_health_check_failures` — updated
+only by *this* server's own active checks (a heartbeat send or anti-entropy
+pull it initiated), never by anything the peer claims about itself.
+`invalid_signature_count` — cumulative, bumped whenever a push from this
+peer contained an event whose signature didn't verify; per the F-S0 plan,
+any nonzero value alone is disqualifying (immediate demotion), not a
+threshold to cross. `last_known_version` — self-reported by the peer in a
+heartbeat *it* sends us, recorded as plain metadata, not a trust signal.
+None of these four columns are queried directly by API responses — the
+reputation *tier* (`probation`/`active`/`trusted`) shown in
+`GET /v1/network/directory` is always derived from them fresh on read
+(`computeReputationTier`), never stored, so it can't drift out of sync with
+the signals it summarizes.
 
 ### `static_data_state`
 Single-row table (`id` is always `1`) holding `version`, a monotonically

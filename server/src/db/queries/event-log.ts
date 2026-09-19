@@ -107,3 +107,42 @@ export async function getDeltaPage(
     hasMore,
   };
 }
+
+/** True if this federation event has already been ingested (by us, or relayed to us before) — the dedup check every federation ingest path starts with. */
+export async function federationEventExists(db: Queryable, federationEventId: string): Promise<boolean> {
+  const rows = await db.execute<{ found: number } & Record<string, unknown>>(sql`
+    select 1 as found from event_log where federation_event_id = ${federationEventId} limit 1
+  `);
+  return rows.length > 0;
+}
+
+export interface FederationEventPage {
+  events: { sequence: number; federationEventId: string; envelope: unknown; occurredAt: string }[];
+  nextAfter: number | null;
+}
+
+/**
+ * Pull-based anti-entropy (GET /v1/federation/events, modules/federation/routes.ts):
+ * every federation-eligible row (federation_event_id is not null) after a
+ * per-peer cursor. `after` is always a value *this* server previously
+ * returned to the specific peer asking — never compared across peers (see
+ * db/schema/network-peers.ts's lastPulledSequence comment).
+ */
+export async function getFederationEventsSince(db: Queryable, after: number, limit: number): Promise<FederationEventPage> {
+  const rows = await db.execute<
+    { sequence: number; federation_event_id: string; federation_envelope: unknown; occurred_at: string } & Record<string, unknown>
+  >(sql`
+    select sequence, federation_event_id, federation_envelope, occurred_at
+    from event_log
+    where sequence > ${after} and federation_event_id is not null
+    order by sequence asc
+    limit ${limit}
+  `);
+  const events = rows.map((r) => ({
+    sequence: r.sequence,
+    federationEventId: r.federation_event_id,
+    envelope: r.federation_envelope,
+    occurredAt: r.occurred_at,
+  }));
+  return { events, nextAfter: events.at(-1)?.sequence ?? null };
+}

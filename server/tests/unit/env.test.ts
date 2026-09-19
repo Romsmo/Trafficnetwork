@@ -41,4 +41,59 @@ describe("loadEnv", () => {
     const second = loadEnv({ ...validEnv, PORT: "9999" });
     expect(second.PORT).toBe(3000);
   });
+
+  it("defaults FEDERATION_ENABLED to false (today's single-server behavior)", () => {
+    resetEnvCache();
+    expect(loadEnv(validEnv).FEDERATION_ENABLED).toBe(false);
+  });
+
+  it("rejects NETWORK_CONFIG_PATH without a matching NETWORK_ROOT_PUBLIC_KEY", () => {
+    resetEnvCache();
+    expect(() => loadEnv({ ...validEnv, NETWORK_CONFIG_PATH: "/tmp/config.json" })).toThrow(
+      /NETWORK_ROOT_PUBLIC_KEY/,
+    );
+  });
+
+  it("accepts NETWORK_CONFIG_PATH when NETWORK_ROOT_PUBLIC_KEY is also set", () => {
+    resetEnvCache();
+    const env = loadEnv({ ...validEnv, NETWORK_CONFIG_PATH: "/tmp/config.json", NETWORK_ROOT_PUBLIC_KEY: "abc" });
+    expect(env.NETWORK_CONFIG_PATH).toBe("/tmp/config.json");
+  });
+
+  it("rejects FEDERATION_ENABLED=true without FEDERATION_PUBLIC_ADDRESS", () => {
+    resetEnvCache();
+    expect(() => loadEnv({ ...validEnv, FEDERATION_ENABLED: "true" })).toThrow(/FEDERATION_PUBLIC_ADDRESS/);
+  });
+
+  it("rejects a FEDERATION_PUBLIC_ADDRESS that isn't https://", () => {
+    resetEnvCache();
+    expect(() =>
+      loadEnv({ ...validEnv, FEDERATION_ENABLED: "true", FEDERATION_PUBLIC_ADDRESS: "http://insecure.example" }),
+    ).toThrow(/https/);
+  });
+
+  it("accepts FEDERATION_ENABLED=true with a valid https FEDERATION_PUBLIC_ADDRESS", () => {
+    resetEnvCache();
+    const env = loadEnv({ ...validEnv, FEDERATION_ENABLED: "true", FEDERATION_PUBLIC_ADDRESS: "https://node.example" });
+    expect(env.FEDERATION_ENABLED).toBe(true);
+    expect(env.FEDERATION_PUBLIC_ADDRESS).toBe("https://node.example");
+  });
+
+  it("applies federation worker interval defaults", () => {
+    resetEnvCache();
+    const env = loadEnv(validEnv);
+    expect(env.FEDERATION_HEARTBEAT_INTERVAL_SECONDS).toBe(60);
+    expect(env.FEDERATION_ANTI_ENTROPY_INTERVAL_SECONDS).toBe(300);
+    expect(env.FEDERATION_EVENT_MAX_AGE_HOURS).toBe(72);
+  });
+
+  it("applies reputation and overload defaults", () => {
+    resetEnvCache();
+    const env = loadEnv(validEnv);
+    expect(env.REPUTATION_PROBATION_MIN_HOURS).toBe(24);
+    expect(env.REPUTATION_MIN_SUCCESSFUL_HEALTH_CHECKS).toBe(5);
+    expect(env.REPUTATION_TRUSTED_MIN_HOURS).toBe(168);
+    expect(env.REPUTATION_DIRECTORY_PROBATION_MAX_SHARE).toBe(0.5);
+    expect(env.FEDERATION_OVERLOAD_MAX_CONCURRENT_PUSHES).toBe(20);
+  });
 });

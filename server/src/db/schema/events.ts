@@ -23,10 +23,33 @@ export const eventLog = pgTable(
     regionTile: varchar("region_tile", { length: 15 }),
     moderationStatus: moderationStatusEnum("moderation_status").notNull().default("accepted"),
     source: text("source").notNull(),
+    // Federation (F-S3), all nullable — null means "not federation-eligible",
+    // i.e. everything before this milestone and every event whose reporting
+    // device never signed its own content (see modules/federation/device-event.ts).
+    // federationEventId = sha256(canonical({payload, signature})) of the
+    // device-signed SignedEnvelope<DeviceCreateEventPayload> that produced
+    // this row — a cross-server-stable id, unlike `sequence` (per-server,
+    // per-process bigserial). UNIQUE so re-ingesting the same event (pushed
+    // by two different peers, or pushed then pulled) is a plain insert
+    // conflict the ingest path already checks for before writing, not a
+    // silent duplicate.
+    federationEventId: text("federation_event_id").unique(),
+    // The full SignedEnvelope, verbatim — kept so this event can be
+    // re-broadcast to other peers, or re-verified independently by anyone,
+    // without reconstructing it from the (already-derived) materialized payload.
+    federationEnvelope: jsonb("federation_envelope"),
+    // The peer this event was received from (POST /v1/federation/events or
+    // GET /v1/federation/events pull) — null when it originated locally on
+    // this server (a device submitted it directly to us). Used only to avoid
+    // immediately gossiping an event straight back to the peer that just sent
+    // it; never a trust signal (see modules/crypto/envelope.ts's keyId comment
+    // — the same "hint, not a boundary" principle applies here).
+    originNodeId: text("origin_node_id"),
   },
   (t) => [
     index("event_log_occurred_at_idx").on(t.occurredAt),
     index("event_log_region_tile_idx").on(t.regionTile),
     index("event_log_type_idx").on(t.type),
+    index("event_log_federation_event_id_idx").on(t.federationEventId),
   ],
 );

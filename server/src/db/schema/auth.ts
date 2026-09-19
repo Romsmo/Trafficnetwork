@@ -24,4 +24,17 @@ export const clients = pgTable("clients", {
    * client provisioned directly via create-client.
    */
   registeredByClientId: uuid("registered_by_client_id").references((): AnyPgColumn => clients.id),
+  /**
+   * Ed25519 public key (raw base64url — see modules/crypto/keys.ts), set once
+   * a client has bound a device-generated key via POST /v1/devices/bind-key
+   * (F-S2, additive — see docs/threat-model.md's migration path). When set,
+   * the client may also authenticate via POST /v1/auth/device-token (a
+   * signed assertion) instead of the symmetric clientSecret — the point of
+   * federation's asymmetric device identity (docs/federation.md section 2):
+   * a server that never saw this client's secret can still verify a
+   * signature against this public key. Null for every client that hasn't
+   * bound a key yet — the symmetric clientSecret flow keeps working
+   * unchanged either way.
+   */
+  devicePublicKey: text("device_public_key"),
 });

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { isAcceptableFederationAddress } from "../modules/federation/address.js";
 
 const envSchema = z.object({
   DATABASE_URL: z.string().min(1, "DATABASE_URL is required"),
@@ -51,6 +52,95 @@ const envSchema = z.object({
   // key may register per rolling day, on top of the per-IP @fastify/rate-limit
   // on the route itself.
   DEVICE_REGISTRATION_RATE_LIMIT_MAX_PER_DAY: z.coerce.number().int().positive().default(50),
+
+  // Self-hosting & federation (Phase F). false = isolated single server,
+  // exactly today's behavior — see docs/federation.md section 4's "Ein
+  // Betreiber kann den Beitritt abschalten" and the F-S0 plan's migration
+  // path. Actual peer-to-peer join/gossip lands in F-S3; this flag exists
+  // now because it already gates the signed-network-config precedence rule
+  // below (F-S2).
+  FEDERATION_ENABLED: z
+    .enum(["true", "false"])
+    .default("false")
+    .transform((v) => v === "true"),
+
+  // The project's network root public key (Ed25519, raw base64url — see
+  // modules/crypto/keys.ts), needed to verify a signed network config.
+  // Optional: a non-federating operator has no network to trust a root key
+  // for. Only ever the public half — the root private key never touches a
+  // running server (docs/threat-model.md).
+  NETWORK_ROOT_PUBLIC_KEY: z.string().optional(),
+
+  // Path to a root-signed network config JSON file (a SignedEnvelope — see
+  // modules/crypto/envelope.ts and modules/network/config.ts), produced
+  // offline by scripts/network-sign-config.mts. Optional; when set, the
+  // server refuses to start unless NETWORK_ROOT_PUBLIC_KEY is also set and
+  // the file verifies against it (fail loudly rather than silently ignore a
+  // bad/tampered config — see docs/threat-model.md's "Sicherheit vor
+  // Bequemlichkeit" framing).
+  NETWORK_CONFIG_PATH: z.string().optional(),
+
+  // Federation protocol (F-S3): join over seeds, signed heartbeats,
+  // event push/pull replication. All only relevant/read when
+  // FEDERATION_ENABLED=true — see modules/federation/*.
+  //
+  // This server's own externally-reachable https:// base URL, told to peers
+  // during join/heartbeat so they know how to reach back. Required whenever
+  // FEDERATION_ENABLED is true (enforced by the refine below) — there is no
+  // sensible default for "how the outside world reaches me".
+  FEDERATION_PUBLIC_ADDRESS: z.string().url().optional(),
+  // Comma-separated https:// base URLs of seed servers to join on startup.
+  // Optional even when federating — a server can also be *only* ever joined
+  // *to*, never itself initiate a join (e.g. the network's first server).
+  FEDERATION_SEEDS: z.string().optional(),
+  FEDERATION_HEARTBEAT_INTERVAL_SECONDS: z.coerce.number().int().positive().default(60),
+  FEDERATION_ANTI_ENTROPY_INTERVAL_SECONDS: z.coerce.number().int().positive().default(300),
+  FEDERATION_ANTI_ENTROPY_PAGE_SIZE: z.coerce.number().int().positive().default(200),
+  // How far in the past a replicated event's own timestamp may be and still
+  // be accepted — deliberately generous compared to the 60s freshness window
+  // used for short-lived auth assertions (modules/crypto/envelope.ts), since
+  // anti-entropy is explicitly meant to catch a server back up after being
+  // offline. Defaults to the same span as EVENT_LOG_RETENTION_DAYS_DYNAMIC's
+  // default (3 days = 72h) — an event older than that would be purged again
+  // immediately anyway.
+  FEDERATION_EVENT_MAX_AGE_HOURS: z.coerce.number().int().positive().default(72),
+  // Outbound HTTP timeout for calls to other servers (join/heartbeat/push/pull)
+  // — an unreachable peer must never hang this server's own request handling
+  // or background workers indefinitely.
+  FEDERATION_PEER_TIMEOUT_MS: z.coerce.number().int().positive().default(5000),
+
+  // Reputation (F-S4, modules/federation/reputation.ts) — thresholds for the
+  // three-tier probation → active → trusted ladder, all measured from this
+  // server's own active health checks of a peer (never self-reported). See
+  // the F-S0 plan's decision 5 for the reasoning; these are the "konkrete
+  // Zahlen als Vorschlag" it deferred to this milestone.
+  REPUTATION_PROBATION_MIN_HOURS: z.coerce.number().int().positive().default(24),
+  REPUTATION_MIN_SUCCESSFUL_HEALTH_CHECKS: z.coerce.number().int().positive().default(5),
+  REPUTATION_TRUSTED_MIN_HOURS: z.coerce.number().int().positive().default(24 * 7),
+  REPUTATION_TRUSTED_MIN_SUCCESSFUL_HEALTH_CHECKS: z.coerce.number().int().positive().default(50),
+  // Consecutive failed health checks (heartbeat send or anti-entropy pull)
+  // before a peer is demoted back to probation — reset to 0 by any success.
+  REPUTATION_DEMOTE_AFTER_CONSECUTIVE_FAILURES: z.coerce.number().int().positive().default(5),
+  // Directory listing cap for probation-tier peers (GET /v1/network/directory)
+  // — a fraction of the *total* listed peers, not of probation peers alone.
+  // Keeps a brand-new server discoverable without letting a flood of unproven
+  // servers dominate the list (the F-S0 plan's "gedeckelter Verzeichnis-Anteil
+  // für Probezeit-Server").
+  REPUTATION_DIRECTORY_PROBATION_MAX_SHARE: z.coerce.number().min(0).max(1).default(0.5),
+
+  // Overload signal (F-S4): POST /v1/federation/events returns 503 +
+  // Retry-After once this many pushes are being processed concurrently by
+  // this process, rather than degrading everyone's latency under load.
+  FEDERATION_OVERLOAD_MAX_CONCURRENT_PUSHES: z.coerce.number().int().positive().default(20),
+}).refine((env) => !env.NETWORK_CONFIG_PATH || env.NETWORK_ROOT_PUBLIC_KEY, {
+  message: "NETWORK_ROOT_PUBLIC_KEY is required whenever NETWORK_CONFIG_PATH is set — a signed config can't be verified without it",
+  path: ["NETWORK_ROOT_PUBLIC_KEY"],
+}).refine((env) => !env.FEDERATION_ENABLED || env.FEDERATION_PUBLIC_ADDRESS, {
+  message: "FEDERATION_PUBLIC_ADDRESS is required whenever FEDERATION_ENABLED=true — peers need a reachable address to join/heartbeat back to",
+  path: ["FEDERATION_PUBLIC_ADDRESS"],
+}).refine((env) => !env.FEDERATION_PUBLIC_ADDRESS || isAcceptableFederationAddress(env.FEDERATION_PUBLIC_ADDRESS), {
+  message: "FEDERATION_PUBLIC_ADDRESS must be an https:// URL (docs/threat-model.md: no self-hosted server identity over plain HTTP; a bare http://127.0.0.1 or http://localhost loopback literal is the one exception, for local testing)",
+  path: ["FEDERATION_PUBLIC_ADDRESS"],
 });
 
 export type Env = z.infer<typeof envSchema>;
