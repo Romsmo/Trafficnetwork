@@ -2,33 +2,35 @@
 
 > **Zweck:** Zwei Claude-Code-Instanzen arbeiten parallel an getrennten Branches (Server bzw. Client-Bibliothek) und teilen sich keinen Kontext. Diese Datei lebt bewusst direkt auf `main` (nicht auf einem Feature-Branch) und wird von **jeder** Instanz nach jedem abgeschlossenen Meilenstein aktualiziert, committet und gepusht — so sieht die andere Instanz per `git fetch origin main` sofort den aktuellen Stand, ohne den unfertigen Code des anderen Branches anzufassen. `docs/todo.md` bleibt der langfristige Fahrplan; diese Datei ist der kurzfristige "was passiert gerade"-Status.
 
-Letztes Update: 2026-09-19, Server-Instanz — CI jetzt grün, PR nach `main` offen.
+Letztes Update: 2026-09-19, Server-Instanz — Überarbeitung F nach `main` gemergt.
 
 ---
 
-## ✅ Update (Server-Instanz, 2026-09-19): CI ist grün, PR #1 offen
+## ✅ Update (Server-Instanz, 2026-09-19): PR #1 gemergt, F-S0–F-S5 auf `main`
+
+**PR #1 wurde vom Nutzer freigegeben und ist gemergt** (Merge-Commit `d32ae72`). `server-ci` auf `main` ist grün (Lauf [35446013012](https://github.com/Romsmo/Trafficnetwork/actions/runs/35446013012), alle drei Jobs). Damit ist die Voraussetzung für Phase 3 (Ingestion) erfüllt; die Server-Instanz wechselt jetzt auf `phase3/ingestion`.
+
+Vorgeschichte (CI-Fund und Behebung):
 
 Der unten dokumentierte rote CI-Befund ist behoben:
 
 - `GET /v1/network/directory` fehlte in `PUBLIC_PATHS` des Auth-Hooks → 401 statt 200 (dritte Wiederholung desselben Fehlers in dieser Überarbeitung). Behoben in `a1d323f`, dazu eine stehende Regressionsprüfung ergänzt (`tests/integration/auth-public-paths.test.ts`): jede als öffentlich dokumentierte Route wird ohne `Authorization`-Header erreichbar gehalten.
 - `federation-multi-node.test.ts` prüfte Replikation über einen kamera-gefilterten Endpunkt, der die erwartete Meldung strukturell nie sehen konnte — auf `GET /v1/federation/events` umgestellt (`a1d323f`, Nachbesserung `4f38baf` für einen dadurch entstandenen Fehlalarm in der neuen PUBLIC_PATHS-Prüfung).
 - **Neu gefunden, nachdem die 401 behoben war:** `federation-reputation.test.ts` scheiterte danach an `entry.tier` von `undefined` — `applyDirectoryProbationCap()` rundete den Anteil eines einzelnen frisch beigetretenen Peers per `Math.floor(1 * 0.5)` auf 0 herunter und blendete ihn komplett aus dem Verzeichnis aus, obwohl die Funktion selbst dokumentiert "still discoverable, just not able to dominate the list". Behoben in `504b1db`: garantiert einen Platz, wenn sonst kein nicht-Probezeit-Peer das Verzeichnis füllt — außer ein Betreiber setzt den Anteil bewusst auf 0 (bleibt ein gültiger "alle unbewiesenen Peers ausblenden"-Schalter, per bestehendem Test).
-- `server-ci` Lauf [35443320665](https://github.com/Romsmo/Trafficnetwork/actions/runs/35443320665) (Commit `504b1db`) ist **grün** in allen drei Jobs (`install-smoke`, `test`, `docker-build`).
-- **PR nach `main` offen:** [#1](https://github.com/Romsmo/Trafficnetwork/pull/1) — F-S0 bis F-S5, wartet auf Freigabe/Merge durch den Nutzer.
+- `server-ci` Lauf [35443320665](https://github.com/Romsmo/Trafficnetwork/actions/runs/35443320665) (Commit `504b1db`) war **grün** in allen drei Jobs (`install-smoke`, `test`, `docker-build`), danach PR #1 vom Nutzer gemergt.
 
-**Folge:** F-S0–F-S5 gelten jetzt als abgeschlossen (CI grün). Merge liegt beim Nutzer.
+**Folge:** F-S0–F-S5 sind abgeschlossen und auf `main`.
 
-- **Client-Instanz:** `GET /v1/network/directory` ist jetzt in CI verifiziert grün (Form unverändert gegenüber der Doku unten) — Planung dagegen ist nicht mehr an den 401-Vorbehalt gebunden. API kann sich bis zum tatsächlichen Merge von PR #1 noch minimal ändern, ist aber inhaltlich stabil.
+- **Client-Instanz:** `GET /v1/network/directory` ist jetzt in CI verifiziert grün **und auf `main`** — kein Vorbehalt mehr, die Form in `server/docs/api.md`/`schema.md` auf `main` ist der verbindliche Stand.
 - **Geteilter Checkout:** weiterhin gilt — vor jedem Branch-Wechsel `git status` prüfen und nie wechseln, solange fremde Änderungen im Arbeitsverzeichnis liegen.
 
 ---
 
 ## Server (`server/`)
 
-- **Branch:** `rework/server-federation`
-- **Letzter Commit:** `504b1db` — "server: fix probation-cap rounding hiding a lone fresh peer from the directory"
-- **Status:** Code für F-S0–F-S5 ist gepusht, **CI ist grün**. **PR #1 nach `main` offen** ([Romsmo/Trafficnetwork#1](https://github.com/Romsmo/Trafficnetwork/pull/1)), wartet auf Freigabe/Merge durch den Nutzer.
-- **CI:** **Grün.** Lauf [35443320665](https://github.com/Romsmo/Trafficnetwork/actions/runs/35443320665) (`504b1db`) — alle drei Jobs (`install-smoke`, `test`, `docker-build`) erfolgreich. Details zu den drei behobenen Fehlern im Update-Abschnitt oben.
+- **Branch:** `rework/server-federation` — **gemergt nach `main`** (PR [#1](https://github.com/Romsmo/Trafficnetwork/pull/1), Merge-Commit `d32ae72`); Feature-Branch bleibt vorerst bestehen, ist aber nicht mehr der aktive Arbeitsstand.
+- **Status:** **F-S0–F-S5 vollständig auf `main`, abgeschlossen.**
+- **CI:** **Grün auf `main`.** Lauf [35446013012](https://github.com/Romsmo/Trafficnetwork/actions/runs/35446013012) (Merge-Commit `d32ae72`) — alle drei Jobs (`install-smoke`, `test`, `docker-build`) erfolgreich. Details zu den drei zuvor behobenen Fehlern im Update-Abschnitt oben.
 - **Abgeschlossen:**
   - F-S0 — Plan, Bedrohungsmodell (Kurzfassung), acht Entscheidungen mit Beleg, Protokoll-Skizze, Migrationspfad
   - F-S1 — Docker-Image (Multi-Arch amd64+arm64), `docker-compose.yml` (Server+PostGIS+optional Caddy), Installation ohne Docker (`deploy/{apache.conf,nginx.conf,Caddyfile.example,trafficnetwork-server.service}`), `server/docs/installation.md`, volles `server/docs/threat-model.md`, CI-Erweiterung (Multi-Arch-Build-Validierung + echter Apache-Reverse-Proxy-WebSocket-Smoke-Test)
@@ -39,7 +41,7 @@ Der unten dokumentierte rote CI-Befund ist behoben:
 - **Bewusst zurückgestellt (dokumentiert, kein stiller Gap, vollständig konsolidiert in `server/docs/federation-protocol.md` Abschnitt 7):**
   - Confirm/Deny-Replikation — braucht eine für Geräte referenzierbare, serverübergreifende Report-ID (`federationEventId`), die noch nicht über Sync/Snapshot an Clients zurückgegeben wird. Das ist eine **client-lib-Schnittstellenänderung** — siehe "Relevant für die Client-Instanz" unten, falls das für F-C relevant wird.
   - "Server hält Daten zurück"-Erkennung, periodisches Re-Gossip (Discovery ist nur einen Hop tief, nur beim Beitritt), netzwerkweites Rate-Limiting, gewichtete Überlast-Zulassung, ASN-basierte Sybil-Abwehr.
-- **Gerade in Arbeit:** nichts — F-S0–F-S5 abgeschlossen, CI grün, wartet auf Merge von PR #1.
+- **Gerade in Arbeit:** Überarbeitung F ist fertig. Server-Instanz wechselt jetzt zu **Phase 3 (Ingestion-Programm)** auf Branch `phase3/ingestion`, siehe `docs/prompt-phase3-ingestion.md`.
 - **Relevant für die Client-Instanz:**
   - Bestehendes Auth-Modell (`POST /v1/auth/token`, gemeinsames `JWT_SECRET`) bleibt unverändert nutzbar, solange `FEDERATION_ENABLED=false` — reine Zusatzfunktion, kein Bruch.
   - **Neue Endpunkte aus F-S2 (Details: `server/docs/api.md`, Schema: `server/docs/schema.md`):**
