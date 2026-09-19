@@ -1,0 +1,22 @@
+{
+  "regions": {
+    "bayern": {
+      "name": "Bayern",
+      "geofabrikExtractUrl": "https://download.geofabrik.de/europe/germany/bayern-latest.osm.pbf",
+      "geofabrikChecksumUrl": "https://download.geofabrik.de/europe/germany/bayern-latest.osm.pbf.md5",
+      "bbox": [8.975186, 47.26543, 13.84947, 50.56623]
+    },
+    "germany": {
+      "name": "Germany (whole country)",
+      "geofabrikExtractUrl": "https://download.geofabrik.de/europe/germany-latest.osm.pbf",
+      "geofabrikChecksumUrl": "https://download.geofabrik.de/europe/germany-latest.osm.pbf.md5",
+      "bbox": [5.864417, 47.26543, 15.05078, 55.14777]
+    },
+    "europe": {
+      "name": "Europe (whole continent)",
+      "geofabrikExtractUrl": "https://download.geofabrik.de/europe-latest.osm.pbf",
+      "geofabrikChecksumUrl": "https://download.geofabrik.de/europe-latest.osm.pbf.md5",
+      "bbox": [-32.683233, 29.635548, 46.75348, 81.47299]
+    }
+  }
+}

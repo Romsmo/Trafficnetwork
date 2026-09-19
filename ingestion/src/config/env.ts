@@ -1,0 +1,71 @@
+import { z } from "zod";
+
+const envSchema = z
+  .object({
+    SERVER_URL: z.string().url("SERVER_URL must be a valid URL"),
+    CLIENT_ID: z.string().min(1, "CLIENT_ID is required"),
+    CLIENT_SECRET: z.string().min(1, "CLIENT_SECRET is required"),
+
+    // Where per-region/per-source progress state lives (state/store.ts) —
+    // this directory is the *only* thing standing between a resumed run and
+    // re-posting rows the server already accepted (the server itself has no
+    // dedup of its own). Never delete it between runs unless you mean to
+    // duplicate everything already imported.
+    STATE_DIR: z.string().default("./.ingestion-state"),
+
+    // Rows per bulk-import API call. Server hard-caps at 5000; kept well
+    // below that by default so a crash's duplication blast radius (see
+    // state/store.ts) stays small, at the cost of more HTTP round trips.
+    BATCH_SIZE: z.coerce.number().int().positive().max(5000).default(2000),
+
+    HTTP_MAX_RETRIES: z.coerce.number().int().nonnegative().default(5),
+    HTTP_BACKOFF_BASE_MS: z.coerce.number().int().positive().default(500),
+    HTTP_BACKOFF_MAX_MS: z.coerce.number().int().positive().default(30_000),
+
+    LOG_LEVEL: z.enum(["fatal", "error", "warn", "info", "debug", "trace", "silent"]).default("info"),
+
+    // Only OSM is on by default (docs/prompt-phase3-ingestion.md section 1:
+    // "Standardmäßig sind diese Quellen aus; nur OSM ist standardmäßig an").
+    OSM_ENABLED: z.enum(["true", "false"]).default("true").transform((v) => v === "true"),
+    HERE_ENABLED: z.enum(["true", "false"]).default("false").transform((v) => v === "true"),
+    TOMTOM_ENABLED: z.enum(["true", "false"]).default("false").transform((v) => v === "true"),
+    MOBILITHEK_ENABLED: z.enum(["true", "false"]).default("false").transform((v) => v === "true"),
+    AUTOBAHN_API_ENABLED: z.enum(["true", "false"]).default("false").transform((v) => v === "true"),
+
+    // No default: current HERE/TomTom free-tier pricing could not be pinned
+    // to one confirmed authoritative number as of this project's own source
+    // research (see ingestion/docs/sources.md) — a hardcoded limit would
+    // silently encode a figure nobody could verify is still current. The
+    // operator must set this from their own account/contract before either
+    // source can be enabled.
+    HERE_MONTHLY_CALL_LIMIT: z.coerce.number().int().positive().optional(),
+    TOMTOM_MONTHLY_CALL_LIMIT: z.coerce.number().int().positive().optional(),
+  })
+  .refine((env) => !env.HERE_ENABLED || env.HERE_MONTHLY_CALL_LIMIT !== undefined, {
+    message: "HERE_MONTHLY_CALL_LIMIT is required whenever HERE_ENABLED=true — no default exists (see ingestion/docs/sources.md)",
+    path: ["HERE_MONTHLY_CALL_LIMIT"],
+  })
+  .refine((env) => !env.TOMTOM_ENABLED || env.TOMTOM_MONTHLY_CALL_LIMIT !== undefined, {
+    message: "TOMTOM_MONTHLY_CALL_LIMIT is required whenever TOMTOM_ENABLED=true — no default exists (see ingestion/docs/sources.md)",
+    path: ["TOMTOM_MONTHLY_CALL_LIMIT"],
+  });
+
+export type Env = z.infer<typeof envSchema>;
+
+let cachedEnv: Env | undefined;
+
+export function loadEnv(source: NodeJS.ProcessEnv = process.env): Env {
+  if (cachedEnv) return cachedEnv;
+  const parsed = envSchema.safeParse(source);
+  if (!parsed.success) {
+    const issues = parsed.error.issues.map((issue) => `  - ${issue.path.join(".")}: ${issue.message}`).join("\n");
+    throw new Error(`Invalid environment configuration:\n${issues}`);
+  }
+  cachedEnv = parsed.data;
+  return cachedEnv;
+}
+
+/** Test-only: forces the next loadEnv() call to re-parse instead of returning the cached value. */
+export function resetEnvCache(): void {
+  cachedEnv = undefined;
+}
