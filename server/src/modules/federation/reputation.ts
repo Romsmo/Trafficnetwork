@@ -48,6 +48,14 @@ export function computeReputationTier(peer: NetworkPeerApi, env: Env): Reputatio
 export function applyDirectoryProbationCap<T extends { tier: ReputationTier }>(peers: T[], maxProbationShare: number): T[] {
   const nonProbation = peers.filter((p) => p.tier !== "probation");
   const probation = peers.filter((p) => p.tier === "probation");
-  const maxProbationCount = Math.floor(peers.length * maxProbationShare);
+  let maxProbationCount = Math.floor(peers.length * maxProbationShare);
+  // Floor() rounds a lone probation peer's share down to 0 (e.g. 1 peer * 0.5
+  // share), which would make a just-joined server on an otherwise-empty
+  // network permanently undiscoverable — the opposite of "still discoverable,
+  // just not able to dominate the list" above. Only rescue that specific
+  // case: an operator who explicitly zeroes the share out is still obeyed.
+  if (maxProbationCount === 0 && nonProbation.length === 0 && probation.length > 0 && maxProbationShare > 0) {
+    maxProbationCount = 1;
+  }
   return [...nonProbation, ...probation.slice(0, maxProbationCount)];
 }
