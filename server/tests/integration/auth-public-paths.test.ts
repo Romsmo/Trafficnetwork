@@ -49,19 +49,16 @@ describe("auth hook: PUBLIC_PATHS coverage", () => {
     expect(res.statusCode).not.toBe(401);
   });
 
-  it("POST /v1/auth/token is reachable with no Authorization header (not a 401)", async () => {
-    const res = await app.inject({ method: "POST", url: "/v1/auth/token", payload: { clientId: "x", clientSecret: "y" } });
-    expect(res.statusCode).not.toBe(401);
-  });
-
-  it("POST /v1/auth/device-token is reachable with no Authorization header (not a 401)", async () => {
-    const res = await app.inject({
-      method: "POST",
-      url: "/v1/auth/device-token",
-      payload: { clientId: "x", assertion: { payload: { clientId: "x", timestamp: new Date().toISOString() }, keyId: "y", signature: "z" } },
-    });
-    expect(res.statusCode).not.toBe(401);
-  });
+  // POST /v1/auth/token and /v1/auth/device-token are deliberately not
+  // checked here with a blind "not 401" assertion — both legitimately
+  // return 401 for bad credentials/assertions as their own business logic
+  // (see modules/auth/routes.ts), same status code the auth *hook* itself
+  // uses when it blocks a request, so that check would be meaningless for
+  // these two specifically. They're already proven reachable without a
+  // Bearer header by their own dedicated tests elsewhere
+  // (auth-and-bulk-import.test.ts's "issues a token for a valid client
+  // credential", device-signed-auth.test.ts's device-token flow) — both
+  // succeed with no Authorization header sent at all.
 
   it("POST /v1/federation/join is reachable with no Authorization header (not a 401)", async () => {
     const res = await app.inject({ method: "POST", url: "/v1/federation/join", payload: {} });
