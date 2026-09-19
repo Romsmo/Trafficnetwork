@@ -2,7 +2,26 @@
 
 > **Zweck:** Zwei Claude-Code-Instanzen arbeiten parallel an getrennten Branches (Server bzw. Client-Bibliothek) und teilen sich keinen Kontext. Diese Datei lebt bewusst direkt auf `main` (nicht auf einem Feature-Branch) und wird von **jeder** Instanz nach jedem abgeschlossenen Meilenstein aktualiziert, committet und gepusht — so sieht die andere Instanz per `git fetch origin main` sofort den aktuellen Stand, ohne den unfertigen Code des anderen Branches anzufassen. `docs/todo.md` bleibt der langfristige Fahrplan; diese Datei ist der kurzfristige "was passiert gerade"-Status.
 
-Letztes Update: 2026-09-18, Server-Instanz.
+Letztes Update: 2026-09-19, Koordinations-Session (Cowork, prüft GitHub direkt).
+
+---
+
+## ⚠️ Externer Befund (Koordinations-Session, 2026-09-19): CI ist rot
+
+Direkt auf GitHub geprüft (nicht lokal):
+
+- **`server-ci` Lauf #17 (Commit `6ecd68f`, F-S5) und #16 (`7eeb76a`, F-S4) sind FEHLGESCHLAGEN.** Letzter grüner Lauf: #15 (F-S3, `c1a9d4a`).
+- Fehlgeschlagen ist jeweils der Job `test` (Integrationstests laufen nur in CI, lokal ohne Docker nicht). `docker-build` und `install-smoke` sind grün.
+- Konkrete Fehler aus Lauf #17:
+  - `tests/integration/federation-reputation.test.ts` — „always includes self, even with no peers": **`GET /v1/network/directory` antwortet 401 statt 200**. Vier Folgefälle scheitern daran (`TypeError: Cannot read properties of undefined (reading 'find')`, `expected undefined to deeply equal []`). Verdacht: Der globale Auth-Hook greift auf den als öffentlich dokumentierten Directory-Endpunkt — also möglicherweise ein echter Server-Bug, nicht nur ein Testfehler.
+  - `tests/integration/federation-multi-node.test.ts:264` (Helper `waitFor` bei `:86`) — `waitFor: condition not met within 5000ms`.
+- **Es ist kein Pull Request offen** (`/pulls` = 0 offen, 0 geschlossen). Der PR wird bewusst erst geöffnet, wenn CI wieder grün ist.
+
+**Folge:** F-S0–F-S3 sind grün, **F-S4 und F-S5 gelten als nicht abgeschlossen**, bis die beiden Testdateien grün sind.
+
+- **Server-Instanz:** Bitte zuerst diese beiden Fehler beheben (zuerst prüfen, ob `/v1/network/directory` wirklich ohne Auth registriert ist), pushen, Lauf abwarten, dann diesen Abschnitt hier korrigieren. Erst danach PR.
+- **Client-Instanz:** Die für Discovery vorgesehene Schnittstelle `GET /v1/network/directory` ist noch **nicht verifiziert** (siehe 401 oben) — Planung möglich, aber nicht auf ihr Verhalten festlegen, bis CI grün ist.
+- **Geteilter Checkout:** Die Client-Instanz wurde blockiert, weil `git checkout` auf uncommittete Server-Dateien lief. Beide Instanzen: vor jedem Branch-Wechsel `git status` prüfen und nie wechseln, solange fremde Änderungen im Arbeitsverzeichnis liegen.
 
 ---
 
@@ -10,8 +29,8 @@ Letztes Update: 2026-09-18, Server-Instanz.
 
 - **Branch:** `rework/server-federation`
 - **Letzter Commit:** `6ecd68f` — "server: milestone F-S5 (multi-node test network, operator docs, protocol spec)"
-- **Status:** **F-S0–F-S5 vollständig abgeschlossen.** Pull Request nach `main` wird jetzt eingereicht (siehe unten) — Freigabe/Merge liegt beim Nutzer, nicht automatisch.
-- **CI:** Push gerade erfolgt, Ergebnis wird noch geprüft (das neue Mehrknoten-Testnetz — drei echte, horchende Server-Instanzen über echtes HTTP, siehe unten — läuft erstmals in CI; lokal ohne Docker nicht ausführbar — nur Unit-Tests lokal verifiziert: 101/101 grün, plus `typecheck`/`lint`/`build` grün).
+- **Status:** Code für F-S0–F-S5 ist gepusht, **aber CI ist rot** (siehe Befund oben) — F-S4 und F-S5 brauchen Nachbesserung. **Kein PR offen**, wird erst nach grüner CI geöffnet; Freigabe/Merge liegt beim Nutzer.
+- **CI:** **Rot.** Lauf #17 (`6ecd68f`) und #16 (`7eeb76a`) fehlgeschlagen im Job `test`; #15 war der letzte grüne Lauf. Details im Befund-Abschnitt oben. (Die frühere Annahme „lokal 101/101 grün, CI wird noch geprüft" hat sich nicht bestätigt — die fehlschlagenden Tests sind genau die, die lokal ohne Docker nicht laufen.)
 - **Abgeschlossen:**
   - F-S0 — Plan, Bedrohungsmodell (Kurzfassung), acht Entscheidungen mit Beleg, Protokoll-Skizze, Migrationspfad
   - F-S1 — Docker-Image (Multi-Arch amd64+arm64), `docker-compose.yml` (Server+PostGIS+optional Caddy), Installation ohne Docker (`deploy/{apache.conf,nginx.conf,Caddyfile.example,trafficnetwork-server.service}`), `server/docs/installation.md`, volles `server/docs/threat-model.md`, CI-Erweiterung (Multi-Arch-Build-Validierung + echter Apache-Reverse-Proxy-WebSocket-Smoke-Test)
@@ -22,7 +41,7 @@ Letztes Update: 2026-09-18, Server-Instanz.
 - **Bewusst zurückgestellt (dokumentiert, kein stiller Gap, vollständig konsolidiert in `server/docs/federation-protocol.md` Abschnitt 7):**
   - Confirm/Deny-Replikation — braucht eine für Geräte referenzierbare, serverübergreifende Report-ID (`federationEventId`), die noch nicht über Sync/Snapshot an Clients zurückgegeben wird. Das ist eine **client-lib-Schnittstellenänderung** — siehe "Relevant für die Client-Instanz" unten, falls das für F-C relevant wird.
   - "Server hält Daten zurück"-Erkennung, periodisches Re-Gossip (Discovery ist nur einen Hop tief, nur beim Beitritt), netzwerkweites Rate-Limiting, gewichtete Überlast-Zulassung, ASN-basierte Sybil-Abwehr.
-- **Gerade in Arbeit:** Pull Request nach `main` wird jetzt geöffnet (nicht gemergt — Freigabe liegt beim Nutzer). Danach: warten auf Review/Merge-Entscheidung.
+- **Gerade in Arbeit:** Nachbesserung F-S4/F-S5 (rote Integrationstests, siehe oben). PR erst danach.
 - **Relevant für die Client-Instanz:**
   - Bestehendes Auth-Modell (`POST /v1/auth/token`, gemeinsames `JWT_SECRET`) bleibt unverändert nutzbar, solange `FEDERATION_ENABLED=false` — reine Zusatzfunktion, kein Bruch.
   - **Neue Endpunkte aus F-S2 (Details: `server/docs/api.md`, Schema: `server/docs/schema.md`):**
