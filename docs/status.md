@@ -2,35 +2,33 @@
 
 > **Zweck:** Zwei Claude-Code-Instanzen arbeiten parallel an getrennten Branches (Server bzw. Client-Bibliothek) und teilen sich keinen Kontext. Diese Datei lebt bewusst direkt auf `main` (nicht auf einem Feature-Branch) und wird von **jeder** Instanz nach jedem abgeschlossenen Meilenstein aktualiziert, committet und gepusht — so sieht die andere Instanz per `git fetch origin main` sofort den aktuellen Stand, ohne den unfertigen Code des anderen Branches anzufassen. `docs/todo.md` bleibt der langfristige Fahrplan; diese Datei ist der kurzfristige "was passiert gerade"-Status.
 
-Letztes Update: 2026-09-19, Koordinations-Session (Cowork, prüft GitHub direkt).
+Letztes Update: 2026-09-19, Server-Instanz — CI jetzt grün, PR nach `main` offen.
 
 ---
 
-## ⚠️ Externer Befund (Koordinations-Session, 2026-09-19): CI ist rot
+## ✅ Update (Server-Instanz, 2026-09-19): CI ist grün, PR #1 offen
 
-Direkt auf GitHub geprüft (nicht lokal):
+Der unten dokumentierte rote CI-Befund ist behoben:
 
-- **`server-ci` Lauf #17 (Commit `6ecd68f`, F-S5) und #16 (`7eeb76a`, F-S4) sind FEHLGESCHLAGEN.** Letzter grüner Lauf: #15 (F-S3, `c1a9d4a`).
-- Fehlgeschlagen ist jeweils der Job `test` (Integrationstests laufen nur in CI, lokal ohne Docker nicht). `docker-build` und `install-smoke` sind grün.
-- Konkrete Fehler aus Lauf #17:
-  - `tests/integration/federation-reputation.test.ts` — „always includes self, even with no peers": **`GET /v1/network/directory` antwortet 401 statt 200**. Vier Folgefälle scheitern daran (`TypeError: Cannot read properties of undefined (reading 'find')`, `expected undefined to deeply equal []`). Verdacht: Der globale Auth-Hook greift auf den als öffentlich dokumentierten Directory-Endpunkt — also möglicherweise ein echter Server-Bug, nicht nur ein Testfehler.
-  - `tests/integration/federation-multi-node.test.ts:264` (Helper `waitFor` bei `:86`) — `waitFor: condition not met within 5000ms`.
-- **Es ist kein Pull Request offen** (`/pulls` = 0 offen, 0 geschlossen). Der PR wird bewusst erst geöffnet, wenn CI wieder grün ist.
+- `GET /v1/network/directory` fehlte in `PUBLIC_PATHS` des Auth-Hooks → 401 statt 200 (dritte Wiederholung desselben Fehlers in dieser Überarbeitung). Behoben in `a1d323f`, dazu eine stehende Regressionsprüfung ergänzt (`tests/integration/auth-public-paths.test.ts`): jede als öffentlich dokumentierte Route wird ohne `Authorization`-Header erreichbar gehalten.
+- `federation-multi-node.test.ts` prüfte Replikation über einen kamera-gefilterten Endpunkt, der die erwartete Meldung strukturell nie sehen konnte — auf `GET /v1/federation/events` umgestellt (`a1d323f`, Nachbesserung `4f38baf` für einen dadurch entstandenen Fehlalarm in der neuen PUBLIC_PATHS-Prüfung).
+- **Neu gefunden, nachdem die 401 behoben war:** `federation-reputation.test.ts` scheiterte danach an `entry.tier` von `undefined` — `applyDirectoryProbationCap()` rundete den Anteil eines einzelnen frisch beigetretenen Peers per `Math.floor(1 * 0.5)` auf 0 herunter und blendete ihn komplett aus dem Verzeichnis aus, obwohl die Funktion selbst dokumentiert "still discoverable, just not able to dominate the list". Behoben in `504b1db`: garantiert einen Platz, wenn sonst kein nicht-Probezeit-Peer das Verzeichnis füllt — außer ein Betreiber setzt den Anteil bewusst auf 0 (bleibt ein gültiger "alle unbewiesenen Peers ausblenden"-Schalter, per bestehendem Test).
+- `server-ci` Lauf [35443320665](https://github.com/Romsmo/Trafficnetwork/actions/runs/35443320665) (Commit `504b1db`) ist **grün** in allen drei Jobs (`install-smoke`, `test`, `docker-build`).
+- **PR nach `main` offen:** [#1](https://github.com/Romsmo/Trafficnetwork/pull/1) — F-S0 bis F-S5, wartet auf Freigabe/Merge durch den Nutzer.
 
-**Folge:** F-S0–F-S3 sind grün, **F-S4 und F-S5 gelten als nicht abgeschlossen**, bis die beiden Testdateien grün sind.
+**Folge:** F-S0–F-S5 gelten jetzt als abgeschlossen (CI grün). Merge liegt beim Nutzer.
 
-- **Server-Instanz:** Bitte zuerst diese beiden Fehler beheben (zuerst prüfen, ob `/v1/network/directory` wirklich ohne Auth registriert ist), pushen, Lauf abwarten, dann diesen Abschnitt hier korrigieren. Erst danach PR.
-- **Client-Instanz:** Die für Discovery vorgesehene Schnittstelle `GET /v1/network/directory` ist noch **nicht verifiziert** (siehe 401 oben) — Planung möglich, aber nicht auf ihr Verhalten festlegen, bis CI grün ist.
-- **Geteilter Checkout:** Die Client-Instanz wurde blockiert, weil `git checkout` auf uncommittete Server-Dateien lief. Beide Instanzen: vor jedem Branch-Wechsel `git status` prüfen und nie wechseln, solange fremde Änderungen im Arbeitsverzeichnis liegen.
+- **Client-Instanz:** `GET /v1/network/directory` ist jetzt in CI verifiziert grün (Form unverändert gegenüber der Doku unten) — Planung dagegen ist nicht mehr an den 401-Vorbehalt gebunden. API kann sich bis zum tatsächlichen Merge von PR #1 noch minimal ändern, ist aber inhaltlich stabil.
+- **Geteilter Checkout:** weiterhin gilt — vor jedem Branch-Wechsel `git status` prüfen und nie wechseln, solange fremde Änderungen im Arbeitsverzeichnis liegen.
 
 ---
 
 ## Server (`server/`)
 
 - **Branch:** `rework/server-federation`
-- **Letzter Commit:** `6ecd68f` — "server: milestone F-S5 (multi-node test network, operator docs, protocol spec)"
-- **Status:** Code für F-S0–F-S5 ist gepusht, **aber CI ist rot** (siehe Befund oben) — F-S4 und F-S5 brauchen Nachbesserung. **Kein PR offen**, wird erst nach grüner CI geöffnet; Freigabe/Merge liegt beim Nutzer.
-- **CI:** **Rot.** Lauf #17 (`6ecd68f`) und #16 (`7eeb76a`) fehlgeschlagen im Job `test`; #15 war der letzte grüne Lauf. Details im Befund-Abschnitt oben. (Die frühere Annahme „lokal 101/101 grün, CI wird noch geprüft" hat sich nicht bestätigt — die fehlschlagenden Tests sind genau die, die lokal ohne Docker nicht laufen.)
+- **Letzter Commit:** `504b1db` — "server: fix probation-cap rounding hiding a lone fresh peer from the directory"
+- **Status:** Code für F-S0–F-S5 ist gepusht, **CI ist grün**. **PR #1 nach `main` offen** ([Romsmo/Trafficnetwork#1](https://github.com/Romsmo/Trafficnetwork/pull/1)), wartet auf Freigabe/Merge durch den Nutzer.
+- **CI:** **Grün.** Lauf [35443320665](https://github.com/Romsmo/Trafficnetwork/actions/runs/35443320665) (`504b1db`) — alle drei Jobs (`install-smoke`, `test`, `docker-build`) erfolgreich. Details zu den drei behobenen Fehlern im Update-Abschnitt oben.
 - **Abgeschlossen:**
   - F-S0 — Plan, Bedrohungsmodell (Kurzfassung), acht Entscheidungen mit Beleg, Protokoll-Skizze, Migrationspfad
   - F-S1 — Docker-Image (Multi-Arch amd64+arm64), `docker-compose.yml` (Server+PostGIS+optional Caddy), Installation ohne Docker (`deploy/{apache.conf,nginx.conf,Caddyfile.example,trafficnetwork-server.service}`), `server/docs/installation.md`, volles `server/docs/threat-model.md`, CI-Erweiterung (Multi-Arch-Build-Validierung + echter Apache-Reverse-Proxy-WebSocket-Smoke-Test)
@@ -41,7 +39,7 @@ Direkt auf GitHub geprüft (nicht lokal):
 - **Bewusst zurückgestellt (dokumentiert, kein stiller Gap, vollständig konsolidiert in `server/docs/federation-protocol.md` Abschnitt 7):**
   - Confirm/Deny-Replikation — braucht eine für Geräte referenzierbare, serverübergreifende Report-ID (`federationEventId`), die noch nicht über Sync/Snapshot an Clients zurückgegeben wird. Das ist eine **client-lib-Schnittstellenänderung** — siehe "Relevant für die Client-Instanz" unten, falls das für F-C relevant wird.
   - "Server hält Daten zurück"-Erkennung, periodisches Re-Gossip (Discovery ist nur einen Hop tief, nur beim Beitritt), netzwerkweites Rate-Limiting, gewichtete Überlast-Zulassung, ASN-basierte Sybil-Abwehr.
-- **Gerade in Arbeit:** Nachbesserung F-S4/F-S5 (rote Integrationstests, siehe oben). PR erst danach.
+- **Gerade in Arbeit:** nichts — F-S0–F-S5 abgeschlossen, CI grün, wartet auf Merge von PR #1.
 - **Relevant für die Client-Instanz:**
   - Bestehendes Auth-Modell (`POST /v1/auth/token`, gemeinsames `JWT_SECRET`) bleibt unverändert nutzbar, solange `FEDERATION_ENABLED=false` — reine Zusatzfunktion, kein Bruch.
   - **Neue Endpunkte aus F-S2 (Details: `server/docs/api.md`, Schema: `server/docs/schema.md`):**
