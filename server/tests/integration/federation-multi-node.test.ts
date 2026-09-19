@@ -261,9 +261,18 @@ describe("multi-node federation network (F-S5)", () => {
     });
     expect(res.statusCode).toBe(201);
 
+    // Can't confirm replication via /v1/hazard-reports/nearby — that
+    // endpoint structurally excludes every camera-adjacent type regardless
+    // of any flag (docs/api.md: "always excludes all five, regardless of
+    // the namespace flag"), and /v1/speed-cameras/nearby is exactly the
+    // flag-gated read this test is trying to distinguish from replication
+    // itself. GET /v1/federation/events is unfiltered by either, so it's
+    // the right place to confirm the event actually reached B.
     await waitFor(async () => {
-      const reports = await reportsNear(b, 40, 40);
-      return reports.length > 0 ? reports : undefined;
+      const pull = await b.app.inject({ method: "GET", url: "/v1/federation/events?after=0&limit=200" });
+      const events = pull.json().events as { envelope: { payload: { lat: number; lng: number } } }[];
+      const found = events.some((e) => e.envelope.payload.lat === 40 && e.envelope.payload.lng === 40);
+      return found ? true : undefined;
     });
 
     // The underlying data replicated (writes are never namespace-gated —

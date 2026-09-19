@@ -28,6 +28,17 @@ declare module "fastify" {
  * Omitting these here would silently require a Bearer token from every other
  * server in the network, which none of them have — see the identical mistake
  * caught for /v1/auth/device-token in F-S2.
+ *
+ * /v1/network/directory (F-S4) is the same "public self-description" case as
+ * node-info, just a bigger payload (self + peer list) — always registered,
+ * even when FEDERATION_ENABLED=false. This one was missed here when it was
+ * built and only caught by CI going red (server-ci #16/#17) — the third
+ * occurrence of this exact class of mistake (device-token in F-S2, the
+ * /v1/federation/* endpoints in F-S3, now this), which is worth naming
+ * plainly rather than writing another comment that quietly repeats it: any
+ * new route that isn't meant to require a client Bearer token needs to be
+ * added here explicitly, and reviewed for at the time it's added, not
+ * discovered later by a failing test.
  */
 const PUBLIC_PATHS = new Set([
   "/v1/health",
@@ -35,6 +46,7 @@ const PUBLIC_PATHS = new Set([
   "/v1/auth/device-token",
   "/v1/ws",
   "/v1/network/node-info",
+  "/v1/network/directory",
   "/v1/federation/join",
   "/v1/federation/peers",
   "/v1/federation/heartbeat",
