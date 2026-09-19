@@ -2,7 +2,7 @@
 
 > **Zweck:** Zwei Claude-Code-Instanzen arbeiten parallel an getrennten Branches (Server bzw. Client-Bibliothek) und teilen sich keinen Kontext. Diese Datei lebt bewusst direkt auf `main` (nicht auf einem Feature-Branch) und wird von **jeder** Instanz nach jedem abgeschlossenen Meilenstein aktualiziert, committet und gepusht — so sieht die andere Instanz per `git fetch origin main` sofort den aktuellen Stand, ohne den unfertigen Code des anderen Branches anzufassen. `docs/todo.md` bleibt der langfristige Fahrplan; diese Datei ist der kurzfristige "was passiert gerade"-Status.
 
-Letztes Update: 2026-09-19, Server-Instanz — Überarbeitung F nach `main` gemergt.
+Letztes Update: 2026-09-19, Ingestion-Instanz — P3.1 (Gerüst) fertig, siehe neuen Abschnitt "Ingestion" unten.
 
 ---
 
@@ -54,6 +54,23 @@ Der unten dokumentierte rote CI-Befund ist behoben:
     - **Achtung, noch offen:** die entstehende `federationEventId` (serverübergreifend stabile Meldungs-ID) wird aktuell **nicht** über `/v1/snapshot`/`/v1/delta` an Clients zurückgegeben — falls F-C das für Confirm/Deny-Föderation später braucht, ist das ein Server-API-Änderungswunsch, bitte hier vermerken.
   - **Neu aus F-S4:** `GET /v1/network/directory` (öffentlich, kein Auth, immer registriert — auch ohne Föderation, dann mit leerer Peer-Liste) ist das für Discovery gedachte Verzeichnis: `{ self: {...}, peers: [{nodeId, publicKey, address, tier: "probation"|"active"|"trusted", discoveredVia, joinedAt, lastSeenAt, lastKnownVersion}], generatedAt }`. `GET /v1/federation/peers` (F-S3, nur bei `FEDERATION_ENABLED=true`) bleibt die interne, unbewertete "wen kenne ich"-Liste mit den rohen Reputationszählern — für Client-Discovery ist `directory` die richtige Wahl.
   - `SignedEnvelope`-Format (gilt für alle signierten Payloads): `{ payload: T, keyId: string, signature: string }`, Signatur = Ed25519 über RFC-8785-kanonisiertem `payload`. `keyId` ist nur ein Lookup-Hinweis, niemals selbst die Vertrauensquelle.
+
+## Ingestion (`ingestion/`)
+
+- **Branch:** `phase3/ingestion` (von `main` nach dem F-Merge abgezweigt, `d32ae72`).
+- **Status:** P3.0 (Plan) und P3.1 (Gerüst) abgeschlossen, Commit `b31679a`. P3.2 (echter OSM-Worker) ist als Nächstes dran.
+- **P3.0 — Entscheidungen (voll begründet + belegt in `ingestion/docs/sources.md` und im gebilligten Plan dieser Session):**
+  - Stack: Node/TypeScript (wie `server/`).
+  - OSM-Verarbeitung: `osmium-tool` als Subprozess (`tags-filter` + `export --output-format=geojsonseq`), nicht `osm2pgsql`/`pyosmium`/reine Node-PBF-Parser/Overpass — Begründung und Alternativen-Vergleich in `docs/sources.md`.
+  - Einheiten unverändert aus der Quelle übernommen (kmh/mph), nie umgerechnet.
+  - Dedup/Idempotenz: **serverseitig gibt es keinerlei Dedup** auf den drei Bulk-Import-Tabellen (reines `INSERT`, kein Unique-Constraint — direkt im Code verifiziert, `server/src/db/queries/bulk-import.ts`). Deshalb komplett clientseitig gelöst: NDJSON-Fortschrittsprotokoll pro (Region, Quelle), ein `fsync`-gesicherter Eintrag pro erfolgreich bestätigtem Batch, beim Fortsetzen in ein Dedup-Set eingelesen. Akzeptierter, dokumentierter Rest-Fall: ein harter Abbruch exakt im `fsync`-Fenster kann höchstens einen Batch doppelt importieren.
+  - Batchgröße Standard 2000 (Server-Hardlimit 5000), exponentielles Backoff bei 5xx/429.
+  - Quellenkatalog: OSM Standard an, alle anderen (HERE, TomTom, Mobilithek, Autobahn-API) Standard aus, dieser Runde **nur katalogisiert, nicht implementiert** (Nutzer-Entscheidung: keine HERE/TomTom-Zugänge vorhanden, kein konkreter Mobilithek-Datensatz gewählt, Autobahn-API-Code 3+ Jahre unverändert). HERE/TomTom-Kill-Switch-Limits haben **bewusst keinen Default** — aktuelle Preise ließen sich nicht auf eine verlässliche, primäre Quelle festnageln (siehe `docs/sources.md`).
+  - **Erste Region: Bayern** (Nutzer-Entscheidung, ~812MB Geofabrik-Extrakt, 457.027 `maxspeed`-Ways / 91.551 `traffic_sign`-Vorkommen laut taginfo.geofabrik.de, Stand 2026-09-18) — deutlich über der ursprünglichen "~100MB"-Leitplanke aus `docs/prompt-phase3-ingestion.md`, hier festgehalten statt stillschweigend ersetzt. `germany` und `europe` sind im selben `config/regions.json` bereits konfiguriert (gleicher Code, nur größere Extrakte).
+  - **Abgelehnt:** Der Nutzer bot einen Datensatz (~500 Blitzer-/Baustellen-/Gefahren-Einträge, Bayern+Tirol, aus eigenem Foren-Scraper) zur Ingestion an und bat darum, das `source`-Feld auf `undefined` zu setzen. Beides abgelehnt — keine identifizierbare Einzelquelle mit prüfbaren Bedingungen, Ursprungsdaten gehören Dritten (Forenautoren) ohne erkennbare Zustimmung zur Weiterverteilung über ein föderiertes Netzwerk, und ein verschleiertes `source`-Feld würde genau den Zweck der Provenienz-Pflicht unterlaufen (spätere Quellen-Bereinigung). Dokumentiert in `ingestion/docs/sources.md`.
+- **P3.1 — Gerüst (`ingestion/src/`):** Zod-Konfiguration (`.env` + `config/regions.json`), Auth-Client (`POST /v1/auth/token`, Token-Cache), generischer Batch/Dedup/Resume-Treiber (`pipeline/run-worker.ts`) hinter einem `SourceWorker`-Interface (nur "osm" muss in P3.2 real implementiert werden), strukturiertes Logging (pino), CLI (`npm run ingest -- --region bayern [--dry-run|--fresh|--batch-size]`). 33 Unit-Tests grün, `typecheck`/`lint` grün. Kein echter OSM-Worker — `OSM_ENABLED=true` gegen einen echten Server bricht bewusst laut ab, statt still nichts zu tun, bis P3.2 einen Worker registriert.
+- **Gerade in Arbeit:** P3.2 — echter OSM-Worker (Download+Checksum, `osmium`-Aufruf, Normalisierung inkl. `DE:motorway`/`DE:living_street`-Sonderfälle, Anbindung an den P3.1-Treiber).
+- **Kein eigener CI-Workflow bisher** — `.github/workflows/ingestion-ci.yml` ist P3.4 (nach dem echten OSM-Worker).
 
 ## Client-Bibliothek (`client-lib/`)
 
