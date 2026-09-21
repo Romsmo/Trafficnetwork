@@ -201,7 +201,9 @@ mod tests {
     #[test]
     fn upsert_hazard_reports_replaces_by_id_rather_than_duplicating() {
         let store = InMemoryStore::new();
-        store.upsert_hazard_reports(&[sample_report("hr1")]).unwrap();
+        store
+            .upsert_hazard_reports(&[sample_report("hr1")])
+            .unwrap();
         let mut updated = sample_report("hr1");
         updated.confirm_count = 3;
         store.upsert_hazard_reports(&[updated]).unwrap();
@@ -214,7 +216,9 @@ mod tests {
     #[test]
     fn remove_hazard_report_deletes_by_id() {
         let store = InMemoryStore::new();
-        store.upsert_hazard_reports(&[sample_report("hr1"), sample_report("hr2")]).unwrap();
+        store
+            .upsert_hazard_reports(&[sample_report("hr1"), sample_report("hr2")])
+            .unwrap();
         store.remove_hazard_report("hr1").unwrap();
         let all = store.all_entities().unwrap();
         assert_eq!(all.hazard_reports.len(), 1);
@@ -224,7 +228,9 @@ mod tests {
     #[test]
     fn clear_static_data_leaves_hazard_reports_untouched() {
         let store = InMemoryStore::new();
-        store.upsert_hazard_reports(&[sample_report("hr1")]).unwrap();
+        store
+            .upsert_hazard_reports(&[sample_report("hr1")])
+            .unwrap();
         store.set_partition_hash("tileA", "hash1").unwrap();
         store.clear_static_data().unwrap();
 

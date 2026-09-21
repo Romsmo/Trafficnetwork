@@ -2,10 +2,15 @@
 //! federation-aware `discovery::DiscoveryService`, with a per-server cursor
 //! persisted through `storage::Store` (F-C0 plan §1.4).
 
+pub mod auth;
 pub mod types;
 
+pub use auth::{
+    bind_device_key, device_token, exchange_client_secret, register_device, AuthError,
+    BindKeyResponse, DeviceRegistration, TokenResponse,
+};
 pub use types::{
     effective_camera_namespace_enabled, ClientConfig, DeltaPage, EventLogEntry, FixedSpeedCamera,
-    Geometry, HazardReport, HazardType, NetworkConfigPayload, PartitionContent,
-    PartitionSummary, SnapshotResult, SpeedLimitSegment, StaticDataManifest, StaticSign,
+    Geometry, HazardReport, HazardType, NetworkConfigPayload, PartitionContent, PartitionSummary,
+    SnapshotResult, SpeedLimitSegment, StaticDataManifest, StaticSign,
 };
