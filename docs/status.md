@@ -2,7 +2,7 @@
 
 > **Zweck:** Zwei Claude-Code-Instanzen arbeiten parallel an getrennten Branches (Server bzw. Client-Bibliothek) und teilen sich keinen Kontext. Diese Datei lebt bewusst direkt auf `main` (nicht auf einem Feature-Branch) und wird von **jeder** Instanz nach jedem abgeschlossenen Meilenstein aktualiziert, committet und gepusht — so sieht die andere Instanz per `git fetch origin main` sofort den aktuellen Stand, ohne den unfertigen Code des anderen Branches anzufassen. `docs/todo.md` bleibt der langfristige Fahrplan; diese Datei ist der kurzfristige "was passiert gerade"-Status.
 
-Letztes Update: 2026-09-21, Launch-L-Instanz — L0+L1 (Docker-Setup, Compose-Stack läuft) fertig, siehe Abschnitt "Launch L" unten.
+Letztes Update: 2026-09-21, Launch-L-Instanz — L2 (Test-Schlüssel, signierte Netzwerkkonfiguration, drei Test-Clients) fertig, siehe Abschnitt "Launch L" unten.
 
 ---
 
@@ -92,13 +92,14 @@ Der unten dokumentierte rote CI-Befund ist behoben:
 ## Launch L — lokaler Test (`launch/local-test`, Nutzer-PC, Windows+Docker)
 
 - **Branch:** `launch/local-test` (von `main` abgezweigt) für alles, was ins Repo kommt (Testwerkzeug, Doku). Läuft in einem eigenen Worktree (`TrafficNetwork-launch-local-test`), ebenso `rework/server-federation` in `TrafficNetwork-server-launch` — der Haupt-Checkout bleibt unangetastet, weil dort die Client-Instanz mit uncommitteten Änderungen arbeitet.
-- **Status:** L0 (Bestandsaufnahme) und L1 (Docker + Compose-Stack) abgeschlossen.
+- **Status:** L0 (Bestandsaufnahme), L1 (Docker + Compose-Stack) und L2 (Test-Schlüssel/Zugänge) abgeschlossen.
 - **L0-Befund:** Zum Start dieser Session waren die im Launch-Prompt genannten Voraussetzungen noch nicht erfüllt (F noch nicht auf `main`, `client-lib/`+`ingestion/` ohne Code) — mittlerweile durch die anderen Instanzen überholt, siehe Abschnitte oben: F ist gemergt, `client-lib` bei F-C2, `ingestion` bei P3.1 (OSM-Worker/P3.2 fehlt noch, daher für L3 weiterhin manueller Bulk-Import-Fallback geplant).
 - **L1 (Docker + Stack):** Docker Desktop lokal eingerichtet (WSL2-Backend, Daten auf `D:\DockerData` statt `C:`, das nur ~6,6GB frei hatte). Dabei einen bekannten Docker-Desktop-4.88–4.91-Bug getroffen (AF_UNIX-Socket-Reparse-Points lassen sich nach Absturz/Neustart nicht erneuern, `docker/desktop-feedback#679`) — behoben über `"EnableDockerAI": false` in `settings-store.json` plus einmaliges Verschieben der betroffenen Ordner. Separat: Norton 360 scannt HTTPS (auch WSL2-Traffic) und signiert Zertifikate mit einem eigenen Root-CA um, was `npm ci` im Docker-Build mit `UNABLE_TO_VERIFY_LEAF_SIGNATURE` scheitern ließ — lokal (nicht committet) im Dockerfile per `NODE_EXTRA_CA_CERTS` auf das (bereits von Windows selbst vertraute) Norton-Root-Zertifikat behoben, nutzerfreigegeben.
   - Compose-Stack (`server/docker-compose.yml`, Branch `rework/server-federation`) läuft: `GET /v1/health` → `{"status":"ok","database":"ok"}`, Postgres+Server beide "healthy", Logs sauber, `FEDERATION_ENABLED=false` (Default), Datenbank auf benanntem Volume.
 - **Region:** Bayern (Nutzer-Entscheidung, konsistent mit der Ingestion-Instanz oben).
 - **Abgelehnt:** Anfrage, Blitzer-Standorte von blitzer.de (bzw. dessen inoffizieller API `cdn2.atudo.net`) zu scrapen — proprietäre/kommerzielle Datenbank, ToS/Datenbankrecht-Risiko, und das Blitzer-Flag bleibt für diesen Test ohnehin aus.
-- **Gerade in Arbeit:** L2 (Test-Schlüssel/Zugänge), danach L3 (Befüllung, Fallback: manueller Bulk-Import) und L4 (Testwerkzeug `tools/test-client/`, vorerst direkt gegen HTTP statt gegen `client-lib`, da F-C3/Sync-Engine dort noch nicht fertig ist).
+- **L2 (Test-Schlüssel/Zugänge):** Test-Wurzelschlüssel + signierte Netzwerkkonfiguration erzeugt (`server/scripts/network-{generate-root-key,sign-config}.mts`, via einem lokal gebauten Toolbox-Image aus der `build`-Dockerfile-Stage, da die Skripte `tsx`/DevDependencies brauchen, die im Laufzeit-Image fehlen). Über `server/docker-compose.override.yml` (durch `*.override.yml` bereits gitignored) eingebunden, `GET /v1/config` bestätigt: `federationEnabled: false`, signierte `networkConfig` mit `blitzerEnabled: false` korrekt verifiziert. Drei Test-Clients angelegt (`create-client.mts`, Scopes `bulk-import`/`device-registration`/`client`). Alles (Wurzelschlüssel, Config, Client-Zugangsdaten) liegt **ausschließlich lokal, nicht versioniert** in `server/local-secrets/` (eigene README dort) — ausdrücklich Test-Schlüssel, nicht der spätere echte Netzwerk-Wurzelschlüssel.
+- **Gerade in Arbeit:** L3 (Befüllung, Fallback: manueller Bulk-Import über den `launch-l-bulk-import`-Client) und L4 (Testwerkzeug `tools/test-client/`, vorerst direkt gegen HTTP statt gegen `client-lib`, da F-C3/Sync-Engine dort noch nicht fertig ist).
 - **Relevant für die anderen Instanzen:** Kein Zugriff auf/keine Änderung an `server/`/`client-lib/`/`ingestion/`-Code von hier aus (nur lokale, nicht committete Dockerfile-Anpassung für den eigenen Rechner). Sobald P3.2 (echter OSM-Worker) landet, wechselt L3 vermutlich vom manuellen Fallback auf das echte Ingestion-Tool.
 
 ## Wie diese Datei genutzt wird
