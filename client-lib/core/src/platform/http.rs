@@ -24,7 +24,12 @@ pub struct HttpRequest {
 
 impl HttpRequest {
     pub fn get(url: impl Into<String>) -> Self {
-        Self { method: HttpMethod::Get, url: url.into(), headers: Vec::new(), body: None }
+        Self {
+            method: HttpMethod::Get,
+            url: url.into(),
+            headers: Vec::new(),
+            body: None,
+        }
     }
 
     pub fn post_json(url: impl Into<String>, body: &serde_json::Value) -> Result<Self, HttpError> {
@@ -100,7 +105,9 @@ impl ReqwestHttpTransport {
     /// constructor is fallible everywhere rather than infallible on native
     /// and panicking on wasm32.
     pub fn new() -> Result<Self, HttpError> {
-        let client = reqwest::Client::builder().build().map_err(|e| HttpError::Network(e.to_string()))?;
+        let client = reqwest::Client::builder()
+            .build()
+            .map_err(|e| HttpError::Network(e.to_string()))?;
         Ok(Self { client })
     }
 }
@@ -127,9 +134,16 @@ impl HttpTransport for ReqwestHttpTransport {
         if let Some(body) = request.body {
             builder = builder.body(body);
         }
-        let response = builder.send().await.map_err(|e| HttpError::Network(e.to_string()))?;
+        let response = builder
+            .send()
+            .await
+            .map_err(|e| HttpError::Network(e.to_string()))?;
         let status = response.status().as_u16();
-        let body = response.bytes().await.map_err(|e| HttpError::Network(e.to_string()))?.to_vec();
+        let body = response
+            .bytes()
+            .await
+            .map_err(|e| HttpError::Network(e.to_string()))?
+            .to_vec();
         Ok(HttpResponse { status, body })
     }
 }
@@ -140,10 +154,22 @@ mod tests {
 
     #[test]
     fn response_is_success_checks_2xx_range() {
-        let ok = HttpResponse { status: 200, body: vec![] };
-        let created = HttpResponse { status: 201, body: vec![] };
-        let not_found = HttpResponse { status: 404, body: vec![] };
-        let server_error = HttpResponse { status: 500, body: vec![] };
+        let ok = HttpResponse {
+            status: 200,
+            body: vec![],
+        };
+        let created = HttpResponse {
+            status: 201,
+            body: vec![],
+        };
+        let not_found = HttpResponse {
+            status: 404,
+            body: vec![],
+        };
+        let server_error = HttpResponse {
+            status: 500,
+            body: vec![],
+        };
         assert!(ok.is_success());
         assert!(created.is_success());
         assert!(!not_found.is_success());
@@ -152,9 +178,12 @@ mod tests {
 
     #[test]
     fn post_json_sets_content_type_and_encodes_body() {
-        let req = HttpRequest::post_json("https://example.test/x", &serde_json::json!({ "a": 1 })).unwrap();
+        let req = HttpRequest::post_json("https://example.test/x", &serde_json::json!({ "a": 1 }))
+            .unwrap();
         assert_eq!(req.method, HttpMethod::Post);
-        assert!(req.headers.contains(&("Content-Type".to_string(), "application/json".to_string())));
+        assert!(req
+            .headers
+            .contains(&("Content-Type".to_string(), "application/json".to_string())));
         assert_eq!(req.body.unwrap(), br#"{"a":1}"#);
     }
 }

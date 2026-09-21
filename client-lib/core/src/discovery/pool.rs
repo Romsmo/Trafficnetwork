@@ -67,7 +67,9 @@ impl KnownServer {
     }
 
     pub fn is_backed_off(&self, now_unix_ms: i64) -> bool {
-        self.backoff_until_unix_ms.map(|until| now_unix_ms < until).unwrap_or(false)
+        self.backoff_until_unix_ms
+            .map(|until| now_unix_ms < until)
+            .unwrap_or(false)
     }
 }
 
@@ -78,7 +80,10 @@ pub struct ServerPool {
 
 impl ServerPool {
     pub fn new(pool_size: usize) -> Self {
-        Self { servers: HashMap::new(), pool_size }
+        Self {
+            servers: HashMap::new(),
+            pool_size,
+        }
     }
 
     /// Merges a freshly fetched directory in — new servers are added, and
@@ -94,7 +99,12 @@ impl ServerPool {
                     s.address = peer.address.clone();
                 })
                 .or_insert_with(|| {
-                    KnownServer::new(peer.node_id.clone(), peer.public_key.clone(), peer.address.clone(), peer.tier)
+                    KnownServer::new(
+                        peer.node_id.clone(),
+                        peer.public_key.clone(),
+                        peer.address.clone(),
+                        peer.tier,
+                    )
                 });
         }
     }
@@ -102,14 +112,22 @@ impl ServerPool {
     /// For seeding the pool with a server reached directly (a built-in seed,
     /// or a host-app-supplied fixed `nodes[]` entry) before any directory
     /// has ever been fetched from it.
-    pub fn add_known_server(&mut self, node_id: String, public_key: String, address: String, tier: ReputationTier) {
+    pub fn add_known_server(
+        &mut self,
+        node_id: String,
+        public_key: String,
+        address: String,
+        tier: ReputationTier,
+    ) {
         self.servers
             .entry(node_id.clone())
             .or_insert_with(|| KnownServer::new(node_id, public_key, address, tier));
     }
 
     pub fn record_success(&mut self, node_id: &str, latency_ms: f64) {
-        let Some(server) = self.servers.get_mut(node_id) else { return };
+        let Some(server) = self.servers.get_mut(node_id) else {
+            return;
+        };
         server.consecutive_failures = 0;
         server.backoff_until_unix_ms = None;
         server.push_outcome(true);
@@ -126,7 +144,9 @@ impl ServerPool {
     /// source — kept out of this function so the backoff math itself stays
     /// deterministic and unit-testable.
     pub fn record_failure(&mut self, node_id: &str, now_unix_ms: i64, jitter_fraction: f64) {
-        let Some(server) = self.servers.get_mut(node_id) else { return };
+        let Some(server) = self.servers.get_mut(node_id) else {
+            return;
+        };
         server.push_outcome(false);
         server.consecutive_failures += 1;
         let exponent = server.consecutive_failures.min(20); // guards against overflow in 2^n at high counts
@@ -158,20 +178,33 @@ impl ServerPool {
     /// to `pool_size`. `jitter_fractions` supplies one `0.0..=1.0` value per
     /// eligible server (order-independent — matched up by node_id), from
     /// the caller's own random source.
-    pub fn current_pool(&self, now_unix_ms: i64, jitter_fractions: &HashMap<String, f64>) -> Vec<String> {
+    pub fn current_pool(
+        &self,
+        now_unix_ms: i64,
+        jitter_fractions: &HashMap<String, f64>,
+    ) -> Vec<String> {
         let mut ranked: Vec<(String, f64)> = self
             .servers
             .values()
             .filter(|s| !s.is_backed_off(now_unix_ms))
             .map(|s| {
                 let jitter = jitter_fractions.get(&s.node_id).copied().unwrap_or(0.0);
-                let inputs = ScoreInputs { tier: s.tier, latency_ema_ms: s.latency_ema_ms, error_rate: s.error_rate(), jitter };
+                let inputs = ScoreInputs {
+                    tier: s.tier,
+                    latency_ema_ms: s.latency_ema_ms,
+                    error_rate: s.error_rate(),
+                    jitter,
+                };
                 let withholding_penalty = s.withholding_strikes as f64 * 2.0;
                 (s.node_id.clone(), score(&inputs) - withholding_penalty)
             })
             .collect();
         ranked.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
-        ranked.into_iter().take(self.pool_size).map(|(id, _)| id).collect()
+        ranked
+            .into_iter()
+            .take(self.pool_size)
+            .map(|(id, _)| id)
+            .collect()
     }
 
     pub fn known_server_count(&self) -> usize {
@@ -212,7 +245,10 @@ mod tests {
     #[test]
     fn ingesting_a_directory_adds_new_servers() {
         let mut pool = ServerPool::new(3);
-        pool.ingest_directory(&directory_with_peers(&[("a", ReputationTier::Active), ("b", ReputationTier::Trusted)]));
+        pool.ingest_directory(&directory_with_peers(&[
+            ("a", ReputationTier::Active),
+            ("b", ReputationTier::Trusted),
+        ]));
         assert_eq!(pool.known_server_count(), 2);
     }
 
@@ -230,7 +266,10 @@ mod tests {
     #[test]
     fn a_backed_off_server_is_excluded_from_the_current_pool() {
         let mut pool = ServerPool::new(3);
-        pool.ingest_directory(&directory_with_peers(&[("a", ReputationTier::Trusted), ("b", ReputationTier::Probation)]));
+        pool.ingest_directory(&directory_with_peers(&[
+            ("a", ReputationTier::Trusted),
+            ("b", ReputationTier::Probation),
+        ]));
         pool.record_failure("a", 1_000, 0.0);
         let jitters = HashMap::new();
         let selected = pool.current_pool(1_000, &jitters); // still within backoff window
@@ -287,7 +326,10 @@ mod tests {
     #[test]
     fn withholding_strikes_reduce_a_servers_effective_rank() {
         let mut pool = ServerPool::new(1);
-        pool.ingest_directory(&directory_with_peers(&[("a", ReputationTier::Trusted), ("b", ReputationTier::Trusted)]));
+        pool.ingest_directory(&directory_with_peers(&[
+            ("a", ReputationTier::Trusted),
+            ("b", ReputationTier::Trusted),
+        ]));
         for _ in 0..10 {
             pool.record_withholding_suspicion("a");
         }

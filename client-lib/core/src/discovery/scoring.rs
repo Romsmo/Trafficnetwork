@@ -37,7 +37,10 @@ pub fn score(inputs: &ScoreInputs) -> f64 {
     // No measurement yet is treated as a moderate (not maximal) penalty —
     // an unmeasured server should get a chance to be tried, but a proven
     // fast one should still usually rank higher than a complete unknown.
-    let latency_ms = inputs.latency_ema_ms.unwrap_or(LATENCY_SATURATION_MS / 2.0).min(LATENCY_SATURATION_MS);
+    let latency_ms = inputs
+        .latency_ema_ms
+        .unwrap_or(LATENCY_SATURATION_MS / 2.0)
+        .min(LATENCY_SATURATION_MS);
     let latency_penalty = (latency_ms / LATENCY_SATURATION_MS) * reputation_scale(reputation);
 
     let error_penalty = inputs.error_rate.clamp(0.0, 1.0) * reputation_scale(reputation) * 2.0;
@@ -58,7 +61,12 @@ mod tests {
     use super::*;
 
     fn inputs(tier: ReputationTier, latency_ms: Option<f64>, error_rate: f64) -> ScoreInputs {
-        ScoreInputs { tier, latency_ema_ms: latency_ms, error_rate, jitter: 0.0 }
+        ScoreInputs {
+            tier,
+            latency_ema_ms: latency_ms,
+            error_rate,
+            jitter: 0.0,
+        }
     }
 
     #[test]
@@ -87,7 +95,11 @@ mod tests {
     #[test]
     fn an_unmeasured_server_is_not_penalized_as_harshly_as_a_confirmed_slow_one() {
         let unmeasured = score(&inputs(ReputationTier::Active, None, 0.0));
-        let confirmed_slow = score(&inputs(ReputationTier::Active, Some(LATENCY_SATURATION_MS), 0.0));
+        let confirmed_slow = score(&inputs(
+            ReputationTier::Active,
+            Some(LATENCY_SATURATION_MS),
+            0.0,
+        ));
         assert!(unmeasured > confirmed_slow);
     }
 
@@ -95,7 +107,11 @@ mod tests {
     fn probation_server_is_never_scored_below_zero_by_latency_alone_at_zero_error_rate() {
         // Discoverable, not unusable — matches the server directory's own
         // "capped share, not hidden" design for probation-tier peers.
-        let worst_case = score(&inputs(ReputationTier::Probation, Some(LATENCY_SATURATION_MS), 0.0));
+        let worst_case = score(&inputs(
+            ReputationTier::Probation,
+            Some(LATENCY_SATURATION_MS),
+            0.0,
+        ));
         assert!(worst_case > 0.0);
     }
 }

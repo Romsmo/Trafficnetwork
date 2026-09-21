@@ -24,9 +24,13 @@ sha2 = "0.10"
 hex = "0.4"
 chrono = "0.4"
 # default-features off: skips default-tls (native-tls/openssl) in favor of
-# rustls-tls (no system OpenSSL dependency) — rustls-tls is a no-op on
-# wasm32, where reqwest delegates TLS to the browser's own fetch() instead.
-reqwest = { version = "0.13", default-features = false, features = ["rustls-tls"] }
+# rustls (no system OpenSSL dependency), with webpki-roots for bundled
+# Mozilla root certs rather than depending on each target platform's own
+# cert store. Both are a no-op on wasm32, where reqwest delegates TLS to the
+# browser's own fetch() instead. Feature named "rustls-tls" in older
+# reqwest releases — renamed to "rustls" as of 0.13 (confirmed against the
+# actual available-features list in a CI failure, not assumed).
+reqwest = { version = "0.13", default-features = false, features = ["rustls", "webpki-roots"] }
 # HttpTransport/Clock (platform/) need dyn-dispatchable async trait methods
 # for host-app-supplied implementations — native async-fn-in-trait isn't
 # object-safe as of this Rust version, async-trait remains the standard

@@ -10,4 +10,6 @@ pub mod clock;
 pub mod http;
 
 pub use clock::{Clock, SystemClock};
-pub use http::{HttpError, HttpMethod, HttpRequest, HttpResponse, HttpTransport, ReqwestHttpTransport};
+pub use http::{
+    HttpError, HttpMethod, HttpRequest, HttpResponse, HttpTransport, ReqwestHttpTransport,
+};

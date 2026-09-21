@@ -30,7 +30,9 @@ impl std::fmt::Display for DiscoveryError {
             DiscoveryError::NoServersAvailable => write!(f, "no servers available to try"),
             DiscoveryError::Transport(e) => write!(f, "transport error: {e}"),
             DiscoveryError::InvalidResponse(msg) => write!(f, "invalid response: {msg}"),
-            DiscoveryError::AllServersFailed => write!(f, "every server in the current pool failed"),
+            DiscoveryError::AllServersFailed => {
+                write!(f, "every server in the current pool failed")
+            }
         }
     }
 }
@@ -49,7 +51,11 @@ pub struct DiscoveryConfig {
 
 impl Default for DiscoveryConfig {
     fn default() -> Self {
-        Self { seeds: Vec::new(), pool_size: 3, directory_ttl_ms: 30 * 60 * 1000 }
+        Self {
+            seeds: Vec::new(),
+            pool_size: 3,
+            directory_ttl_ms: 30 * 60 * 1000,
+        }
     }
 }
 
@@ -66,9 +72,19 @@ pub struct DiscoveryService {
 }
 
 impl DiscoveryService {
-    pub fn new(transport: Arc<dyn HttpTransport>, clock: Arc<dyn Clock>, config: DiscoveryConfig) -> Self {
+    pub fn new(
+        transport: Arc<dyn HttpTransport>,
+        clock: Arc<dyn Clock>,
+        config: DiscoveryConfig,
+    ) -> Self {
         let pool = Mutex::new(ServerPool::new(config.pool_size));
-        Self { transport, clock, config, pool, cache_meta: Mutex::new(None) }
+        Self {
+            transport,
+            clock,
+            config,
+            pool,
+            cache_meta: Mutex::new(None),
+        }
     }
 
     /// True once at least one directory fetch has ever succeeded (or a fixed
@@ -96,7 +112,12 @@ impl DiscoveryService {
     pub fn seed_fixed_nodes(&self, nodes: &[(String, String)]) {
         let mut pool = self.pool.lock().unwrap();
         for (node_id, address) in nodes {
-            pool.add_known_server(node_id.clone(), String::new(), address.clone(), ReputationTier::Active);
+            pool.add_known_server(
+                node_id.clone(),
+                String::new(),
+                address.clone(),
+                ReputationTier::Active,
+            );
         }
     }
 
@@ -113,17 +134,27 @@ impl DiscoveryService {
 
         let mut last_error = None;
         for base_url in candidates {
-            let request = HttpRequest::get(format!("{}/v1/network/directory", base_url.trim_end_matches('/')));
+            let request = HttpRequest::get(format!(
+                "{}/v1/network/directory",
+                base_url.trim_end_matches('/')
+            ));
             match self.transport.send(request).await {
                 Ok(response) if response.is_success() => match parse_directory(&response) {
                     Ok(directory) => {
                         self.pool.lock().unwrap().ingest_directory(&directory);
-                        *self.cache_meta.lock().unwrap() = Some(CachedDirectory { fetched_at_unix_ms: self.clock.now_unix_ms() });
+                        *self.cache_meta.lock().unwrap() = Some(CachedDirectory {
+                            fetched_at_unix_ms: self.clock.now_unix_ms(),
+                        });
                         return Ok(());
                     }
                     Err(e) => last_error = Some(e),
                 },
-                Ok(response) => last_error = Some(DiscoveryError::InvalidResponse(format!("HTTP {}", response.status))),
+                Ok(response) => {
+                    last_error = Some(DiscoveryError::InvalidResponse(format!(
+                        "HTTP {}",
+                        response.status
+                    )))
+                }
                 Err(e) => last_error = Some(DiscoveryError::Transport(e)),
             }
         }
@@ -166,7 +197,10 @@ impl DiscoveryService {
     /// The ranked server list the sync engine should use right now.
     pub fn current_pool(&self) -> Vec<KnownServer> {
         let pool = self.pool.lock().unwrap();
-        let jitters: HashMap<String, f64> = pool.node_ids().map(|id| (id.clone(), random_jitter())).collect();
+        let jitters: HashMap<String, f64> = pool
+            .node_ids()
+            .map(|id| (id.clone(), random_jitter()))
+            .collect();
         pool.current_pool(self.clock.now_unix_ms(), &jitters)
             .into_iter()
             .filter_map(|id| pool.get(&id).cloned())
@@ -193,11 +227,18 @@ impl DiscoveryService {
             match self.transport.send(request).await {
                 Ok(response) if response.status < 500 => {
                     let elapsed = (self.clock.now_unix_ms() - start).max(0) as f64;
-                    self.pool.lock().unwrap().record_success(&server.node_id, elapsed);
+                    self.pool
+                        .lock()
+                        .unwrap()
+                        .record_success(&server.node_id, elapsed);
                     return Ok((server, response));
                 }
                 _ => {
-                    self.pool.lock().unwrap().record_failure(&server.node_id, self.clock.now_unix_ms(), random_jitter());
+                    self.pool.lock().unwrap().record_failure(
+                        &server.node_id,
+                        self.clock.now_unix_ms(),
+                        random_jitter(),
+                    );
                 }
             }
         }
@@ -208,29 +249,54 @@ impl DiscoveryService {
     /// (cheap, unauthenticated) and records it — the basis for "closeness"
     /// in `discovery::scoring`, since the directory itself carries no geo
     /// field (F-C0 plan §1.2).
-    pub async fn measure_latency(&self, node_id: &str, base_url: &str) -> Result<f64, DiscoveryError> {
-        let request = HttpRequest::get(format!("{}/v1/network/node-info", base_url.trim_end_matches('/')));
+    pub async fn measure_latency(
+        &self,
+        node_id: &str,
+        base_url: &str,
+    ) -> Result<f64, DiscoveryError> {
+        let request = HttpRequest::get(format!(
+            "{}/v1/network/node-info",
+            base_url.trim_end_matches('/')
+        ));
         let start = self.clock.now_unix_ms();
-        let response = self.transport.send(request).await.map_err(DiscoveryError::Transport)?;
+        let response = self
+            .transport
+            .send(request)
+            .await
+            .map_err(DiscoveryError::Transport)?;
         let elapsed = (self.clock.now_unix_ms() - start).max(0) as f64;
         if response.is_success() {
             self.pool.lock().unwrap().record_success(node_id, elapsed);
             Ok(elapsed)
         } else {
-            self.pool.lock().unwrap().record_failure(node_id, self.clock.now_unix_ms(), random_jitter());
-            Err(DiscoveryError::InvalidResponse(format!("HTTP {}", response.status)))
+            self.pool.lock().unwrap().record_failure(
+                node_id,
+                self.clock.now_unix_ms(),
+                random_jitter(),
+            );
+            Err(DiscoveryError::InvalidResponse(format!(
+                "HTTP {}",
+                response.status
+            )))
         }
     }
 
     pub fn record_withholding_suspicion(&self, node_id: &str) {
-        self.pool.lock().unwrap().record_withholding_suspicion(node_id);
+        self.pool
+            .lock()
+            .unwrap()
+            .record_withholding_suspicion(node_id);
     }
 }
 
 fn parse_directory(response: &HttpResponse) -> Result<NetworkDirectory, DiscoveryError> {
-    response.json().map_err(|e| DiscoveryError::InvalidResponse(e.to_string())).and_then(|value| {
-        serde_json::from_value(value).map_err(|e| DiscoveryError::InvalidResponse(e.to_string()))
-    })
+    response
+        .json()
+        .map_err(|e| DiscoveryError::InvalidResponse(e.to_string()))
+        .and_then(|value| {
+            serde_json::from_value(value)
+                .map_err(|e| DiscoveryError::InvalidResponse(e.to_string()))
+        })
 }
 
 /// `0.0..=1.0`. Falls back to `0.0` (no jitter, not an error) if the
@@ -261,16 +327,24 @@ mod tests {
     }
     impl MockTransport {
         fn new() -> Self {
-            Self { responses: Mutex::new(HashMap::new()) }
+            Self {
+                responses: Mutex::new(HashMap::new()),
+            }
         }
         fn set(&self, url: &str, status: u16, body: serde_json::Value) {
+            self.responses.lock().unwrap().insert(
+                url.to_string(),
+                Ok(HttpResponse {
+                    status,
+                    body: serde_json::to_vec(&body).unwrap(),
+                }),
+            );
+        }
+        fn set_error(&self, url: &str) {
             self.responses
                 .lock()
                 .unwrap()
-                .insert(url.to_string(), Ok(HttpResponse { status, body: serde_json::to_vec(&body).unwrap() }));
-        }
-        fn set_error(&self, url: &str) {
-            self.responses.lock().unwrap().insert(url.to_string(), Err("connection refused".to_string()));
+                .insert(url.to_string(), Err("connection refused".to_string()));
         }
     }
     #[async_trait::async_trait]
@@ -279,7 +353,10 @@ mod tests {
             match self.responses.lock().unwrap().get(&request.url) {
                 Some(Ok(response)) => Ok(response.clone()),
                 Some(Err(msg)) => Err(HttpError::Network(msg.clone())),
-                None => Err(HttpError::Network(format!("no mock response configured for {}", request.url))),
+                None => Err(HttpError::Network(format!(
+                    "no mock response configured for {}",
+                    request.url
+                ))),
             }
         }
     }
@@ -298,12 +375,20 @@ mod tests {
     #[tokio::test]
     async fn refresh_directory_fetches_from_a_seed_and_ingests_peers() {
         let transport = Arc::new(MockTransport::new());
-        transport.set("https://seed1.example/v1/network/directory", 200, directory_json());
+        transport.set(
+            "https://seed1.example/v1/network/directory",
+            200,
+            directory_json(),
+        );
         let clock = Arc::new(FixedClock(AtomicI64::new(1000)));
         let service = DiscoveryService::new(
             transport,
             clock,
-            DiscoveryConfig { seeds: vec!["https://seed1.example".to_string()], pool_size: 3, directory_ttl_ms: 60_000 },
+            DiscoveryConfig {
+                seeds: vec!["https://seed1.example".to_string()],
+                pool_size: 3,
+                directory_ttl_ms: 60_000,
+            },
         );
 
         service.refresh_directory().await.unwrap();
@@ -314,13 +399,20 @@ mod tests {
     async fn refresh_directory_falls_through_to_the_next_seed_on_failure() {
         let transport = Arc::new(MockTransport::new());
         transport.set_error("https://dead-seed.example/v1/network/directory");
-        transport.set("https://live-seed.example/v1/network/directory", 200, directory_json());
+        transport.set(
+            "https://live-seed.example/v1/network/directory",
+            200,
+            directory_json(),
+        );
         let clock = Arc::new(FixedClock(AtomicI64::new(0)));
         let service = DiscoveryService::new(
             transport,
             clock,
             DiscoveryConfig {
-                seeds: vec!["https://dead-seed.example".to_string(), "https://live-seed.example".to_string()],
+                seeds: vec![
+                    "https://dead-seed.example".to_string(),
+                    "https://live-seed.example".to_string(),
+                ],
                 pool_size: 3,
                 directory_ttl_ms: 60_000,
             },
@@ -333,12 +425,20 @@ mod tests {
     #[tokio::test]
     async fn ensure_fresh_directory_skips_the_network_call_when_cache_is_fresh() {
         let transport = Arc::new(MockTransport::new());
-        transport.set("https://seed1.example/v1/network/directory", 200, directory_json());
+        transport.set(
+            "https://seed1.example/v1/network/directory",
+            200,
+            directory_json(),
+        );
         let clock = Arc::new(FixedClock(AtomicI64::new(0)));
         let service = DiscoveryService::new(
             transport,
             clock.clone(),
-            DiscoveryConfig { seeds: vec!["https://seed1.example".to_string()], pool_size: 3, directory_ttl_ms: 60_000 },
+            DiscoveryConfig {
+                seeds: vec!["https://seed1.example".to_string()],
+                pool_size: 3,
+                directory_ttl_ms: 60_000,
+            },
         );
         service.ensure_fresh_directory().await.unwrap();
 
@@ -353,10 +453,25 @@ mod tests {
     async fn request_with_failover_tries_the_next_server_after_a_failure() {
         let transport = Arc::new(MockTransport::new());
         transport.set_error("https://a.example/v1/x");
-        transport.set("https://b.example/v1/x", 200, serde_json::json!({"ok": true}));
+        transport.set(
+            "https://b.example/v1/x",
+            200,
+            serde_json::json!({"ok": true}),
+        );
         let clock = Arc::new(FixedClock(AtomicI64::new(0)));
-        let service = DiscoveryService::new(transport, clock, DiscoveryConfig { seeds: vec![], pool_size: 3, directory_ttl_ms: 60_000 });
-        service.seed_fixed_nodes(&[("a".to_string(), "https://a.example".to_string()), ("b".to_string(), "https://b.example".to_string())]);
+        let service = DiscoveryService::new(
+            transport,
+            clock,
+            DiscoveryConfig {
+                seeds: vec![],
+                pool_size: 3,
+                directory_ttl_ms: 60_000,
+            },
+        );
+        service.seed_fixed_nodes(&[
+            ("a".to_string(), "https://a.example".to_string()),
+            ("b".to_string(), "https://b.example".to_string()),
+        ]);
 
         let (server, response) = service
             .request_with_failover(|s| HttpRequest::get(format!("{}/v1/x", s.address)))
@@ -371,10 +486,20 @@ mod tests {
         let transport = Arc::new(MockTransport::new());
         transport.set_error("https://a.example/v1/x");
         let clock = Arc::new(FixedClock(AtomicI64::new(0)));
-        let service = DiscoveryService::new(transport, clock, DiscoveryConfig { seeds: vec![], pool_size: 3, directory_ttl_ms: 60_000 });
+        let service = DiscoveryService::new(
+            transport,
+            clock,
+            DiscoveryConfig {
+                seeds: vec![],
+                pool_size: 3,
+                directory_ttl_ms: 60_000,
+            },
+        );
         service.seed_fixed_nodes(&[("a".to_string(), "https://a.example".to_string())]);
 
-        let result = service.request_with_failover(|s| HttpRequest::get(format!("{}/v1/x", s.address))).await;
+        let result = service
+            .request_with_failover(|s| HttpRequest::get(format!("{}/v1/x", s.address)))
+            .await;
         assert!(matches!(result, Err(DiscoveryError::AllServersFailed)));
     }
 
@@ -383,7 +508,9 @@ mod tests {
         let transport = Arc::new(MockTransport::new());
         let clock = Arc::new(FixedClock(AtomicI64::new(0)));
         let service = DiscoveryService::new(transport, clock, DiscoveryConfig::default());
-        let result = service.request_with_failover(|s| HttpRequest::get(&s.address)).await;
+        let result = service
+            .request_with_failover(|s| HttpRequest::get(&s.address))
+            .await;
         assert!(matches!(result, Err(DiscoveryError::NoServersAvailable)));
     }
 }
