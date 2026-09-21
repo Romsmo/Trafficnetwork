@@ -45,10 +45,14 @@ fn error_json(message: &str) -> *mut c_char {
 }
 
 /// Frees a string previously returned by any `tn_*` function in this crate.
-/// Safe to call with NULL (no-op). Never call this on a pointer not returned
-/// by this crate, and never call it twice on the same pointer.
+/// Safe to call with NULL (no-op).
+///
+/// # Safety
+/// `s` must be NULL or a pointer this crate itself returned via
+/// `CString::into_raw`, and must not be passed to this function more than
+/// once.
 #[no_mangle]
-pub extern "C" fn tn_free_string(s: *mut c_char) {
+pub unsafe extern "C" fn tn_free_string(s: *mut c_char) {
     if s.is_null() {
         return;
     }
@@ -77,8 +81,12 @@ pub extern "C" fn tn_generate_keypair() -> *mut c_char {
 /// Signs `payload_json` (any JSON value) with the given keypair, returning a
 /// serialized `SignedEnvelope` JSON string, or `{"error": "..."}`. Caller
 /// frees the result.
+///
+/// # Safety
+/// Every argument must be NULL or a valid null-terminated C string owned by
+/// the caller for the duration of this call.
 #[no_mangle]
-pub extern "C" fn tn_sign_envelope(
+pub unsafe extern "C" fn tn_sign_envelope(
     public_key: *const c_char,
     private_key: *const c_char,
     payload_json: *const c_char,
@@ -111,8 +119,12 @@ pub extern "C" fn tn_sign_envelope(
 /// (verified), 0 (not verified — including any malformed input, which is
 /// treated identically to "don't trust this", matching
 /// `core::crypto::verify_signed_envelope`'s own contract).
+///
+/// # Safety
+/// Every argument must be NULL or a valid null-terminated C string owned by
+/// the caller for the duration of this call.
 #[no_mangle]
-pub extern "C" fn tn_verify_envelope(
+pub unsafe extern "C" fn tn_verify_envelope(
     public_key: *const c_char,
     envelope_json: *const c_char,
 ) -> i32 {
