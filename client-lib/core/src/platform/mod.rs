@@ -9,7 +9,9 @@
 pub mod clock;
 pub mod http;
 
-pub use clock::{Clock, SystemClock};
+pub use clock::Clock;
+#[cfg(not(target_arch = "wasm32"))]
+pub use clock::SystemClock;
 pub use http::{
     HttpError, HttpMethod, HttpRequest, HttpResponse, HttpTransport, ReqwestHttpTransport,
 };

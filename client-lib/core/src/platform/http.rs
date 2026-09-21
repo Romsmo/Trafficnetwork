@@ -5,8 +5,6 @@
 //! this trait and passes it in; everything else in `core` is written
 //! against the trait, never against `reqwest` directly.
 
-use async_trait::async_trait;
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HttpMethod {
     Get,
@@ -85,7 +83,16 @@ impl std::fmt::Display for HttpError {
 
 impl std::error::Error for HttpError {}
 
-#[async_trait]
+// `?Send` on wasm32: reqwest's wasm backend wraps browser Promises via
+// js_sys/wasm-bindgen types that aren't (and can't be, in a single-threaded
+// wasm32 browser context) Send — async_trait's default expansion boxes the
+// returned future as `Pin<Box<dyn Future + Send>>`, which those futures
+// can't satisfy. `?Send` (an async-trait feature specifically for this)
+// drops that requirement; native keeps the normal Send-required expansion,
+// since a host app may legitimately move a boxed future across threads
+// there (e.g. handing it to a tokio worker pool).
+#[cfg_attr(target_arch = "wasm32", async_trait::async_trait(?Send))]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait::async_trait)]
 pub trait HttpTransport: Send + Sync {
     async fn send(&self, request: HttpRequest) -> Result<HttpResponse, HttpError>;
 }
@@ -120,7 +127,8 @@ impl Default for ReqwestHttpTransport {
     }
 }
 
-#[async_trait]
+#[cfg_attr(target_arch = "wasm32", async_trait::async_trait(?Send))]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait::async_trait)]
 impl HttpTransport for ReqwestHttpTransport {
     async fn send(&self, request: HttpRequest) -> Result<HttpResponse, HttpError> {
         let method = match request.method {
