@@ -76,6 +76,8 @@ mod tests {
         let pair = generate_ed25519_keypair().unwrap();
         let id = key_id(&pair.public_key_raw);
         assert_eq!(id.len(), 16);
-        assert!(id.chars().all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase()));
+        assert!(id
+            .chars()
+            .all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase()));
     }
 }

@@ -31,5 +31,8 @@ fn main() {
         "keyId": envelope.key_id,
         "signature": envelope.signature,
     });
-    println!("{}", serde_json::to_string(&vector).expect("vector serialization failed"));
+    println!(
+        "{}",
+        serde_json::to_string(&vector).expect("vector serialization failed")
+    );
 }

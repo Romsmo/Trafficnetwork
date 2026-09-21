@@ -39,7 +39,10 @@ pub fn sign_envelope<T: Serialize + Clone>(
 /// caveat in `verifySignedEnvelope`). Returns `false` (never propagates an
 /// error) for any malformed input — a verification failure and a malformed
 /// envelope are the same outcome to a caller: don't trust this.
-pub fn verify_signed_envelope<T: Serialize>(envelope: &SignedEnvelope<T>, expected_public_key_raw: &str) -> bool {
+pub fn verify_signed_envelope<T: Serialize>(
+    envelope: &SignedEnvelope<T>,
+    expected_public_key_raw: &str,
+) -> bool {
     let attempt = || -> Result<bool, CanonicalError> {
         let bytes = to_canonical_bytes(&envelope.payload)?;
         let verifying_key = import_public_key(expected_public_key_raw)?;
@@ -101,7 +104,9 @@ mod tests {
     #[test]
     fn timestamp_freshness_window() {
         let now = 1_000_000_000_i64;
-        let iso = chrono::DateTime::from_timestamp_millis(now - 30_000).unwrap().to_rfc3339();
+        let iso = chrono::DateTime::from_timestamp_millis(now - 30_000)
+            .unwrap()
+            .to_rfc3339();
         assert!(is_fresh_timestamp(&iso, 60, now));
         assert!(!is_fresh_timestamp(&iso, 10, now));
         assert!(!is_fresh_timestamp("not-a-timestamp", 60, now));

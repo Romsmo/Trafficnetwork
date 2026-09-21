@@ -28,6 +28,9 @@ mod tests {
     #[test]
     fn sorts_keys_and_strips_whitespace() {
         let value = json!({ "c": 120, "b": false, "a": "Hello!" });
-        assert_eq!(to_canonical_json(&value).unwrap(), r#"{"a":"Hello!","b":false,"c":120}"#);
+        assert_eq!(
+            to_canonical_json(&value).unwrap(),
+            r#"{"a":"Hello!","b":false,"c":120}"#
+        );
     }
 }
