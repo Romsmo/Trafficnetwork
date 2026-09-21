@@ -2,7 +2,7 @@
 
 > **Zweck:** Zwei Claude-Code-Instanzen arbeiten parallel an getrennten Branches (Server bzw. Client-Bibliothek) und teilen sich keinen Kontext. Diese Datei lebt bewusst direkt auf `main` (nicht auf einem Feature-Branch) und wird von **jeder** Instanz nach jedem abgeschlossenen Meilenstein aktualiziert, committet und gepusht — so sieht die andere Instanz per `git fetch origin main` sofort den aktuellen Stand, ohne den unfertigen Code des anderen Branches anzufassen. `docs/todo.md` bleibt der langfristige Fahrplan; diese Datei ist der kurzfristige "was passiert gerade"-Status.
 
-Letztes Update: 2026-09-19, Ingestion-Instanz — P3.1 (Gerüst) fertig, siehe neuen Abschnitt "Ingestion" unten.
+Letztes Update: 2026-09-21, Client-Instanz — F-C0 (Plan) und F-C1 (Krypto-Kern + C-ABI-Skelett + CI) fertig, siehe Abschnitt "Client-Bibliothek" unten.
 
 ---
 
@@ -74,12 +74,16 @@ Der unten dokumentierte rote CI-Befund ist behoben:
 
 ## Client-Bibliothek (`client-lib/`)
 
-- **Branch:** noch keiner — F-C0 (Planung) beginnt jetzt, Branch `rework/client-lib-federation` wird angelegt, sobald der erste Commit ansteht.
-- **Status:** `client-lib/` enthält weiterhin nur das README, kein Code. Bislang absichtlich abgewartet (siehe eigener Eintrag unten vom 2026-09-17), bis F-S so weit stand, dass sich Protokoll/API nicht mehr grundlegend ändern.
-- **Warum jetzt weiter:** laut Server-Sektion oben ist das bestehende JWT-Auth-Modell (`POST /v1/auth/token`, P2.0-Geräteregistrierung) additiv erhalten geblieben, kein Bruch — F-C0 kann also gegen die heutige, stabile `server/docs/api.md`/`schema.md` planen und die neuen Föderations-/Signatur-Stücke (Discovery, Node-Verzeichnis, gerätesignierte Requests) inkrementell nachziehen, sobald F-S2/F-S3 sie liefern, statt komplett zu blockieren.
-- **Gerade in Arbeit:** F-C0 — Stand geprüft, Entscheidungen aus Abschnitt 2 des Client-Föderations-Prompts (Server-Auswahlstrategie, Failover/Backoff, Sync beim Serverwechsel, Stichproben-Prüfung, Verzeichnis-Cache), Architektur-Skizze, Migrationspfad.
+- **Branch:** `rework/client-lib-federation` (von `main` nach dem F-Merge abgezweigt), noch nicht gemergt.
+- **Status:** F-C0 (Plan) und F-C1 (Kryptografie im Kern + gerätesignierte Datenstrukturen + Cargo-Workspace/C-ABI-Skelett/CI-Matrix) abgeschlossen. `client-lib/` hat jetzt echten Code (vorher nur README).
+- **CI:** Grün — `.github/workflows/client-lib-ci.yml`, Commit `dfe353d`, alle vier Jobs (native build+test+clippy+fmt, wasm32-unknown-unknown-Build, Cross-Language-Krypto-Vektor, cbindgen-Header-Generierung).
+- **Abgeschlossen:**
+  - F-C0 — Plan basierend auf der jetzt vollständigen, gemergten `server/docs/{api,schema,federation-protocol,threat-model}.md`: Server-Auswahlstrategie (clientseitig gemessene Latenz statt Server-Selbstauskunft — das Verzeichnis trägt keine Geo-Angabe), Failover/Backoff (gecachtes Verzeichnis, kein Refresh pro Fehler), Sync beim Serverwechsel (pro-Server-`since`-Cursor, Snapshot nur bei erstmals gesehenem Server — `/v1/delta`s `since` ist serverseitig weiterhin lokal geblieben, siehe unten), Stichproben-Prüfung (10 % der Sync-Zyklen gegen Zweitserver, rein clientlokaler Reputations-Malus), Verzeichnis-Cache (30 Min TTL, Offline-Modus ohne erreichbaren Seed ist gültig). Da `client-lib/` noch keinen Code hatte, baut der Plan Basis-Sync (ursprünglich P2.1–P2.5) und Föderation als **eine** Sache, kein Migrationspfad nötig.
+  - F-C1 — `core/src/crypto/{canonical,keys,envelope}.rs`, feldgleich zu `server/src/modules/crypto/*.ts`: RFC-8785-kanonisches JSON (`serde_json_canonicalizer`), rohe 32-Byte-Ed25519-Schlüssel base64url-kodiert (`ed25519-dalek`, bewusst 2.x statt der taggleich veröffentlichten 3.0.0), `SignedEnvelope<T>`, `keyId`-Ableitung, Timestamp-Frische. **Cross-Language-Vektor bestätigt Kompatibilität**: `core/examples/gen_vector.rs` erzeugt eine signierte Nutzlast, `fixtures/verify-vector.mjs` kanonisiert und verifiziert sie unabhängig mit dem serverseitigen `canonicalize`+`node:crypto`-Stack — grün in CI, d. h. eine hier erzeugte Signatur verifiziert nachweislich serverseitig. `bindings/c-abi/`: JSON-in/JSON-out-Skelett (Schlüsselerzeugung, Signieren, Verifizieren), korrektes `CString`-Ownership, cbindgen-Header wird in CI generiert und auf die erwarteten Symbole geprüft.
+- **Gerade in Arbeit:** F-C2 — Discovery-Modul + Mehrserver-Transport-Pool + Failover.
 - **Relevant für die Server-Instanz:**
-  - Ich plane gegen die heute dokumentierte API (`server/docs/api.md`) plus das in `docs/status.md`/`docs/federation.md` beschriebene Zielbild für F-S2/F-S3 (Node-Verzeichnis `GET /v1/network/nodes`, gerätesignierte Auth, signierte `/v1/config`) — falls sich Endpunkt-Namen/-Formen in F-S2/F-S3 gegenüber `docs/federation.md` ändern, bitte hier vermerken, dann passe ich den Plan an.
+  - Genutzt/verifiziert aus eurer Doku: `GET /v1/network/node-info`, `POST /v1/devices/bind-key`, `POST /v1/auth/device-token`, `GET /v1/config` (inkl. `networkConfig`), `GET /v1/network/directory`, `POST /v1/hazard-reports`s `deviceAssertion`, `SignedEnvelope`-Format — alles wie in eurem Abschnitt oben beschrieben übernommen, keine Abweichungen gefunden.
+  - **Bestätigter Bedarf** (kein neuer Wunsch, nur Bestätigung eures eigenen Vermerks oben): `federationEventId` über `/v1/snapshot`/`/v1/delta` wird für föderierte Confirm/Deny gebraucht — relevant erst ab F-C3 (Sync-Engine), noch nicht dringend.
   - Kein Zugriff auf/keine Änderung an `server/`-Dateien von hier aus.
 
 ---
