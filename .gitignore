@@ -42,7 +42,14 @@ target/
 .gradle/
 
 # --- Rust ---
-/target/
+# Unanchored (not /target/) — this is a monorepo, Rust crates can live in any
+# subdirectory (e.g. client-lib/), not just the repo root. Cargo.lock itself
+# is intentionally NOT ignored here: client-lib is consumed as prebuilt
+# per-platform binding artifacts (AAR, XCFramework, npm, wheel, wasm), never
+# as a source Cargo dependency of some other Rust project, so the usual
+# "libraries shouldn't commit their lockfile" advice doesn't apply — what
+# matters here is reproducible builds of *our own* release artifacts.
+target/
 
 # --- Databases / local data ---
 *.sqlite
@@ -56,3 +63,8 @@ coverage/
 
 # --- Docker ---
 *.override.yml
+
+# --- client-lib (Rust) ---
+# cbindgen-generated C header — regenerated on demand/in CI from src/lib.rs,
+# never hand-edited, so not worth tracking (see bindings/c-abi/cbindgen.toml).
+client-lib/bindings/c-abi/trafficnetwork.h

@@ -1,0 +1,119 @@
+name: client-lib-ci
+
+on:
+  push:
+    branches: [main, "rework/client-lib-*"]
+    paths:
+      - "client-lib/**"
+      - ".github/workflows/client-lib-ci.yml"
+  pull_request:
+    paths:
+      - "client-lib/**"
+      - ".github/workflows/client-lib-ci.yml"
+
+defaults:
+  run:
+    working-directory: client-lib
+
+jobs:
+  test:
+    name: build, test, lint (native)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: client-lib
+
+      - name: Format check
+        run: cargo fmt --all -- --check
+
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: Build
+        run: cargo build --workspace
+
+      - name: Test
+        run: cargo test --workspace
+
+  wasm-build:
+    name: build (wasm32-unknown-unknown)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: client-lib
+          key: wasm32
+
+      # bindings/c-abi is cdylib/staticlib (native-linking crate-types) and
+      # isn't meaningful on wasm32 — only core needs to prove it's WASM-clean
+      # at this milestone (no platform-specific WASM binding crate exists
+      # yet, that's F-C4).
+      - name: Build core for wasm32
+        run: cargo build -p trafficnetwork-core --target wasm32-unknown-unknown
+
+  crypto-cross-lang-vector:
+    name: cross-language crypto vector (Rust -> Node)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: client-lib
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install fixture dependencies
+        working-directory: client-lib/fixtures
+        run: npm install
+
+      - name: Generate vector with the Rust core and verify it with the server's own crypto stack (canonicalize + node:crypto)
+        run: cargo run -p trafficnetwork-core --example gen_vector | node fixtures/verify-vector.mjs
+
+  c-abi-header:
+    name: cbindgen header generation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: client-lib
+
+      - name: Install cbindgen
+        run: cargo install --locked cbindgen
+
+      - name: Build c-abi crate
+        run: cargo build -p trafficnetwork-c-abi
+
+      - name: Generate C header
+        working-directory: client-lib/bindings/c-abi
+        run: cbindgen --config cbindgen.toml --output trafficnetwork.h
+
+      - name: Header sanity check (non-empty, declares expected symbols)
+        working-directory: client-lib/bindings/c-abi
+        run: |
+          test -s trafficnetwork.h
+          grep -q "tn_generate_keypair" trafficnetwork.h
+          grep -q "tn_sign_envelope" trafficnetwork.h
+          grep -q "tn_verify_envelope" trafficnetwork.h
+          grep -q "tn_free_string" trafficnetwork.h
