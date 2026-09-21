@@ -23,8 +23,18 @@ base64 = "0.23"
 sha2 = "0.10"
 hex = "0.4"
 chrono = "0.4"
+# default-features off: skips default-tls (native-tls/openssl) in favor of
+# rustls-tls (no system OpenSSL dependency) — rustls-tls is a no-op on
+# wasm32, where reqwest delegates TLS to the browser's own fetch() instead.
+reqwest = { version = "0.13", default-features = false, features = ["rustls-tls"] }
+# HttpTransport/Clock (platform/) need dyn-dispatchable async trait methods
+# for host-app-supplied implementations — native async-fn-in-trait isn't
+# object-safe as of this Rust version, async-trait remains the standard
+# workaround (see docs.rs/async-trait).
+async-trait = "0.1"
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 getrandom = { version = "0.4", features = ["wasm_js"] }
 
 [dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
