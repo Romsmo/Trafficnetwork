@@ -4,7 +4,7 @@ Client-Sync-Bibliothek: einbettbarer, maximal portabler Adapter für beliebige A
 
 Zielplattformen: Android (Kotlin), iOS/macOS (Swift), Flutter (Dart), React Native, Desktop/Server über C-ABI (inkl. Python, Node.js), Web-Browser (WASM).
 
-**Status**: Meilenstein F-C1 abgeschlossen (Branch `rework/client-lib-federation`, noch nicht nach `main` gemergt). Details zum Gesamtplan siehe [`docs/concept.md`](../docs/concept.md) (Abschnitt 6/13), [`docs/federation.md`](../docs/federation.md), [`docs/prompt-phase2-client-lib.md`](../docs/prompt-phase2-client-lib.md) (ursprünglicher Basis-Auftrag), [`docs/prompt-rework-client-lib-federation.md`](../docs/prompt-rework-client-lib-federation.md) (Föderations-Auftrag) und [`docs/todo.md`](../docs/todo.md). Laufender Cross-Instanz-Status: [`docs/status.md`](../docs/status.md).
+**Status**: Meilenstein F-C2 abgeschlossen (Branch `rework/client-lib-federation`, noch nicht nach `main` gemergt). Details zum Gesamtplan siehe [`docs/concept.md`](../docs/concept.md) (Abschnitt 6/13), [`docs/federation.md`](../docs/federation.md), [`docs/prompt-phase2-client-lib.md`](../docs/prompt-phase2-client-lib.md) (ursprünglicher Basis-Auftrag), [`docs/prompt-rework-client-lib-federation.md`](../docs/prompt-rework-client-lib-federation.md) (Föderations-Auftrag) und [`docs/todo.md`](../docs/todo.md). Laufender Cross-Instanz-Status: [`docs/status.md`](../docs/status.md).
 
 ## Warum Basis und Föderation zusammen
 
@@ -28,6 +28,8 @@ cargo run -p trafficnetwork-core --example gen_vector | node fixtures/verify-vec
 
 Server-Discovery über `GET /v1/network/directory` (eingebaute Seed-Liste als Startpunkt), Mehrserver-Pool mit clientseitig gemessener Latenz + Reputationsstufe für die Auswahl (das Verzeichnis liefert keine Geo-Angabe — "Nähe" wird gemessen, nicht behauptet), Failover mit exponentiellem Backoff, pro-Server-Sync-Cursor (da `/v1/delta`s `since` serverseitig weiterhin lokal ist), client-lokale Stichproben-Prüfung gegen Zurückhalten (serverseitig nicht implementiert, siehe `server/docs/federation-protocol.md` §7). Details/Begründung: F-C0-Plan-Abschnitt dieser Session, konsolidiert in `docs/status.md`.
 
+`core/src/platform/{clock,http}.rs` sind die host-app-austauschbaren Seams (kein direkter Netzwerk-/Uhrzugriff im Kern); `ReqwestHttpTransport` ist der Standard und läuft unverändert nativ wie auf `wasm32-unknown-unknown` (reqwest wechselt selbst auf `fetch()` im Browser). `core/src/discovery/{types,scoring,pool,service}.rs` implementiert das oben Beschriebene — `ServerPool` und `discovery::scoring` sind pure, deterministisch unit-getestete Logik (Zeit/Zufall werden injiziert, nie intern gelesen), `DiscoveryService` verbindet sie mit dem Transport.
+
 ## Bauen & Testen
 
 Rust ist auf der Entwicklungsmaschine dieser Session nicht installiert — Verifikation ausschließlich über `.github/workflows/client-lib-ci.yml` (native build+test+clippy+fmt, `wasm32-unknown-unknown`-Build, Cross-Language-Krypto-Vektor, cbindgen-Header-Generierung). Mit lokalem Rust: `cargo build --workspace`, `cargo test --workspace` in `client-lib/`.
@@ -38,7 +40,7 @@ Rust ist auf der Entwicklungsmaschine dieser Session nicht installiert — Verif
 |---|---|---|
 | F-C0 | Stand geprüft, Entscheidungen (Server-Auswahl, Failover, Sync beim Serverwechsel, Stichproben-Prüfung, Verzeichnis-Cache), Architektur-Skizze, Plan | ✅ |
 | F-C1 | Kryptografie im Kern + gerätesignierte Datenstrukturen, Cargo-Workspace, C-ABI-Skelett, CI-Matrix | ✅ |
-| F-C2 | Discovery-Modul + Mehrserver-Transport-Pool + Failover | 🔜 |
-| F-C3 | Sync-Engine (Bootstrap/Delta/Pakete/WebSocket, pro-Server-Cursor), Offline-Schreibpuffer, Map-Matching, Verfallsberechnung, Stichproben-Prüfung | |
+| F-C2 | Discovery-Modul + Mehrserver-Transport-Pool + Failover | ✅ |
+| F-C3 | Sync-Engine (Bootstrap/Delta/Pakete/WebSocket, pro-Server-Cursor), Offline-Schreibpuffer, Map-Matching, Verfallsberechnung, Stichproben-Prüfung | 🔜 |
 | F-C4 | Bindings für alle Zielplattformen + Konformitätstests | |
 | F-C5 | Mehrknoten-Integrationstests grün, Doku, Pull Request — **Abschluss** | |
