@@ -43,7 +43,10 @@ pub enum SyncError {
     /// failure — most notably `409 SNAPSHOT_REQUIRED` on a stale delta
     /// cursor, which [`SyncEngine::sync_server`] specifically catches and
     /// recovers from by falling back to a fresh snapshot.
-    Rejected { status: u16, body: String },
+    Rejected {
+        status: u16,
+        body: String,
+    },
 }
 
 impl std::fmt::Display for SyncError {
@@ -76,7 +79,10 @@ fn parse_ok<T: DeserializeOwned>(response: &HttpResponse) -> Result<T, SyncError
 }
 
 fn auth_header(bearer_token: &str) -> (String, String) {
-    ("Authorization".to_string(), format!("Bearer {bearer_token}"))
+    (
+        "Authorization".to_string(),
+        format!("Bearer {bearer_token}"),
+    )
 }
 
 pub struct SyncEngine {
@@ -132,11 +138,15 @@ impl SyncEngine {
             Some(since) => match self.pull_delta(bearer_token, server, since, tiles).await {
                 Ok(()) => Ok(()),
                 Err(SyncError::Rejected { status: 409, .. }) => {
-                    self.bootstrap_from_server(bearer_token, server, tiles).await
+                    self.bootstrap_from_server(bearer_token, server, tiles)
+                        .await
                 }
                 Err(e) => Err(e),
             },
-            None => self.bootstrap_from_server(bearer_token, server, tiles).await,
+            None => {
+                self.bootstrap_from_server(bearer_token, server, tiles)
+                    .await
+            }
         }
     }
 
@@ -291,10 +301,9 @@ impl SyncEngine {
                 );
             }
             "fixedSpeedCamera" => {
-                let camera = serde_json::from_value::<super::types::FixedSpeedCamera>(
-                    event.payload.clone(),
-                )
-                .map_err(|e| SyncError::InvalidResponse(e.to_string()))?;
+                let camera =
+                    serde_json::from_value::<super::types::FixedSpeedCamera>(event.payload.clone())
+                        .map_err(|e| SyncError::InvalidResponse(e.to_string()))?;
                 if camera.status == "removed" {
                     return self
                         .store
@@ -305,7 +314,9 @@ impl SyncEngine {
             }
             _ => return Ok(()),
         }
-        self.store.upsert_static_data(&data).map_err(SyncError::Store)
+        self.store
+            .upsert_static_data(&data)
+            .map_err(SyncError::Store)
     }
 
     async fn sync_static_data(&self, bearer_token: &str) -> Result<(), SyncError> {
