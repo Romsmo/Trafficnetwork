@@ -45,7 +45,10 @@ pub enum AuthError {
     /// or the expected `409 KEY_ALREADY_BOUND` on a second bind-key attempt)
     /// — carries the raw status/body for the caller to inspect rather than
     /// collapsing every non-2xx response into one opaque error.
-    Rejected { status: u16, body: String },
+    Rejected {
+        status: u16,
+        body: String,
+    },
     InvalidResponse(String),
     Signing(String),
 }
@@ -113,7 +116,10 @@ pub async fn register_device(
 ) -> Result<DeviceRegistration, AuthError> {
     let (_, response) = discovery
         .request_with_failover(|server| {
-            let url = format!("{}/v1/devices/register", server.address.trim_end_matches('/'));
+            let url = format!(
+                "{}/v1/devices/register",
+                server.address.trim_end_matches('/')
+            );
             HttpRequest::post_json(url, &serde_json::json!({}))
                 .expect("empty body always serializes")
                 .with_header("Authorization", format!("Bearer {app_key_bearer_token}"))
@@ -150,7 +156,10 @@ pub async fn bind_device_key(
     let body = serde_json::json!({ "assertion": assertion });
     let (_, response) = discovery
         .request_with_failover(|server| {
-            let url = format!("{}/v1/devices/bind-key", server.address.trim_end_matches('/'));
+            let url = format!(
+                "{}/v1/devices/bind-key",
+                server.address.trim_end_matches('/')
+            );
             HttpRequest::post_json(url, &body)
                 .expect("assertion body always serializes")
                 .with_header("Authorization", format!("Bearer {bearer_token}"))
@@ -185,7 +194,10 @@ pub async fn device_token(
     let body = serde_json::json!({ "clientId": client_id, "assertion": assertion });
     let (_, response) = discovery
         .request_with_failover(|server| {
-            let url = format!("{}/v1/auth/device-token", server.address.trim_end_matches('/'));
+            let url = format!(
+                "{}/v1/auth/device-token",
+                server.address.trim_end_matches('/')
+            );
             HttpRequest::post_json(url, &body).expect("device-token body always serializes")
         })
         .await

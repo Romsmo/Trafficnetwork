@@ -281,6 +281,54 @@ impl DiscoveryService {
         }
     }
 
+    /// Sends `request` to exactly this one server — never fails over to a
+    /// different one. For calls where a different server's answer would be
+    /// actively wrong, not just less preferred (F-C3's per-server delta
+    /// cursor: each server's `since` sequence is its own local counter, per
+    /// F-C0 plan §1.4 — retrying a stale cursor against a *different*
+    /// server would silently skip or duplicate events). Still records
+    /// success/failure for this server's score, exactly like
+    /// `request_with_failover`'s per-attempt bookkeeping — a 4xx is
+    /// returned to the caller as `Ok` (the server answered; the caller
+    /// decides what a particular status means, e.g. `409` for a stale
+    /// cursor), only `>=500` or a transport error counts against it here.
+    pub async fn request_to_server(
+        &self,
+        server: &KnownServer,
+        request: HttpRequest,
+    ) -> Result<HttpResponse, DiscoveryError> {
+        let start = self.clock.now_unix_ms();
+        match self.transport.send(request).await {
+            Ok(response) if response.status < 500 => {
+                let elapsed = (self.clock.now_unix_ms() - start).max(0) as f64;
+                self.pool
+                    .lock()
+                    .unwrap()
+                    .record_success(&server.node_id, elapsed);
+                Ok(response)
+            }
+            Ok(response) => {
+                self.pool.lock().unwrap().record_failure(
+                    &server.node_id,
+                    self.clock.now_unix_ms(),
+                    random_jitter(),
+                );
+                Err(DiscoveryError::InvalidResponse(format!(
+                    "HTTP {}",
+                    response.status
+                )))
+            }
+            Err(e) => {
+                self.pool.lock().unwrap().record_failure(
+                    &server.node_id,
+                    self.clock.now_unix_ms(),
+                    random_jitter(),
+                );
+                Err(DiscoveryError::Transport(e))
+            }
+        }
+    }
+
     pub fn record_withholding_suspicion(&self, node_id: &str) {
         self.pool
             .lock()
@@ -501,6 +549,41 @@ mod tests {
             .request_with_failover(|s| HttpRequest::get(format!("{}/v1/x", s.address)))
             .await;
         assert!(matches!(result, Err(DiscoveryError::AllServersFailed)));
+    }
+
+    #[tokio::test]
+    async fn request_to_server_does_not_fail_over_on_a_4xx() {
+        let transport = Arc::new(MockTransport::new());
+        transport.set(
+            "https://a.example/v1/delta",
+            409,
+            serde_json::json!({"error": {"code": "SNAPSHOT_REQUIRED"}}),
+        );
+        let clock = Arc::new(FixedClock(AtomicI64::new(0)));
+        let service = DiscoveryService::new(transport, clock, DiscoveryConfig::default());
+        service.seed_fixed_nodes(&[("a".to_string(), "https://a.example".to_string())]);
+        let server = service.current_pool().into_iter().next().unwrap();
+
+        let response = service
+            .request_to_server(&server, HttpRequest::get("https://a.example/v1/delta"))
+            .await
+            .unwrap();
+        assert_eq!(response.status, 409);
+    }
+
+    #[tokio::test]
+    async fn request_to_server_errors_on_a_5xx_without_trying_anything_else() {
+        let transport = Arc::new(MockTransport::new());
+        transport.set("https://a.example/v1/delta", 503, serde_json::json!({}));
+        let clock = Arc::new(FixedClock(AtomicI64::new(0)));
+        let service = DiscoveryService::new(transport, clock, DiscoveryConfig::default());
+        service.seed_fixed_nodes(&[("a".to_string(), "https://a.example".to_string())]);
+        let server = service.current_pool().into_iter().next().unwrap();
+
+        let result = service
+            .request_to_server(&server, HttpRequest::get("https://a.example/v1/delta"))
+            .await;
+        assert!(matches!(result, Err(DiscoveryError::InvalidResponse(_))));
     }
 
     #[tokio::test]
