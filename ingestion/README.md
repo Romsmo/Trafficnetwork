@@ -2,11 +2,13 @@
 
 Optional bulk-import client that seeds a Trafficnetwork server's database from OpenStreetMap and other sources. **Not a core system component** — it's a normal client with the `bulk-import` scope, talking only to the server's public, publicly-documented bulk-import API (`server/docs/api.md`). No direct database access, no privileged path, nothing the server needs to know about. It can be run once and never again, run periodically, or never run at all — a server with an empty database is a valid, fully working state.
 
-**Status**: P3.1 scaffold (config, auth, generic batch/dedupe/resume pipeline, CLI). The OSM worker itself lands in P3.2 — until then, `npm run ingest` can authenticate and validate configuration (`--dry-run`) but has no source wired in yet to actually fetch data.
+**Status**: P3.2 — the OSM worker is implemented and registered (download+checksum, `osmium-tool` filter/export, tag normalization). **Not yet empirically verified against a real Geofabrik extract in this environment** — Docker Desktop wasn't reachable here to run `osmium-tool` locally (it's a system binary, not an npm dependency — see `docs/sources.md`), so the normalizer's assumptions about `osmium export -a type,id`'s output shape are based on the official manual plus a confirmed real-world example (osmcode/osmium-tool#218), not a local end-to-end run. 63 unit tests pass, including the full normalization logic (implicit-speed table, `DE:motorway`/`DE:living_street` skips, hyphen-vs-comma sign parsing, coordinate-order handling). **Before a real production import**, run once with `osmium --version` confirmed on PATH and sanity-check the first batch's row counts against expectations — or validate via CI (P3.4) once its `osmium-tool` apt install is wired up.
 
 See [`docs/concept.md`](../docs/concept.md) section 7 and [`docs/prompt-phase3-ingestion.md`](../docs/prompt-phase3-ingestion.md) for the full design brief, and [`docs/sources.md`](docs/sources.md) for the evidenced source catalog (licenses, pricing, what's implemented vs. catalog-only).
 
 ## Setup
+
+Requires [`osmium-tool`](https://osmcode.org/osmium-tool/) on `PATH` for the OSM worker (Ubuntu/CI: `apt-get install osmium-tool`; other platforms: see osmium-tool's own install docs). This program shells out to the real `osmium` CLI rather than reimplementing PBF parsing — see `docs/sources.md` for why.
 
 ```bash
 npm install
@@ -24,7 +26,7 @@ Edit `.env`:
 
 ```bash
 npm run ingest -- --region bayern --dry-run   # validates config + server credentials, sends nothing
-npm run ingest -- --region bayern             # real run (once a worker exists for an enabled source — P3.2 for OSM)
+npm run ingest -- --region bayern             # real run — requires osmium-tool on PATH (apt: osmium-tool; see docs/sources.md)
 npm run ingest -- --region bayern --fresh     # wipes local progress state and starts over — see "Resuming" below before using this
 npm run ingest -- --region bayern --batch-size 500
 ```

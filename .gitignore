@@ -52,7 +52,7 @@ data/
 
 # --- Ingestion local state / downloaded extracts (not tests/fixtures/*.osm.pbf, those are checked in) ---
 ingestion/.ingestion-state/
-ingestion/.downloads/
+ingestion/.ingestion-downloads/
 
 # --- Coverage / test output ---
 coverage/

@@ -13,6 +13,11 @@ const envSchema = z
     // duplicate everything already imported.
     STATE_DIR: z.string().default("./.ingestion-state"),
 
+    // Where downloaded source extracts (e.g. Geofabrik .osm.pbf files) are
+    // cached between runs, keyed by region — re-used if its checksum still
+    // matches instead of re-downloading a multi-hundred-MB file every time.
+    DOWNLOAD_DIR: z.string().default("./.ingestion-downloads"),
+
     // Rows per bulk-import API call. Server hard-caps at 5000; kept well
     // below that by default so a crash's duplication blast radius (see
     // state/store.ts) stays small, at the cost of more HTTP round trips.

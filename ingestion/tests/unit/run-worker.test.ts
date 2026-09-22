@@ -71,7 +71,7 @@ describe("runWorker", () => {
     const apiClient = fakeApiClient();
     const stateStore = new StateStore(stateDir, "bayern", "osm");
 
-    const result = await runWorker({ worker: fakeWorker(rows), region, apiClient, stateStore, logger: silentLogger, batchSize: 10, dryRun: false });
+    const result = await runWorker({ worker: fakeWorker(rows), regionId: "test-region", region, downloadDir: "/tmp/ingestion-test-downloads", apiClient, stateStore, logger: silentLogger, batchSize: 10, dryRun: false });
 
     expect(result.insertedByKind["speed-limit-segment"]).toBe(2);
     expect(result.insertedByKind["static-sign"]).toBe(1);
@@ -85,7 +85,7 @@ describe("runWorker", () => {
     const apiClient = fakeApiClient();
     const stateStore = new StateStore(stateDir, "bayern", "osm");
 
-    await runWorker({ worker: fakeWorker(rows), region, apiClient, stateStore, logger: silentLogger, batchSize: 2, dryRun: false });
+    await runWorker({ worker: fakeWorker(rows), regionId: "test-region", region, downloadDir: "/tmp/ingestion-test-downloads", apiClient, stateStore, logger: silentLogger, batchSize: 2, dryRun: false });
 
     const segmentCalls = apiClient.calls.filter((c) => c.kind === "speed-limit-segment");
     expect(segmentCalls.map((c) => c.rows.length)).toEqual([2, 1]);
@@ -105,7 +105,7 @@ describe("runWorker", () => {
     const rows = [segmentRow(1), segmentRow(2)];
     const apiClient = fakeApiClient();
 
-    const result = await runWorker({ worker: fakeWorker(rows), region, apiClient, stateStore, logger: silentLogger, batchSize: 10, dryRun: false });
+    const result = await runWorker({ worker: fakeWorker(rows), regionId: "test-region", region, downloadDir: "/tmp/ingestion-test-downloads", apiClient, stateStore, logger: silentLogger, batchSize: 10, dryRun: false });
 
     expect(result.skippedAlreadyDone).toBe(1);
     expect(result.insertedByKind["speed-limit-segment"]).toBe(1);
@@ -124,7 +124,7 @@ describe("runWorker", () => {
     const worker: SourceWorker = { id: "osm", run: runSpy as unknown as SourceWorker["run"] };
     const apiClient = fakeApiClient();
 
-    const result = await runWorker({ worker, region, apiClient, stateStore, logger: silentLogger, batchSize: 10, dryRun: false });
+    const result = await runWorker({ worker, regionId: "test-region", region, downloadDir: "/tmp/ingestion-test-downloads", apiClient, stateStore, logger: silentLogger, batchSize: 10, dryRun: false });
 
     expect(result.shortCircuited).toBe(true);
     expect(runSpy).not.toHaveBeenCalled();
@@ -136,7 +136,7 @@ describe("runWorker", () => {
     const apiClient = fakeApiClient({ "speed-limit-segment": 1 }); // anomaly: posted 2, server says 1
     const stateStore = new StateStore(stateDir, "bayern", "osm");
 
-    await expect(runWorker({ worker: fakeWorker(rows), region, apiClient, stateStore, logger: silentLogger, batchSize: 10, dryRun: false })).rejects.toThrow(
+    await expect(runWorker({ worker: fakeWorker(rows), regionId: "test-region", region, downloadDir: "/tmp/ingestion-test-downloads", apiClient, stateStore, logger: silentLogger, batchSize: 10, dryRun: false })).rejects.toThrow(
       /anomaly/i,
     );
 
@@ -149,7 +149,7 @@ describe("runWorker", () => {
     const apiClient = fakeApiClient();
     const stateStore = new StateStore(stateDir, "bayern", "osm");
 
-    const result = await runWorker({ worker: fakeWorker(rows), region, apiClient, stateStore, logger: silentLogger, batchSize: 10, dryRun: true });
+    const result = await runWorker({ worker: fakeWorker(rows), regionId: "test-region", region, downloadDir: "/tmp/ingestion-test-downloads", apiClient, stateStore, logger: silentLogger, batchSize: 10, dryRun: true });
 
     expect(apiClient.calls).toHaveLength(0);
     expect(result.insertedByKind["speed-limit-segment"]).toBe(0);

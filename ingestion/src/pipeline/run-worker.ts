@@ -8,12 +8,14 @@ import type { NormalizedRow, SourceWorker } from "./worker.js";
 
 export interface RunWorkerOptions {
   worker: SourceWorker;
+  regionId: string;
   region: Region;
   apiClient: BulkImportPoster;
   stateStore: StateStore;
   logger: Logger;
   batchSize: number;
   dryRun: boolean;
+  downloadDir: string;
 }
 
 export interface RunWorkerResult {
@@ -35,7 +37,7 @@ function emptyCounts(): Record<BulkImportKind, number> {
  * matches what was sent, and only once that mark is durably fsync'd.
  */
 export async function runWorker(options: RunWorkerOptions): Promise<RunWorkerResult> {
-  const { worker, region, apiClient, stateStore, logger, batchSize, dryRun } = options;
+  const { worker, regionId, region, apiClient, stateStore, logger, batchSize, dryRun, downloadDir } = options;
 
   await stateStore.init();
 
@@ -86,7 +88,7 @@ export async function runWorker(options: RunWorkerOptions): Promise<RunWorkerRes
     logger.info({ kind, count: response.inserted }, "batch imported");
   };
 
-  for await (const normalized of worker.run({ region, logger })) {
+  for await (const normalized of worker.run({ regionId, region, logger, downloadDir })) {
     if (doneKeys.has(normalized.key)) {
       skippedAlreadyDone++;
       continue;

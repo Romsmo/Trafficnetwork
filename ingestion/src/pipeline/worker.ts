@@ -9,8 +9,11 @@ export type NormalizedRow =
   | { kind: "fixed-speed-camera"; key: string; row: FixedSpeedCameraRow };
 
 export interface WorkerContext {
+  regionId: string;
   region: Region;
   logger: Logger;
+  /** Where a worker may cache downloaded source data between runs (config/env.ts's DOWNLOAD_DIR) — never used for dedup/resume state, that's state/store.ts's job. */
+  downloadDir: string;
 }
 
 /**

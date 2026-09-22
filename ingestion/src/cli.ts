@@ -84,7 +84,7 @@ async function main() {
       );
       await stateStore.reset();
     }
-    await runWorker({ worker, region, apiClient, stateStore, logger, batchSize, dryRun: false });
+    await runWorker({ worker, regionId, region, apiClient, stateStore, logger, batchSize, dryRun: false, downloadDir: env.DOWNLOAD_DIR });
   }
 }
 
