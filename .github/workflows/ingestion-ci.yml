@@ -1,0 +1,131 @@
+name: ingestion-ci
+
+on:
+  push:
+    branches: [main, "phase3/**"]
+    paths:
+      - "ingestion/**"
+      - "server/**"
+      - ".github/workflows/ingestion-ci.yml"
+  pull_request:
+    paths:
+      - "ingestion/**"
+      - "server/**"
+      - ".github/workflows/ingestion-ci.yml"
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    # A services: container (not Testcontainers-in-Node) spans the whole job,
+    # which is what's needed here — build/migrate/start-server/create-client/
+    # run-tests are separate steps, not one Node process. Testcontainers is
+    # the right tool *inside* a single process (server/'s own tests use it
+    # that way); this job needs the DB to outlive several shell steps.
+    services:
+      postgres:
+        image: postgis/postgis:16-3.4
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: trafficnetwork
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgres://postgres:postgres@localhost:5432/trafficnetwork
+      JWT_SECRET: ci-test-jwt-secret-at-least-16-characters-long
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: "npm"
+          cache-dependency-path: ingestion/package-lock.json
+
+      - name: Install osmium-tool
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq osmium-tool
+
+      - name: Install ingestion dependencies
+        working-directory: ingestion
+        run: npm ci
+
+      - name: Lint
+        working-directory: ingestion
+        run: npm run lint
+
+      - name: Typecheck
+        working-directory: ingestion
+        run: npm run typecheck
+
+      - name: Unit tests
+        working-directory: ingestion
+        run: npm run test:unit
+
+      - name: Build server
+        working-directory: server
+        run: |
+          npm ci
+          npm run build
+
+      - name: Migrate database
+        working-directory: server
+        run: node dist/db/migrate.js
+
+      - name: Start server
+        working-directory: server
+        env:
+          # See ingestion/tests/integration/setup.ts's doc comment: enabled only
+          # so the integration tests can verify a fixed-speed-camera bulk-import
+          # via reads — writes are never gated by this flag, only reads are, so
+          # this has no bearing on the flag's off-by-default production posture.
+          SPEED_CAMERA_NAMESPACE_ENABLED: "true"
+          PORT: "3000"
+        run: |
+          node dist/server.js > /tmp/server.log 2>&1 &
+          echo $! > /tmp/server.pid
+
+      - name: Wait for the server to become healthy
+        run: |
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:3000/v1/health | grep -q '"status":"ok"'; then
+              echo "Server healthy after ${i}s"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "Server did not become healthy in time"
+          cat /tmp/server.log
+          exit 1
+
+      - name: Create bulk-import test client
+        working-directory: server
+        id: create-client
+        run: |
+          OUTPUT=$(npm run create-client -- --name ingestion-ci --scope bulk-import)
+          echo "$OUTPUT"
+          CLIENT_ID=$(echo "$OUTPUT" | grep -oP 'clientId:\s*\K\S+')
+          CLIENT_SECRET=$(echo "$OUTPUT" | grep -oP 'clientSecret:\s*\K\S+')
+          echo "::add-mask::$CLIENT_SECRET"
+          echo "client_id=$CLIENT_ID" >> "$GITHUB_OUTPUT"
+          echo "client_secret=$CLIENT_SECRET" >> "$GITHUB_OUTPUT"
+
+      - name: Integration tests
+        working-directory: ingestion
+        env:
+          INGESTION_TEST_SERVER_URL: http://localhost:3000
+          INGESTION_TEST_CLIENT_ID: ${{ steps.create-client.outputs.client_id }}
+          INGESTION_TEST_CLIENT_SECRET: ${{ steps.create-client.outputs.client_secret }}
+        run: npm run test:integration
+
+      - name: Dump server logs on failure
+        if: failure()
+        run: cat /tmp/server.log || true
+
+      - name: Stop server
+        if: always()
+        run: kill "$(cat /tmp/server.pid)" 2>/dev/null || true

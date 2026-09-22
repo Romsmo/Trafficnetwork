@@ -18,6 +18,10 @@ const envSchema = z
     // matches instead of re-downloading a multi-hundred-MB file every time.
     DOWNLOAD_DIR: z.string().default("./.ingestion-downloads"),
 
+    // Overrides config/regions.json's path — mainly for integration tests to
+    // point at a fixture-backed region catalog instead of the real one.
+    REGIONS_CONFIG_PATH: z.string().optional(),
+
     // Rows per bulk-import API call. Server hard-caps at 5000; kept well
     // below that by default so a crash's duplication blast radius (see
     // state/store.ts) stays small, at the cost of more HTTP round trips.

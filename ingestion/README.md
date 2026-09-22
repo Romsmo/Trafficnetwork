@@ -2,7 +2,10 @@
 
 Optional bulk-import client that seeds a Trafficnetwork server's database from OpenStreetMap and other sources. **Not a core system component** — it's a normal client with the `bulk-import` scope, talking only to the server's public, publicly-documented bulk-import API (`server/docs/api.md`). No direct database access, no privileged path, nothing the server needs to know about. It can be run once and never again, run periodically, or never run at all — a server with an empty database is a valid, fully working state.
 
-**Status**: P3.2 — the OSM worker is implemented, registered, and **empirically verified end to end against a real Geofabrik extract** (Liechtenstein, chosen for its small size — a real `osmium-tool` v1.16.0 in an Ubuntu 24.04 container, matching CI's exact apt package, processed all 17,680 filtered features with zero errors: 1,882 speed-limit segments, 54 signs, 4 fixed cameras, correct coordinate order and `@type`/`@id` extraction throughout). Both the tag-normalization logic (run directly via the actual `normalize.ts`/`geojsonseq-reader.ts` modules against real output) and `osmium.ts`'s subprocess-spawning logic (its exact args/stdio/error-handling, including the ENOENT guard) were validated this way — not just the shell-equivalent commands. 63 unit tests pass alongside this.
+**Status**: P3.4 — feature-complete for this round (OSM worker, verification, CI). Validated multiple ways against real infrastructure, not just unit tests:
+- The OSM worker (`osmium-tool` v1.16.0, matching CI's exact apt package) processed a real Geofabrik extract (Liechtenstein, chosen for its small size) end to end with zero errors: 17,680 filtered features → 1,882 speed-limit segments, 54 signs, 4 fixed cameras, correct coordinate order and `@type`/`@id` extraction throughout.
+- The full CLI, run as a real OS process against a real built `server/` (Testcontainers Postgres/PostGIS) and real checked-in `.osm.pbf` fixtures (`tests/fixtures/`), passes all four required end-to-end scenarios (`tests/integration/full-cycle.test.ts`): empty DB → import → API confirms counts; a second run is a fast no-op; forcing a re-stream still dedupes to zero new inserts; a hard `SIGKILL` mid-run followed by an unmodified resume lands the exact expected count, no duplicates.
+- 68 unit tests cover the rest (normalization, dedup/state, batching, backoff, config validation, verification logic).
 
 See [`docs/concept.md`](../docs/concept.md) section 7 and [`docs/prompt-phase3-ingestion.md`](../docs/prompt-phase3-ingestion.md) for the full design brief, and [`docs/sources.md`](docs/sources.md) for the evidenced source catalog (licenses, pricing, what's implemented vs. catalog-only).
 
@@ -32,6 +35,22 @@ npm run ingest -- --region bayern --batch-size 500
 ```
 
 Valid `--region` values are the keys in [`config/regions.json`](config/regions.json) — currently `bayern` (the project's chosen first region, ~812MB Geofabrik extract), `germany`, and `europe` (the whole-country/continent extracts work with the exact same code, per the project's requirement that going bigger never needs a code change — just more time and disk).
+
+## Verification
+
+After every real run (not `--dry-run`), the program checks what actually landed on the server, over the same public API any other client uses — no privileged read path (`src/verify/verify.ts`):
+1. **The run's own count** (exact, always available) — how many rows this run's own POSTs got back an `inserted` count for.
+2. **Spot-checks** against `region.verificationPoints` in `config/regions.json` — a known coordinate + expected speed limit, checked via `GET /v1/speed-limit-segments/nearby`. Empty by default; add these yourself after manually confirming a real known-limit road post-import (never invented ahead of time — see `src/config/regions.ts`).
+3. **An approximate cross-check** via the static-data manifest/partitions, summing every static entity in the H3 partitions covering the region's bounding box. Approximate by design (a segment straddling a partition boundary is counted in more than one partition, and this also picks up anything already there from prior runs) — a sanity net, not a second source of truth. Logged clearly as such.
+
+## Testing
+
+```bash
+npm run test:unit          # no external dependencies
+npm run test:integration   # needs osmium-tool on PATH, Docker (Testcontainers), and server/ already built (npm run build in ../server)
+```
+
+`tests/integration/full-cycle.test.ts` either talks to a CI-provisioned server (`INGESTION_TEST_SERVER_URL`/`_CLIENT_ID`/`_CLIENT_SECRET`, set by [`.github/workflows/ingestion-ci.yml`](../.github/workflows/ingestion-ci.yml)) or, locally, boots its own via Testcontainers + the already-built `server/dist/server.js`. Either way it's the real CLI (spawned as an OS process), the real `osmium-tool`, and the tiny checked-in fixtures in `tests/fixtures/` — not mocks.
 
 ## Resuming and duplicates
 

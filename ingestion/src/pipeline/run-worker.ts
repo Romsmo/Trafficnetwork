@@ -16,6 +16,15 @@ export interface RunWorkerOptions {
   batchSize: number;
   dryRun: boolean;
   downloadDir: string;
+  /**
+   * Test-only: an artificial pause after each durably-recorded batch. On a
+   * real server over a real network a batch takes long enough for a "kill
+   * mid-run" test to land between batches; against a tiny fixture over
+   * localhost, three batches can complete in under a millisecond combined —
+   * too fast for any external poll loop to ever observe an intermediate
+   * state. Never set outside tests/integration/full-cycle.test.ts.
+   */
+  testOnlyBatchDelayMs?: number;
 }
 
 export interface RunWorkerResult {
@@ -37,7 +46,7 @@ function emptyCounts(): Record<BulkImportKind, number> {
  * matches what was sent, and only once that mark is durably fsync'd.
  */
 export async function runWorker(options: RunWorkerOptions): Promise<RunWorkerResult> {
-  const { worker, regionId, region, apiClient, stateStore, logger, batchSize, dryRun, downloadDir } = options;
+  const { worker, regionId, region, apiClient, stateStore, logger, batchSize, dryRun, downloadDir, testOnlyBatchDelayMs } = options;
 
   await stateStore.init();
 
@@ -86,6 +95,7 @@ export async function runWorker(options: RunWorkerOptions): Promise<RunWorkerRes
     await stateStore.appendBatch({ batchId: randomUUID(), kind, postedAt: new Date().toISOString(), insertedCount: response.inserted, keys });
     insertedByKind[kind] += response.inserted;
     logger.info({ kind, count: response.inserted }, "batch imported");
+    if (testOnlyBatchDelayMs) await new Promise((resolve) => setTimeout(resolve, testOnlyBatchDelayMs));
   };
 
   for await (const normalized of worker.run({ regionId, region, logger, downloadDir })) {

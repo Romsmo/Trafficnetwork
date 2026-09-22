@@ -7,6 +7,8 @@ import { createLogger } from "./logging.js";
 import { WORKER_REGISTRY } from "./pipeline/registry.js";
 import { runWorker } from "./pipeline/run-worker.js";
 import { StateStore } from "./state/store.js";
+import { verifyRun } from "./verify/verify.js";
+import { BULK_IMPORT_KINDS, type BulkImportKind } from "./api/types.js";
 
 /**
  * Usage:
@@ -49,7 +51,7 @@ async function main() {
 
   const env = loadEnv();
   const logger = createLogger(env);
-  const region = resolveRegion(loadRegions(), regionId);
+  const region = resolveRegion(loadRegions(env.REGIONS_CONFIG_PATH), regionId);
   const sources = resolveSources(env);
   const batchSize = batchSizeOverride ?? env.BATCH_SIZE;
 
@@ -72,6 +74,8 @@ async function main() {
     return;
   }
 
+  const totalInsertedByKind: Record<BulkImportKind, number> = { "speed-limit-segment": 0, "static-sign": 0, "fixed-speed-camera": 0 };
+
   for (const id of enabledSources) {
     const worker = WORKER_REGISTRY[id];
     if (!worker) throw new Error(`Source "${id}" is enabled but has no implemented worker yet — see ingestion/docs/sources.md`);
@@ -84,8 +88,13 @@ async function main() {
       );
       await stateStore.reset();
     }
-    await runWorker({ worker, regionId, region, apiClient, stateStore, logger, batchSize, dryRun: false, downloadDir: env.DOWNLOAD_DIR });
+    // Test-only, undocumented, not part of the Zod-validated Env schema on purpose — see run-worker.ts's doc comment.
+    const testOnlyBatchDelayMs = process.env.INGESTION_TEST_BATCH_DELAY_MS ? Number(process.env.INGESTION_TEST_BATCH_DELAY_MS) : undefined;
+    const result = await runWorker({ worker, regionId, region, apiClient, stateStore, logger, batchSize, dryRun: false, downloadDir: env.DOWNLOAD_DIR, testOnlyBatchDelayMs });
+    for (const kind of BULK_IMPORT_KINDS) totalInsertedByKind[kind] += result.insertedByKind[kind];
   }
+
+  await verifyRun(apiClient, region, totalInsertedByKind, logger);
 }
 
 main().catch((err) => {
