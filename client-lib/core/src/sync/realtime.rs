@@ -105,7 +105,7 @@ mod tests {
     use super::*;
     use crate::discovery::{DiscoveryConfig, DiscoveryService};
     use crate::platform::{Clock, HttpError, HttpRequest, HttpResponse, HttpTransport};
-    use crate::storage::InMemoryStore;
+    use crate::storage::{InMemoryStore, Store};
     use std::collections::VecDeque;
     use std::sync::atomic::{AtomicI64, Ordering};
     use std::sync::{Arc, Mutex};
