@@ -288,7 +288,11 @@ impl SyncEngine {
         parse_ok(&response)
     }
 
-    fn apply_event(&self, event: &EventLogEntry) -> Result<(), SyncError> {
+    /// `pub(crate)`, not private: `sync::realtime` applies WebSocket-pushed
+    /// events through this exact same dispatch, so a pushed event and a
+    /// delta-pulled event are handled identically — no separate code path
+    /// to drift.
+    pub(crate) fn apply_event(&self, event: &EventLogEntry) -> Result<(), SyncError> {
         match event.entity_type.as_str() {
             "hazardReport" => self.apply_hazard_report_event(event),
             "speedLimitSegment" | "staticSign" | "fixedSpeedCamera" => {

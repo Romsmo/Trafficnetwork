@@ -10,6 +10,7 @@ pub mod auth;
 pub mod engine;
 pub mod expiry;
 pub mod matching;
+pub mod realtime;
 pub mod types;
 pub mod withholding;
 pub mod writebuffer;
@@ -24,6 +25,7 @@ pub use matching::{
     distance_to_line_string_meters, haversine_distance_meters, nearby_hazard_reports,
     nearest_speed_limit, NearbyHazardReport, NearestSpeedLimit,
 };
+pub use realtime::run as run_realtime;
 pub use types::{
     effective_camera_namespace_enabled, ClientConfig, DeltaPage, EventLogEntry, FixedSpeedCamera,
     Geometry, HazardReport, HazardType, NetworkConfigPayload, PartitionContent, PartitionSummary,
