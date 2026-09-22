@@ -70,7 +70,9 @@ pub fn submit_report(
         created_at_unix_ms: now,
         attempts: 0,
     };
-    store.enqueue_write(&item).map_err(WriteBufferError::Store)?;
+    store
+        .enqueue_write(&item)
+        .map_err(WriteBufferError::Store)?;
     Ok(id)
 }
 
@@ -115,10 +117,7 @@ pub async fn flush_pending(
 
         let result = discovery
             .request_with_failover(|server| {
-                let url = format!(
-                    "{}/v1/hazard-reports",
-                    server.address.trim_end_matches('/')
-                );
+                let url = format!("{}/v1/hazard-reports", server.address.trim_end_matches('/'));
                 HttpRequest::post_json(url, &body)
                     .expect("pending write body always serializes")
                     .with_header("Authorization", format!("Bearer {bearer_token}"))

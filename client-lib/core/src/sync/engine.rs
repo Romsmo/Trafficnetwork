@@ -24,13 +24,14 @@ use std::sync::Arc;
 use serde::de::DeserializeOwned;
 
 use crate::discovery::{DiscoveryError, DiscoveryService, KnownServer};
-use crate::platform::{HttpRequest, HttpResponse};
+use crate::platform::{Clock, HttpRequest, HttpResponse};
 use crate::storage::{Store, StoreError, StoredEntities};
 
 use super::types::{
     ClientConfig, DeltaPage, EventLogEntry, HazardReport, PartitionContent, SnapshotResult,
     SpeedLimitSegment, StaticDataManifest, StaticSign,
 };
+use super::withholding;
 
 const DELTA_LIMIT: u32 = 500;
 
@@ -78,6 +79,18 @@ fn parse_ok<T: DeserializeOwned>(response: &HttpResponse) -> Result<T, SyncError
     serde_json::from_value(value).map_err(|e| SyncError::InvalidResponse(e.to_string()))
 }
 
+/// `0.0..=1.0`. Falls back to `1.0` (never sample) rather than `0.0` (always
+/// sample) if the platform's RNG is unavailable — same "fail toward doing
+/// less network work, not more" instinct as `discovery::service`'s own
+/// `random_jitter`, which falls back to no jitter for the identical reason.
+fn random_roll() -> f64 {
+    let mut buf = [0u8; 8];
+    if getrandom::fill(&mut buf).is_err() {
+        return 1.0;
+    }
+    (u64::from_le_bytes(buf) as f64) / (u64::MAX as f64)
+}
+
 fn auth_header(bearer_token: &str) -> (String, String) {
     (
         "Authorization".to_string(),
@@ -88,11 +101,20 @@ fn auth_header(bearer_token: &str) -> (String, String) {
 pub struct SyncEngine {
     discovery: Arc<DiscoveryService>,
     store: Arc<dyn Store>,
+    clock: Arc<dyn Clock>,
 }
 
 impl SyncEngine {
-    pub fn new(discovery: Arc<DiscoveryService>, store: Arc<dyn Store>) -> Self {
-        Self { discovery, store }
+    pub fn new(
+        discovery: Arc<DiscoveryService>,
+        store: Arc<dyn Store>,
+        clock: Arc<dyn Clock>,
+    ) -> Self {
+        Self {
+            discovery,
+            store,
+            clock,
+        }
     }
 
     /// One full sync cycle against the current pool: static data first
@@ -198,10 +220,14 @@ impl SyncEngine {
         tiles: &[String],
     ) -> Result<(), SyncError> {
         let mut cursor = since;
+        let mut first_page = None;
         loop {
             let page = self
                 .fetch_delta_page(bearer_token, server, cursor, tiles)
                 .await?;
+            if first_page.is_none() {
+                first_page = Some(page.clone());
+            }
             for event in &page.events {
                 self.apply_event(event)?;
             }
@@ -214,6 +240,24 @@ impl SyncEngine {
             }
             if !has_more {
                 break;
+            }
+        }
+
+        // Best-effort, client-local withholding sample check (F-C0 plan
+        // §1.5) — a failure here is never a sync failure, it's just a
+        // missed opportunity to catch a misbehaving server this cycle.
+        if let Some(page) = first_page {
+            if withholding::should_sample(random_roll(), withholding::DEFAULT_SAMPLE_RATE) {
+                let _ = withholding::sample_check(
+                    &self.discovery,
+                    server,
+                    &page,
+                    since,
+                    tiles,
+                    bearer_token,
+                    self.clock.now_unix_ms(),
+                )
+                .await;
             }
         }
         Ok(())
@@ -436,12 +480,12 @@ mod tests {
         let clock = Arc::new(FixedClock(AtomicI64::new(0)));
         let discovery = Arc::new(DiscoveryService::new(
             transport,
-            clock,
+            clock.clone(),
             DiscoveryConfig::default(),
         ));
         discovery.seed_fixed_nodes(&[("node1".to_string(), "https://a.example".to_string())]);
         let store = Arc::new(InMemoryStore::new());
-        (SyncEngine::new(discovery, store.clone()), store)
+        (SyncEngine::new(discovery, store.clone(), clock), store)
     }
 
     fn empty_manifest() -> serde_json::Value {
