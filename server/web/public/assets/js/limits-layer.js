@@ -116,7 +116,7 @@ export function limitsStateText(state) {
     case "loading":
       return tr.t("map.layer.speedlimits.loading");
     case "ready":
-      return tr.t("map.layer.speedlimits.count", { n: state.count });
+      return tr.tn("map.layer.speedlimits.count", state.count);
     case "error":
       return tr.t("map.layer.speedlimits.error");
     default:

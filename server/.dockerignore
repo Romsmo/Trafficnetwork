@@ -12,3 +12,7 @@ README.md
 .dockerignore
 Dockerfile
 docker-compose*.yml
+e2e
+playwright.config.ts
+test-results
+playwright-report

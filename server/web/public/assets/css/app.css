@@ -67,7 +67,9 @@ button, .button {
 }
 button:hover:not(:disabled) { border-color: var(--accent); }
 button:disabled { opacity: 0.55; cursor: not-allowed; }
-button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); font-weight: 600; }
+button.primary, .button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); font-weight: 600; }
+a.button { display: inline-flex; align-items: center; justify-content: center; text-decoration: none; }
+a.button:hover { filter: brightness(1.08); }
 button.small { min-height: 36px; padding: 4px 10px; font-size: 0.9rem; }
 
 /* ---------- header / footer ---------- */
@@ -113,7 +115,10 @@ button.small { min-height: 36px; padding: 4px 10px; font-size: 0.9rem; }
   background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius);
   padding: 14px 16px; margin: 12px 0; box-shadow: var(--shadow);
 }
+.card h2 { margin: 0 0 8px; font-size: 1.15rem; }
 .card h3 { margin: 0 0 6px; font-size: 1.05rem; }
+.card.highlight { border: 2px solid var(--accent); }
+.card p:last-child { margin-bottom: 0; }
 .grid-3 { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); }
 pre.code {
   position: relative; margin: 8px 0; padding: 12px 44px 12px 12px; overflow-x: auto;
@@ -158,7 +163,9 @@ dl.facts dd { margin: 0; overflow-wrap: anywhere; }
 .layer-toggle { display: flex; align-items: center; gap: 8px; margin-top: 8px; min-height: 32px; }
 .hint { color: var(--muted); font-size: 0.9rem; }
 ul.report-list { list-style: none; margin: 0; padding: 0; }
-ul.report-list li { border-top: 1px solid var(--line); padding: 8px 0; display: flex; gap: 8px; align-items: center; justify-content: space-between; }
+ul.report-list li { border-top: 1px solid var(--line); padding: 8px 0; display: flex; flex-wrap: wrap; gap: 6px 8px; align-items: center; justify-content: space-between; }
+ul.report-list li > div { flex: 1 1 11rem; }
+ul.report-list li button { flex: 0 0 auto; white-space: nowrap; }
 ul.report-list li:first-child { border-top: 0; }
 ul.report-list .meta { color: var(--muted); font-size: 0.85rem; }
 

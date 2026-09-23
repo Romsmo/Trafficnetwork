@@ -12,6 +12,15 @@ const host = tileHost(config);
 function render() {
   const content = document.getElementById("about-content");
   content.replaceChildren(
+    // The project link comes first and stands out: this page is where visitors find where the project lives.
+    h(
+      "section",
+      { class: "card highlight" },
+      h("h2", null, t("about.github.title")),
+      h("p", null, t("about.github.body")),
+      h("p", null, h("span", { class: "repo-cta" }, externalLink(config.repoUrl, t("about.github.button"), { class: "button primary" }))),
+      h("p", { class: "hint" }, t("about.github.note")),
+    ),
     h("section", { class: "card" }, h("h2", null, t("about.how.title")), h("p", null, t("about.how.body"))),
     h(
       "section",
@@ -19,14 +28,6 @@ function render() {
       h("h2", null, t("about.open.title")),
       h("p", null, t("about.open.body")),
       h("p", null, externalLink(`${config.repoUrl.replace(/\/+$/, "")}/blob/main/LICENSE`, t("about.license"))),
-    ),
-    h(
-      "section",
-      { class: "card" },
-      h("h2", null, t("about.github.title")),
-      h("p", null, t("about.github.body")),
-      h("p", null, h("span", { class: "repo-cta" }, externalLink(config.repoUrl, t("about.github.button"), { class: "button primary" }))),
-      h("p", { class: "hint" }, t("about.github.note")),
     ),
     h("section", { class: "card" }, h("h2", null, t("about.data.title")), h("p", null, t("about.data.body"))),
     h("section", { class: "card" }, h("h2", null, t("about.safety.title")), h("p", null, t("about.safety.body"))),

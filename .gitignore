@@ -56,3 +56,7 @@ coverage/
 
 # --- Docker ---
 *.override.yml
+
+# --- Playwright (server/e2e) ---
+test-results/
+playwright-report/
