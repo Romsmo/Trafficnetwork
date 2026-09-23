@@ -36,7 +36,10 @@ const types = selectableTypes(cameraEnabled);
 const enabledTypes = new Set(types);
 
 // ---- map -------------------------------------------------------------------------------------------------------
-const map = L.map("map", { zoomControl: true, attributionControl: false, worldCopyJump: true });
+const map = L.map("map", { zoomControl: false, attributionControl: false, worldCopyJump: true });
+L.control.zoom({ position: "topright" }).addTo(map);
+// The panel's size settles after the header/footer are built and after orientation changes: keep Leaflet in step.
+new ResizeObserver(() => map.invalidateSize()).observe($("map-panel"));
 if (config.tiles) {
   L.tileLayer(config.tiles.url, { maxZoom: config.tiles.maxZoom, detectRetina: false }).addTo(map);
   const attribution = L.control({ position: "bottomright" });
@@ -60,12 +63,19 @@ hazards.setFilter(enabledTypes, cameraEnabled);
 
 let loadTicket = 0;
 let coverage = null;
-async function loadHazards() {
-  const ticket = ++loadTicket;
+let lastLoad = { key: "", at: 0 };
+const DEDUPE_MS = 3_000;
+async function loadHazards({ force = false } = {}) {
   const center = map.getCenter();
   const wanted = map.distance(center, map.getBounds().getNorthEast());
   const radius = Math.min(Math.ceil(wanted), config.limits.maxHazardRadiusM);
   const tooLarge = wanted > config.limits.maxHazardRadiusM;
+
+  // Map init fires several moveend events for one and the same view: do not ask the node three times.
+  const key = `${center.lat.toFixed(4)}|${center.lng.toFixed(4)}|${radius}`;
+  if (!force && key === lastLoad.key && Date.now() - lastLoad.at < DEDUPE_MS) return;
+  lastLoad = { key, at: Date.now() };
+  const ticket = ++loadTicket;
 
   coverage?.remove();
   coverage = null;
@@ -93,7 +103,7 @@ const live = new LiveConnection({
   url: `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/v1/ws`,
   onEvent: handleEvent,
   onStatus: renderLiveChip,
-  onResync: () => void loadHazards(),
+  onResync: () => void loadHazards({ force: true }),
 });
 
 function handleEvent(event) {
@@ -291,9 +301,9 @@ onLangChange(() => {
   applyTranslations(document);
 });
 
-setInterval(() => void loadHazards(), REFRESH_MS);
+setInterval(() => void loadHazards({ force: true }), REFRESH_MS);
 document.addEventListener("visibilitychange", () => {
-  if (document.visibilityState === "visible") void loadHazards();
+  if (document.visibilityState === "visible") void loadHazards({ force: true });
 });
 
 live.start();

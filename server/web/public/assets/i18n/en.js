@@ -76,7 +76,7 @@ export default {
   "report.stillThere": "Still there",
   "report.gone": "Gone",
   "report.vote.sent": "Thanks – your feedback was counted.",
-  "report.vote.already": "You have already rated this report.",
+  "report.vote.already": "Your vote was not counted – you already rated this report, or you created it yourself.",
   "report.vote.rateLimited": "Too many responses. Please try again in about {minutes} min.",
   "report.vote.error": "Your feedback could not be sent.",
 

@@ -76,7 +76,7 @@ export default {
   "report.stillThere": "Ist noch da",
   "report.gone": "Ist weg",
   "report.vote.sent": "Danke – deine Rückmeldung wurde gezählt.",
-  "report.vote.already": "Du hast diese Meldung schon bewertet.",
+  "report.vote.already": "Deine Stimme wurde nicht gezählt – du hast diese Meldung schon bewertet oder selbst erstellt.",
   "report.vote.rateLimited": "Zu viele Rückmeldungen. Bitte in etwa {minutes} Min. erneut versuchen.",
   "report.vote.error": "Die Rückmeldung konnte nicht gesendet werden.",
 

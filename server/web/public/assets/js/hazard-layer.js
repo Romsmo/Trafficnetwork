@@ -159,9 +159,19 @@ export class HazardLayer {
     if (!report) return h("p", null, tr.t("report.expired"));
     const now = Date.now();
     const status = h("p", { class: "status", role: "status", "aria-live": "polite" });
+    const remaining = h("div", null);
+    const counts = h("div", null);
+    // A vote changes the counters and (server-side) the expiry: show the fresh values in the popup that is still open.
+    const renderFacts = () => {
+      const current = this.#reports.get(id) ?? report;
+      remaining.textContent = formatRemaining(current.expiresAt, Date.now(), tr);
+      counts.textContent = `${tr.t("report.confirmations", { n: current.confirmCount ?? 0 })} · ${tr.t("report.denials", { n: current.denyCount ?? 0 })}`;
+    };
+    renderFacts();
     const vote = async (kind) => {
       for (const button of buttons) button.disabled = true;
       status.textContent = await this.onVote(report.id, kind);
+      renderFacts();
       for (const button of buttons) button.disabled = false;
     };
     const buttons = [
@@ -173,8 +183,8 @@ export class HazardLayer {
       null,
       h("h3", null, tr.t(`type.${report.type}`)),
       h("div", null, formatAge(report.reportedAt, now, tr)),
-      h("div", null, formatRemaining(report.expiresAt, now, tr)),
-      h("div", null, `${tr.t("report.confirmations", { n: report.confirmCount ?? 0 })} · ${tr.t("report.denials", { n: report.denyCount ?? 0 })}`),
+      remaining,
+      counts,
       report.speedKmh ? h("div", null, tr.t("report.speed", { kmh: report.speedKmh })) : null,
       // Fixed cameras are confirmed/removed through a different endpoint that web sessions do not get.
       report.type === "fixedSpeedCamera" ? null : h("div", { class: "row" }, buttons),
