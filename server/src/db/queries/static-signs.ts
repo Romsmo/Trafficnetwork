@@ -1,5 +1,6 @@
 import { sql } from "drizzle-orm";
 import type { Queryable } from "../client.js";
+import { bboxPrefilter } from "../../lib/geo-bbox.js";
 
 export interface StaticSignApi {
   id: string;
@@ -49,7 +50,7 @@ export async function findStaticSignsNearby(
     select id, ST_AsGeoJSON(position)::json as position_geojson, sign_type,
            source, source_license, imported_at
     from static_signs
-    where ST_DWithin(
+    where ${bboxPrefilter(sql`position`, lat, lng, radiusM)}ST_DWithin(
       position::geography,
       ST_SetSRID(ST_MakePoint(${lng}, ${lat}), 4326)::geography,
       ${radiusM}
