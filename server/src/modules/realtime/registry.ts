@@ -1,4 +1,5 @@
 import type { WebSocket } from "ws";
+import { CAMERA_NAMESPACE_TYPES } from "../../config/constants.js";
 
 /**
  * In-process only — Map<tile, Set<connection>> plus a set of every connection for
@@ -9,13 +10,34 @@ import type { WebSocket } from "ws";
  * of scope here.
  */
 export class SubscriptionRegistry {
+  /**
+   * `cameraNamespaceEnabled` is the effective speed-camera flag. While it is off, camera-namespace events are not
+   * pushed to anyone: the REST/sync endpoints already withhold that data, and a WebSocket must not be the back door.
+   */
+  constructor(private readonly cameraNamespaceEnabled: () => boolean = () => true) {}
+
+  /** Whether an event may be pushed at all under the current camera-namespace flag. */
+  allowsEvent(event: { entityType?: string; payload?: unknown }): boolean {
+    if (this.cameraNamespaceEnabled()) return true;
+    if (event.entityType === "fixedSpeedCamera") return false;
+    const type = (event.payload as { type?: string } | null | undefined)?.type;
+    return !(typeof type === "string" && (CAMERA_NAMESPACE_TYPES as readonly string[]).includes(type));
+  }
+
   private readonly byTile = new Map<string, Set<WebSocket>>();
   private readonly tilesByConnection = new Map<WebSocket, Set<string>>();
   private readonly allConnections = new Set<WebSocket>();
+  /** Connections authenticated with an anonymous web-session token: they get events without reporter ids. */
+  private readonly webConnections = new WeakSet<WebSocket>();
 
-  addConnection(ws: WebSocket): void {
+  addConnection(ws: WebSocket, opts: { webSession?: boolean } = {}): void {
     this.allConnections.add(ws);
     this.tilesByConnection.set(ws, new Set());
+    if (opts.webSession) this.webConnections.add(ws);
+  }
+
+  isWebSession(ws: WebSocket): boolean {
+    return this.webConnections.has(ws);
   }
 
   removeConnection(ws: WebSocket): void {
@@ -39,6 +61,13 @@ export class SubscriptionRegistry {
       }
       conns.add(ws);
     }
+  }
+
+  /** How many distinct tiles this connection would be subscribed to after also subscribing to `extra`. */
+  tileCountWith(ws: WebSocket, extra: string[]): number {
+    const union = new Set(this.tilesByConnection.get(ws) ?? []);
+    for (const tile of extra) union.add(tile);
+    return union.size;
   }
 
   unsubscribe(ws: WebSocket, tiles: string[]): void {

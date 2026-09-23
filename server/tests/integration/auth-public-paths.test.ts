@@ -80,6 +80,17 @@ describe("auth hook: PUBLIC_PATHS coverage", () => {
     expect(res.statusCode).not.toBe(401);
   });
 
+  it("POST /v1/web/session (web UI, default on) hands out a token with no Authorization header", async () => {
+    const res = await app.inject({ method: "POST", url: "/v1/web/session" });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().accessToken).toEqual(expect.any(String));
+  });
+
+  it.each(["/", "/connect", "/about", "/web-config.json", "/web/js/map-page.js"])("web UI file GET %s needs no token (only /v1/* is guarded)", async (url) => {
+    const res = await app.inject({ method: "GET", url });
+    expect(res.statusCode).toBe(200);
+  });
+
   it("sanity check: an ordinary route still requires auth (control case, so the assertions above are meaningful)", async () => {
     const res = await app.inject({ method: "GET", url: "/v1/config" });
     expect(res.statusCode).toBe(401);

@@ -4,6 +4,7 @@ import { z } from "zod";
 import { verifyToken } from "../auth/jwt.js";
 import { expandTile } from "../../lib/h3.js";
 import { SubscriptionRegistry } from "./registry.js";
+import { isWebSessionSubject } from "../web/guard.js";
 
 const AUTH_TIMEOUT_MS = 10_000;
 
@@ -21,11 +22,13 @@ const clientMessageSchema = z.discriminatedUnion("type", [
  * A connection that never authenticates within AUTH_TIMEOUT_MS is closed.
  */
 export async function registerRealtimeModule(app: FastifyInstance): Promise<SubscriptionRegistry> {
-  const registry = new SubscriptionRegistry();
+  const registry = new SubscriptionRegistry(() => app.deps.env.SPEED_CAMERA_NAMESPACE_ENABLED);
   await app.register(websocketPlugin);
 
   app.get("/v1/ws", { websocket: true }, (socket, req) => {
     let authenticated = false;
+    // Anonymous web sessions are free to mint, so they get a cap on subscribed tiles (see modules/web).
+    let webSession = false;
 
     const authTimer = setTimeout(() => {
       if (!authenticated) socket.close(4001, "Authentication timeout");
@@ -43,10 +46,11 @@ export async function registerRealtimeModule(app: FastifyInstance): Promise<Subs
 
         if (parsed.type === "auth") {
           try {
-            await verifyToken(parsed.token, app.deps.env);
+            const claims = await verifyToken(parsed.token, app.deps.env);
+            webSession = app.deps.env.WEB_UI_ENABLED && isWebSessionSubject(claims.sub);
             authenticated = true;
             clearTimeout(authTimer);
-            registry.addConnection(socket);
+            registry.addConnection(socket, { webSession });
             socket.send(JSON.stringify({ type: "auth_ok" }));
           } catch {
             socket.send(JSON.stringify({ type: "error", message: "Invalid token" }));
@@ -62,8 +66,15 @@ export async function registerRealtimeModule(app: FastifyInstance): Promise<Subs
 
         try {
           const tiles = expandTile(parsed.tile, parsed.k ?? 0);
-          if (parsed.type === "subscribe") registry.subscribe(socket, tiles);
-          else registry.unsubscribe(socket, tiles);
+          if (parsed.type === "subscribe") {
+            if (webSession && registry.tileCountWith(socket, tiles) > app.deps.env.WEB_WS_MAX_TILES_PER_CONNECTION) {
+              socket.send(JSON.stringify({ type: "error", message: "Too many subscribed tiles for a web session" }));
+              return;
+            }
+            registry.subscribe(socket, tiles);
+          } else {
+            registry.unsubscribe(socket, tiles);
+          }
         } catch {
           socket.send(JSON.stringify({ type: "error", message: "Invalid tile" }));
         }

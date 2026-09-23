@@ -26,6 +26,8 @@ WORKDIR /app
 RUN addgroup -S trafficnetwork && adduser -S trafficnetwork -G trafficnetwork
 COPY --from=prod-deps /app/node_modules ./node_modules
 COPY --from=build /app/dist ./dist
+# The built-in web UI's own files (pages, scripts, styles, translations); its map library comes from node_modules.
+COPY web ./web
 COPY package.json ./
 
 USER trafficnetwork

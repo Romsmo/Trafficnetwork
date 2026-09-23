@@ -54,6 +54,19 @@ services:
       REGION_TILE_H3_RESOLUTION: ${REGION_TILE_H3_RESOLUTION:-7}
       STATIC_DATA_PARTITION_H3_RESOLUTION: ${STATIC_DATA_PARTITION_H3_RESOLUTION:-2}
       DEVICE_REGISTRATION_RATE_LIMIT_MAX_PER_DAY: ${DEVICE_REGISTRATION_RATE_LIMIT_MAX_PER_DAY:-50}
+      # Web UI (docs/web-ui.md). Defaults mirror src/config/env.ts; the finer WEB_* limits are not passed
+      # through here — set them in a docker-compose.override.yml if you need to change them.
+      # Compose cannot hold "{z}" inside a default value, so an unset/empty MAP_TILE_URL is passed through as
+      # empty and the server substitutes its default (OpenStreetMap); "none" switches the map background off.
+      WEB_UI_ENABLED: ${WEB_UI_ENABLED:-true}
+      PROJECT_REPO_URL: ${PROJECT_REPO_URL:-https://github.com/Romsmo/Trafficnetwork}
+      MAP_TILE_URL: ${MAP_TILE_URL:-}
+      MAP_TILE_ATTRIBUTION_TEXT: ${MAP_TILE_ATTRIBUTION_TEXT:-© OpenStreetMap contributors}
+      MAP_TILE_ATTRIBUTION_URL: ${MAP_TILE_ATTRIBUTION_URL:-https://www.openstreetmap.org/copyright}
+      # Behind Caddy/nginx/Apache set this (e.g. to the proxy's address or hop count) — otherwise every visitor
+      # looks like the proxy and shares one rate-limit budget. Empty = trust no proxy.
+      TRUST_PROXY: ${TRUST_PROXY:-}
+      LOG_PRIVACY_MODE: ${LOG_PRIVACY_MODE:-true}
     ports:
       - "${PORT:-3000}:${PORT:-3000}"
 

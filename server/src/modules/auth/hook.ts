@@ -47,6 +47,9 @@ const PUBLIC_PATHS = new Set([
   "/v1/ws",
   "/v1/network/node-info",
   "/v1/network/directory",
+  // Anonymous web-UI session (only registered when WEB_UI_ENABLED, see modules/web/session.ts). Public by
+  // definition — its whole purpose is handing a token to a visitor who has none.
+  "/v1/web/session",
   "/v1/federation/join",
   "/v1/federation/peers",
   "/v1/federation/heartbeat",

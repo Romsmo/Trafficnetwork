@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { isAcceptableFederationAddress } from "../modules/federation/address.js";
+import { DEFAULT_MAP_TILE_URL, isAcceptableTileUrl } from "../modules/web/tile.js";
 
 const envSchema = z.object({
   DATABASE_URL: z.string().min(1, "DATABASE_URL is required"),
@@ -132,6 +133,60 @@ const envSchema = z.object({
   // Retry-After once this many pushes are being processed concurrently by
   // this process, rather than degrading everyone's latency under load.
   FEDERATION_OVERLOAD_MAX_CONCURRENT_PUSHES: z.coerce.number().int().positive().default(20),
+
+  // Reverse-proxy awareness. Unset/"false" = use the socket address (right when clients connect
+  // directly). Behind Caddy/nginx/Apache every client would otherwise look like the proxy, so all
+  // per-IP limits (token exchange, device registration, web sessions) would be shared by everyone.
+  // "true" (trust every hop — only safe if the server is reachable ONLY through the proxy), a hop
+  // count ("1"), or a comma-separated list of proxy IPs/CIDRs. See docs/web-ui.md.
+  TRUST_PROXY: z.string().optional(),
+
+  // Request logs contain the client's exact coordinates (query string) and IP address. With this on
+  // (default) request logs keep only method, path and host — no query string, no client address.
+  LOG_PRIVACY_MODE: z
+    .enum(["true", "false"])
+    .default("true")
+    .transform((v) => v === "true"),
+
+  // Built-in web UI (server/web, docs/web-ui.md): map, reporting, connect guide. Off = the node serves
+  // the API only and none of the web routes (including POST /v1/web/session) exist.
+  WEB_UI_ENABLED: z
+    .enum(["true", "false"])
+    .default("true")
+    .transform((v) => v === "true"),
+  // Shown in the web UI footer/about page; one place to change for a fork or after publication.
+  PROJECT_REPO_URL: z.string().url().default("https://github.com/Romsmo/Trafficnetwork"),
+  // Raster tile source for the web UI map, with {z}/{x}/{y} placeholders. Unset or empty = the default,
+  // OpenStreetMap's public tile server, whose usage policy
+  // (https://operations.osmfoundation.org/policies/tiles/) is not meant for heavy use: a node with
+  // real traffic should point this at its own or a commercial tile service. "none" = no map background.
+  // No API keys in here — the URL is visible to every visitor. (Empty means "default" rather than "off"
+  // because docker-compose passes an unset variable through as an empty string.) After parsing, "" means off.
+  MAP_TILE_URL: z
+    .string()
+    .default("")
+    .transform((value) => (value.trim() === "" ? DEFAULT_MAP_TILE_URL : value.trim().toLowerCase() === "none" ? "" : value.trim())),
+  MAP_TILE_ATTRIBUTION_TEXT: z.string().min(1).default("© OpenStreetMap contributors"),
+  MAP_TILE_ATTRIBUTION_URL: z.string().url().default("https://www.openstreetmap.org/copyright"),
+  MAP_TILE_MAX_ZOOM: z.coerce.number().int().min(1).max(22).default(19),
+
+  // Web sessions (POST /v1/web/session): anonymous, short-lived, unlinkable between renewals.
+  WEB_SESSION_TTL_SECONDS: z.coerce.number().int().min(60).max(3600).default(900),
+  WEB_SESSION_MINT_LIMIT_PER_MINUTE: z.coerce.number().int().positive().default(20),
+  // Write limits for web sessions, in addition to the ordinary moderation gate (REPORT_RATE_LIMIT_*):
+  // per session within the REPORT_RATE_LIMIT_WINDOW_MINUTES window, per client IP per hour, and a
+  // per-node circuit breaker per hour for all web sessions together.
+  WEB_REPORT_LIMIT_PER_SESSION: z.coerce.number().int().positive().default(3),
+  WEB_REPORT_LIMIT_PER_IP_PER_HOUR: z.coerce.number().int().positive().default(10),
+  WEB_REPORT_LIMIT_NODE_PER_HOUR: z.coerce.number().int().positive().default(300),
+  WEB_READ_LIMIT_PER_IP_PER_MINUTE: z.coerce.number().int().positive().default(120),
+  WEB_HEAVY_READ_LIMIT_PER_IP_PER_MINUTE: z.coerce.number().int().positive().default(30),
+  WEB_MAX_SEGMENT_RADIUS_M: z.coerce.number().int().positive().max(50_000).default(1500),
+  WEB_MAX_HAZARD_RADIUS_M: z.coerce.number().int().positive().max(50_000).default(25_000),
+  WEB_WS_MAX_TILES_PER_CONNECTION: z.coerce.number().int().positive().default(60),
+}).refine((env) => isAcceptableTileUrl(env.MAP_TILE_URL), {
+  message: "MAP_TILE_URL must be empty (no map background) or an http(s) URL containing {z}, {x} and {y} (no {s} subdomain placeholder, no credentials)",
+  path: ["MAP_TILE_URL"],
 }).refine((env) => !env.NETWORK_CONFIG_PATH || env.NETWORK_ROOT_PUBLIC_KEY, {
   message: "NETWORK_ROOT_PUBLIC_KEY is required whenever NETWORK_CONFIG_PATH is set — a signed config can't be verified without it",
   path: ["NETWORK_ROOT_PUBLIC_KEY"],
