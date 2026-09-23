@@ -102,6 +102,14 @@ _Zuletzt aktualisiert: 2026-09-17 von der F-C-Session._
 - [ ] L4: Testwerkzeug `tools/test-client/` (Kommandozeile + kleine Weboberfläche) auf Basis der Client-Bibliothek
 - [ ] L5: Abnahmetest inkl. zweitem lokalen Knoten und Failover, Ergebnis in `docs/launch-checklist.md`
 
+## Zusatz W — Weboberfläche des Servers (Karte, Melden, Anleitung)
+- [x] Claude-Code-Prompt erstellt (`docs/prompt-server-web-ui.md`) — reine Ergänzung, API bleibt unverändert
+- [ ] W1: Auslieferung durch den Server (`WEB_UI_ENABLED`), Grundgerüst, GitHub-Link in der Fußzeile, Deutsch/Englisch
+- [ ] W2: Karte (OpenStreetMap) mit Meldungen und Tempolimit-Abfrage, Live-Aktualisierung
+- [ ] W3: Melden und Bestätigen aus dem Browser, ohne Geheimnis im Quelltext, mit eigener Begrenzung
+- [ ] W4: Seiten „Verbinden" (App, eigener Knoten, API) und „Über das Projekt"
+- [ ] W5: E2E-Tests, `server/docs/web-ui.md`, Pull Request
+
 ## Launch P — Öffentlicher Betrieb (gemieteter Server + Domain)
 - [x] Claude-Code-Prompt erstellt (`docs/prompt-launch-public-server.md`)
 - [ ] Server und Domain besorgen
