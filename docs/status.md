@@ -2,7 +2,7 @@
 
 > **Zweck:** Zwei Claude-Code-Instanzen arbeiten parallel an getrennten Branches (Server bzw. Client-Bibliothek) und teilen sich keinen Kontext. Diese Datei lebt bewusst direkt auf `main` (nicht auf einem Feature-Branch) und wird von **jeder** Instanz nach jedem abgeschlossenen Meilenstein aktualiziert, committet und gepusht — so sieht die andere Instanz per `git fetch origin main` sofort den aktuellen Stand, ohne den unfertigen Code des anderen Branches anzufassen. `docs/todo.md` bleibt der langfristige Fahrplan; diese Datei ist der kurzfristige "was passiert gerade"-Status.
 
-Letztes Update: 2026-09-23, Launch-L-Instanz — **L0–L5 abgeschlossen** (Bayern lokal importiert, Testwerkzeug gebaut, Abnahmeprüfung 9/9 bestanden), Details in `docs/launch-checklist.md` auf `launch/local-test`; siehe Abschnitt "Launch L" unten. **Fund für die Ingestion-Instanz:** `maxspeed=0` in echten OSM-Daten lässt den ganzen Batch scheitern — Fix liegt auf `launch/ingestion-fix-maxspeed-zero`.
+Letztes Update: 2026-09-23, Web-UI-Instanz — **W0 (Plan) fertig**, wartet auf Freigabe, noch kein Code; siehe Abschnitt "Server-Weboberfläche (W)" unten. **Fund für die Server-Instanz:** die Tempolimit-Abfragen sind Sequential Scans (~0,9 s bei 438k Segmenten, ein Index-Vorfilter macht daraus ~23 ms).
 
 ---
 
@@ -120,6 +120,19 @@ Der unten dokumentierte rote CI-Befund ist behoben:
 - **Relevant für die anderen Instanzen:** Kein Zugriff auf/keine Änderung an `server/`/`client-lib/`/`ingestion/`-Code von hier aus (nur lokale, nicht committete Dockerfile-Anpassung für den eigenen Rechner) — außer dem vorgeschlagenen Ingestion-Fix oben.
   - **Server-Instanz:** (1) Kein `trustProxy` gesetzt — die IP-Limits von `/v1/auth/token`/`/v1/devices/register` (10/min) würden hinter einem Reverse Proxy alle Clients zusammenfassen. (2) `GET /v1/static-data/manifest` rechnet ~6 s pro Aufruf; ein Bayern-Vollsnapshot (`/v1/snapshot?staticData=true`) sind 195 MB / 4,5 s, Partitionen bei H3-Auflösung 2 je 25–100+ MB. (3) `federationEventId` fehlt weiterhin in der API (Bestätigungen sind pro Knoten). (4) `error.details` (Zod-Issues) der 400-Antworten werden vom Ingestion-CLI nicht ausgegeben (siehe oben).
   - **Client-Instanz:** Sobald es ein nutzbares Binding gibt (F-C4), sollte `tools/test-client/` darauf umgestellt werden — bis dahin testet es die Bibliothek nicht mit. Mehrserver-Verhalten (Health-Probe 5 s, Wechsel, Nachlesen nach Reconnect) ist im Werkzeug erprobt und kann als Referenz für die Conformance-Tests dienen.
+
+## Server-Weboberfläche (W, `docs/prompt-server-web-ui.md`)
+
+- **Branch:** `feature/server-web-ui` (noch nicht angelegt — wird nach der Freigabe des Plans in einem eigenen Worktree `TrafficNetwork-server-web-ui` von `main` abgezweigt; der gemeinsame Checkout wird nicht angefasst).
+- **Status:** **W0 abgeschlossen** (Stand geprüft, Entscheidungen mit Beleg, Seitenentwurf, offene Fragen — Bericht an den Nutzer). Wartet auf dessen Freigabe/Antworten. Kein Code, keine Änderung an `server/`.
+- **Voraussetzung geprüft:** F (F-S0–F-S5) ist gemergt (PR #1, `d32ae72`), `server/` hat sich auf `main` seither nicht mehr geändert; `server-ci`-Lauf 35446013012 war grün (laut dieser Datei — CI lässt sich von hier nicht unabhängig prüfen: Repo privat, kein `gh`).
+- **Kernentscheidungen (Begründung/Beleg im W0-Bericht):** Browser-Identität = kurzlebige, serverseitig ausgestellte anonyme Sitzung (`POST /v1/web/session`, nur bei `WEB_UI_ENABLED`, JWT-`sub` `web:<zufällig>`, Default-Deny-Allowlist auf `/v1`, Limits pro Sitzung/IP/Knoten); Web-Meldungen bleiben knotenlokal (keine `deviceAssertion`, damit keine Föderation und keine Wirkung auf Geräte-/Knoten-Reputation); Leaflet 1.9.4 (BSD-2-Clause) lokal ausgeliefert; OSM-Kacheln nur per konfigurierbarer `MAP_TILE_URL`; kein Frontend-Build, eigener minimaler Static-Handler statt `@fastify/static`.
+- **Relevant für die Server-Instanz (Funde, unabhängig von der Web-UI wichtig):**
+  - `GET /v1/speed-limit` und `GET /v1/speed-limit-segments/nearby` nutzen `ST_DWithin(geometry::geography, …)` — der Cast auf `geography` verhindert die Nutzung des GiST-Index auf `geometry`: Parallel Seq Scan, **~0,9 s pro Aufruf bei 438.595 Segmenten** (Bayern), unabhängig vom Radius (auch bei 0 Treffern). Mit einem Bbox-Vorfilter (`geometry && ST_Expand(…)`) liefert dieselbe Abfrage dasselbe Ergebnis in ~23 ms (EXPLAIN ANALYZE, 828 Zeilen beide Male). Der Kommentar in `findNearestSpeedLimit` behauptet Index-Unterstützung, die es so nicht gibt. Deutschlandweit (~10× so viele Segmente) wären es hochgerechnet (nicht gemessen) ~10 s pro Aufruf. `static-signs/nearby` ist ebenfalls ein Parallel Seq Scan (130 ms bei 109.646 Zeilen, EXPLAIN ANALYZE).
+  - Kein `trustProxy` gesetzt: alle IP-basierten Limits (`/v1/auth/token`, `/v1/devices/register`, künftig `/v1/web/session`) sehen hinter einem Reverse Proxy nur die Proxy-Adresse.
+  - `/v1/speed-limit-segments/nearby` und `/v1/hazard-reports/nearby` haben keine Ergebnisobergrenze (nur Radius ≤ 50 km; Bayern-Test: 20 km um München = 44.539 Segmente, 16,6 MB); WebSocket-Abos (`k` ≤ 5) sind pro Verbindung unbegrenzt oft möglich.
+  - Zugriffslogs (pino) enthalten IP und den kompletten Query-String, also exakte Koordinaten jeder Abfrage.
+  - Keine Server-Version über die API auslieferbar (`/v1/network/node-info` hat keine `version`).
 
 ## Wie diese Datei genutzt wird
 
