@@ -34,6 +34,11 @@ describe("normalizeFeature — speed-limit-segment (explicit maxspeed)", () => {
     const rows = normalizeFeature(wayFeature({ highway: "primary", maxspeed: "signals" }), silentLogger);
     expect(rows.filter((r) => r.kind === "speed-limit-segment")).toHaveLength(0);
   });
+
+  it.each(["0", "0 mph", "0.0"])("skips a non-positive maxspeed value %j (the server rejects speedLimit <= 0 for the whole batch)", (maxspeed) => {
+    const rows = normalizeFeature(wayFeature({ highway: "primary", maxspeed }), silentLogger);
+    expect(rows.filter((r) => r.kind === "speed-limit-segment")).toHaveLength(0);
+  });
 });
 
 describe("normalizeFeature — implicit maxspeed:type", () => {

@@ -36,8 +36,12 @@ function resolveMaxspeed(tags: Record<string, unknown>): ResolvedSpeed | { skip:
   const explicit = typeof tags.maxspeed === "string" ? tags.maxspeed.trim() : undefined;
   if (explicit !== undefined) {
     const mphMatch = explicit.match(/^(\d+(?:\.\d+)?)\s*mph$/i);
-    if (mphMatch) return { value: Number(mphMatch[1]), unit: "mph" };
     const kmhMatch = explicit.match(/^(\d+(?:\.\d+)?)$/);
+    const numeric = mphMatch ? Number(mphMatch[1]) : kmhMatch ? Number(kmhMatch[1]) : undefined;
+    // The server's bulk-import schema requires speedLimit > 0 and rejects the whole batch otherwise;
+    // real OSM data has a stray "maxspeed=0" (e.g. way 1526008141 in the Bayern extract).
+    if (numeric !== undefined && numeric <= 0) return { skip: `non-positive maxspeed value "${explicit}"` };
+    if (mphMatch) return { value: Number(mphMatch[1]), unit: "mph" };
     if (kmhMatch) return { value: Number(kmhMatch[1]), unit: "kmh" };
     // Primary source is present but non-numeric (e.g. "signals", "variable", "none", "walk") — per
     // OSM's own guidance maxspeed is the authoritative numeric source, so a non-numeric value here
