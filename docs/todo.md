@@ -114,7 +114,7 @@ _Zuletzt aktualisiert: 2026-09-17 von der F-C-Session._
 - [x] Zusatz-Prompts erstellt (`docs/prompt-addon-online-counter.md`)
 - [ ] O-A Server: `GET /v1/stats/online`, eigene Zahl im Heartbeat, Schwellenwert gegen Rückschlüsse
 - [ ] O-B Web: Anzeige unten rechts, Aktualisierung, Textfall unter dem Schwellenwert
-- [ ] O-C Client-Bibliothek: Felder in `getNetworkStatus()` (optional)
+- [x] O-C Client-Bibliothek: `NetworkStatus`-Felder `onlineNode`/`onlineNetwork`/`onlineEstimated`/`onlineAsOf` + `OnlineStatusService` (Branch `rework/client-lib-online-counter`, CI grün; gegen das vorgeschlagene Format gebaut, O-A steht noch aus; `getNetworkStatus()` als Fassade folgt mit F-C4/F-C5)
 
 ## Zusatz K — Falsche Tempolimits melden und korrigieren
 - [x] Zusatz-Prompts erstellt (`docs/prompt-addon-speed-limit-corrections.md`)
