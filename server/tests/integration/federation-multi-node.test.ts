@@ -103,8 +103,9 @@ describe("multi-node federation network (F-S5)", () => {
 
   beforeAll(async () => {
     // ONLINE_*: no answer caching, and a peer's reported figure goes stale after
-    // 3 s (instead of 5 minutes) so the "stale heartbeat" case fits in a test.
-    const online = { ONLINE_CACHE_SECONDS: "0", ONLINE_PEER_STALE_SECONDS: "3" };
+    // a few seconds (instead of 5 minutes) so the "stale heartbeat" case fits in
+    // a test — see PEER_STALE_SECONDS in the online-counter describe below.
+    const online = { ONLINE_CACHE_SECONDS: "0", ONLINE_PEER_STALE_SECONDS: "4" };
     [a, b, c] = await Promise.all([startNode(PORT_A, online), startNode(PORT_B, online), startNode(PORT_C, online)]);
 
     // Full mesh: B joins A; C joins both A and B. A never initiates a join
@@ -340,6 +341,9 @@ describe("multi-node federation network (F-S5)", () => {
       online: node.app.online,
     });
     const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+    /** Matches ONLINE_PEER_STALE_SECONDS above; waits until everything reported so far has gone stale. */
+    const PEER_STALE_SECONDS = 4;
+    const waitUntilStale = () => sleep((PEER_STALE_SECONDS + 0.3) * 1000);
 
     async function connectClients(node: Node, prefix: string, count: number): Promise<WebSocket[]> {
       const opened: WebSocket[] = [];
@@ -397,7 +401,7 @@ describe("multi-node federation network (F-S5)", () => {
     it("the network total is just the node's own figure until peers have reported theirs", async () => {
       // Nobody has sent a heartbeat carrying a figure yet in this describe block:
       // the estimate is this node's own, from one node.
-      await sleep(3300); // let anything reported by earlier tests go stale
+      await waitUntilStale(); // let anything reported by earlier tests go stale
       expect((await statsOf(a)).network).toMatchObject({ online: base.a + CLIENTS.a, nodes: 1, estimated: true });
     });
 
@@ -416,9 +420,10 @@ describe("multi-node federation network (F-S5)", () => {
 
     it("stops counting a peer whose last heartbeat is stale, and counts it again after a fresh one", async () => {
       await sendHeartbeats(depsOf(b));
-      expect((await statsOf(a)).network).toMatchObject({ nodes: 3 }); // B and C both reported within the last few seconds
+      await sendHeartbeats(depsOf(c));
+      expect((await statsOf(a)).network).toMatchObject({ nodes: 3 }); // both reported just now
 
-      await sleep(3300); // > ONLINE_PEER_STALE_SECONDS: both reports are now stale
+      await waitUntilStale(); // both reports are now stale
       expect((await statsOf(a)).network).toMatchObject({ online: base.a + CLIENTS.a, nodes: 1 });
 
       await sendHeartbeats(depsOf(b)); // only B is heard from again
@@ -438,7 +443,7 @@ describe("multi-node federation network (F-S5)", () => {
     });
 
     it("a heartbeat with an unusable figure is still accepted, but the figure is not counted", async () => {
-      await sleep(3300); // everything reported so far is stale
+      await waitUntilStale(); // everything reported so far is stale
       for (const onlineCount of [-5, 2.5, "many", 999_999_999]) {
         const heartbeat = signEnvelope(
           { nodeId: b.app.nodeIdentity.nodeId, address: b.address, version: "1", onlineCount, timestamp: new Date().toISOString() },
@@ -451,7 +456,7 @@ describe("multi-node federation network (F-S5)", () => {
     });
 
     it("a node with the counter switched off sends no figure, so peers cannot count it", async () => {
-      await sleep(3300);
+      await waitUntilStale();
       await sendHeartbeats({ ...depsOf(b), online: undefined });
       expect((await statsOf(a)).network).toMatchObject({ online: base.a + CLIENTS.a, nodes: 1 });
     });
