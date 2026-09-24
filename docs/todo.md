@@ -112,7 +112,7 @@ _Zuletzt aktualisiert: 2026-09-17 von der F-C-Session._
 
 ## Zusatz O — Anzeige „aktuell online" (Server + Web + Client-Bibliothek)
 - [x] Zusatz-Prompts erstellt (`docs/prompt-addon-online-counter.md`)
-- [ ] O-A Server: `GET /v1/stats/online`, eigene Zahl im Heartbeat, Schwellenwert gegen Rückschlüsse
+- [x] O-A Server: `GET /v1/stats/online`, eigene Zahl im Heartbeat (`onlineCount`), Schwellenwert gegen Rückschlüsse (Branch `feature/online-counter`, lokal 295/295, PR wartet auf Freigabe; Antwortformat entspricht dem von O-B/O-C erwarteten)
 - [ ] O-B Web: Anzeige unten rechts, Aktualisierung, Textfall unter dem Schwellenwert
 - [x] O-C Client-Bibliothek: `NetworkStatus`-Felder `onlineNode`/`onlineNetwork`/`onlineEstimated`/`onlineAsOf` + `OnlineStatusService` (Branch `rework/client-lib-online-counter`, CI grün; gegen das vorgeschlagene Format gebaut, O-A steht noch aus; `getNetworkStatus()` als Fassade folgt mit F-C4/F-C5)
 
