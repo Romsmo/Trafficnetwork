@@ -100,9 +100,32 @@ button.small { min-height: 36px; padding: 4px 10px; font-size: 0.9rem; }
 }
 
 .site-footer {
-  display: flex; flex-wrap: wrap; gap: 6px 18px; align-items: center; justify-content: center;
+  display: grid; grid-template-columns: 1fr; justify-items: center; gap: 2px 18px; align-items: center;
   padding: 10px 12px; font-size: 0.9rem; color: var(--muted);
   background: var(--surface); border-top: 1px solid var(--line);
+}
+.footer-links { display: flex; flex-wrap: wrap; gap: 6px 18px; justify-content: center; }
+
+/* "N online" at the bottom right (add-on O-B): a <details>, so the extra lines open on tap, click or Enter. It always
+   keeps its place in the footer, so neither the first answer nor a changing number moves anything. */
+.online-badge { position: relative; justify-self: end; font-size: 0.85rem; color: var(--ink); font-variant-numeric: tabular-nums; }
+.online-badge[hidden] { display: none; }
+.online-badge[data-state="pending"], .online-badge[data-state="unavailable"] { visibility: hidden; }
+.online-summary {
+  display: inline-flex; align-items: center; gap: 6px; min-width: 8.5rem; min-height: 28px; padding: 2px 6px; justify-content: flex-end;
+  cursor: pointer; list-style: none; border-radius: var(--radius); text-decoration: underline dotted; text-underline-offset: 3px;
+}
+.online-summary::-webkit-details-marker { display: none; }
+.online-summary .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ok); flex: none; }
+.online-detail {
+  position: absolute; right: 0; bottom: calc(100% + 6px); z-index: 3000; width: min(21rem, 88vw); padding: 8px 12px;
+  background: var(--surface); color: var(--ink); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); text-align: left;
+}
+.online-detail p { margin: 4px 0; max-width: none; }
+@media (min-width: 760px) {
+  .site-footer { grid-template-columns: 1fr auto 1fr; }
+  .footer-links { grid-column: 2; }
+  .online-badge { grid-column: 3; grid-row: 1; }
 }
 
 /* ---------- content pages ---------- */

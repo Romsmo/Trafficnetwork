@@ -13,7 +13,7 @@ unchanged (one additive endpoint, `POST /v1/web/session`), and with `WEB_UI_ENAB
 |---|---|
 | ![Speed-limit layer and lookup](web-ui/map-speed-limits.jpg) | ![Map on a phone](web-ui/map-mobile.jpg) |
 
-More: [dark mode](web-ui/map-dark.jpg), [Connect page](web-ui/connect.png), [About page](web-ui/about.png).
+More: [dark mode](web-ui/map-dark.jpg), [online display](web-ui/online-display.jpg) (mock data), [Connect page](web-ui/connect.png), [About page](web-ui/about.png).
 The images are regenerated with `npm run e2e:screenshots` (see [Tests](#tests)); they show the end-to-end suite's synthetic
 test data (a few straight streets and six reports in Munich) on real map tiles — a real node shows the roads its own data has.
 
@@ -62,8 +62,39 @@ The Docker image contains the UI (`server/web` is copied into it); `docker-compo
   copyable `curl` examples containing this node's address, and the node's network status (node id, version, federation
   state, other known nodes). Code examples for the client library's platform bindings will follow when those exist.
 * **About** — the project text, data sources, safety and privacy notice, and a prominent link to the project on GitHub.
+* **Online display** — a small "N online" at the bottom right of every page once the node offers the counter, see below.
 * German and English (browser language, switchable, remembered in `localStorage` — the only thing the page stores), mobile
   friendly, keyboard operable, WCAG 2 A/AA checked automatically (light and dark mode).
+
+## "N online" display (add-on O-B)
+
+Bottom right of every page (in the footer, so it never covers the map's controls) the page shows how many are online, e.g.
+"● 12 online" or, under the node's threshold, "fewer than 5 online". A tap, click or Enter on it opens the details: this node's
+figure, the **network figure — always labelled as an estimate** that adds up what other nodes report about themselves and is
+not verified — and a note that only counting happens. It is text, not a colour signal (the dot is decoration), it is a native
+`<details>` (keyboard operable, closes with Escape), it reserves its place so neither its first appearance nor a changing
+number moves anything, and it stays out of the way on a phone.
+
+**Status: built against a mock.** The server part (O-A, `GET /v1/stats/online`, `docs/prompt-addon-online-counter.md`) does not
+exist yet, so the page follows the contract *proposed* there:
+
+```json
+{ "node": { "online": 12, "windowSeconds": 300 },
+  "network": { "online": 87, "nodes": 4, "estimated": true, "asOf": "2026-09-24T10:15:00Z" },
+  "minDisplayThreshold": 5 }
+```
+
+Below the threshold a figure is `"online": null` with `"below": 5` (or just `null`, then `minDisplayThreshold` applies); the page
+also enforces the threshold itself and never shows an exact number under it. `{ "enabled": false }` means "switched off".
+The reader (`parseOnlineStats` in `assets/js/online-badge.js`) is deliberately tolerant; **anything it does not understand
+hides the display**. If O-A ends up with another shape, adapt that one function and its unit tests
+(`tests/unit/web-online.test.ts`); the end-to-end tests (`e2e/online.spec.ts`) answer the endpoint with a mock until then.
+
+Behaviour: one request when the page opens, then every 30 seconds (none while the tab is hidden; a refresh when it becomes
+visible again). The request is the public one — no token, no cookie, so it does not use up a web session. If the node answers
+401/403/404/405/410 (an older server) or `enabled: false`, the display disappears silently and the page stops asking; a passing
+failure (network, 5xx, 429, unusable answer) hides it and it comes back when the node answers again. The browser logs a failed
+request in its console; that is how a page finds out that a node has no counter (the end-to-end helper ignores exactly that URL).
 
 ## How the page talks to the node
 
@@ -164,7 +195,7 @@ Leaflet 1.9.4 (BSD-2-Clause) and `h3-js` are served from `node_modules` under `/
 
 | What | Command | Notes |
 |---|---|---|
-| Unit | `npm run test:unit` | i18n parity, guard/limits, CSP, static asset table, frontend helpers |
+| Unit | `npm run test:unit` | i18n parity, guard/limits, CSP, static asset table, frontend helpers, the online display's reader and polling |
 | Integration | `npm run test:integration` | real PostGIS via Testcontainers: session, allowlist, limits, camera flag, WebSocket push, `WEB_UI_ENABLED=false` |
 | End-to-end | `npm run e2e` | real Chromium against real node processes and PostGIS (Testcontainers), `npx playwright install chromium` once |
 | Screenshots | `npm run e2e:screenshots` | regenerates `docs/web-ui/*` (needs internet: real map tiles) |

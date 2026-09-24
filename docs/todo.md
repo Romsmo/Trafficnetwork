@@ -114,7 +114,7 @@ _Zuletzt aktualisiert: 2026-09-17 von der F-C-Session._
 ## Zusatz O — Anzeige „aktuell online" (Server + Web + Client-Bibliothek)
 - [x] Zusatz-Prompts erstellt (`docs/prompt-addon-online-counter.md`)
 - [ ] O-A Server: `GET /v1/stats/online`, eigene Zahl im Heartbeat, Schwellenwert gegen Rückschlüsse
-- [ ] O-B Web: Anzeige unten rechts, Aktualisierung, Textfall unter dem Schwellenwert
+- [x] O-B Web: Anzeige unten rechts, Aktualisierung, Textfall unter dem Schwellenwert — **gegen einen Mock des vorgeschlagenen Vertrags gebaut** (Branch `feature/server-web-ui`); gegen den echten Endpunkt zu prüfen, sobald O-A gemergt ist (`server/docs/web-ui.md`, Abschnitt "N online")
 - [ ] O-C Client-Bibliothek: Felder in `getNetworkStatus()` (optional)
 
 ## Zusatz K — Falsche Tempolimits melden und korrigieren

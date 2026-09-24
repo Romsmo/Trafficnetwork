@@ -28,6 +28,7 @@ Stand / as of: 2026-09-24 · gilt für / applies to `server/web` (Weboberfläche
 * **IP-Adresse:** Sie wird kurz im Arbeitsspeicher gezählt (Missbrauchsbegrenzung, Fenster bis zu einer Stunde) und nicht in
   der Datenbank gespeichert. Die **Zugriffsprotokolle** des Knotens enthalten standardmäßig weder Koordinaten (Query-String) noch
   IP-Adressen (`LOG_PRIVACY_MODE=true`). Ein vorgeschalteter Webserver/Proxy des Betreibers kann eigene Protokolle führen.
+* **Anzeige „online“ (nur wenn der Knoten sie anbietet):** Die Seite ruft alle 30 Sekunden eine öffentliche Zählung ab (`GET /v1/stats/online`, ohne Token und ohne Cookie). Es wird nur gezählt: dafür werden keine Personen, Adressen, Kennungen oder Standorte gespeichert; unter einem Mindestwert wird „weniger als N“ statt einer Zahl ausgegeben. Die Zahl für das Netzwerk beruht auf Angaben anderer Knoten und ist eine ungeprüfte Schätzung.
 * **Kartenkacheln:** Dein Browser lädt die Kacheln **direkt vom konfigurierten Kartenserver** (Standard:
   `tile.openstreetmap.org`, betrieben von der OpenStreetMap Foundation). Dieser sieht deine IP-Adresse, deinen Browser und den
   angezeigten Kartenausschnitt und unterliegt seiner eigenen Datenschutzerklärung. Betreiber können einen anderen Kartenserver
@@ -59,6 +60,7 @@ Abschnitt 8).
 * **IP address:** counted briefly in memory for abuse limiting (window of up to one hour), not stored in the database. The
   node's **access logs** contain neither coordinates (query string) nor IP addresses by default (`LOG_PRIVACY_MODE=true`). A web
   server/proxy in front of the node may keep its own logs.
+* **"Online" display (only if the node offers it):** the page reads a public count every 30 seconds (`GET /v1/stats/online`, no token, no cookie). It only counts: no people, addresses, identifiers or locations are stored for it; below a minimum the page says "fewer than N" instead of a number. The network figure rests on what other nodes report and is an unverified estimate.
 * **Map tiles:** your browser loads tiles **directly from the configured tile server** (default `tile.openstreetmap.org`,
   operated by the OpenStreetMap Foundation). It sees your IP address, browser and the map area shown and is subject to its own
   privacy policy. Operators can configure another tile server or switch the map background off (`MAP_TILE_URL=none`).

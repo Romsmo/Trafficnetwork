@@ -40,7 +40,11 @@ export async function watchTraffic(page: Page, nodeUrl: string, { fakeTiles = tr
   });
   page.on("websocket", (socket) => traffic.sockets.push(socket.url()));
   page.on("console", (message) => {
-    if (message.type() === "error") traffic.consoleErrors.push(message.text());
+    if (message.type() !== "error") return;
+    // The "N online" display probes GET /v1/stats/online; a node without that add-on answers 401/404 and the browser logs it.
+    // That is the display's designed way of finding out that there is no counter, not an error of the page.
+    if (message.location().url.includes("/v1/stats/online")) return;
+    traffic.consoleErrors.push(message.text());
   });
   page.on("pageerror", (error) => traffic.consoleErrors.push(`pageerror: ${error.message}`));
   return traffic;

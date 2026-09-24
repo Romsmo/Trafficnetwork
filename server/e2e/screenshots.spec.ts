@@ -108,3 +108,21 @@ test.describe("phone", () => {
     await page.screenshot(photo("map-mobile"));
   });
 });
+
+test("online display (mock of the proposed endpoint)", async ({ page }) => {
+  await watchTraffic(page, node, { fakeTiles: false });
+  // The server part of the online counter does not exist yet: this picture shows the page reading a MOCK of the proposed answer.
+  await page.route("**/v1/stats/online", (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ node: { online: 12, windowSeconds: 300 }, network: { online: 87, nodes: 4, estimated: true, asOf: new Date().toISOString() }, minDisplayThreshold: 5 }),
+    }),
+  );
+  await openMap(page, node);
+  await tilesLoaded(page);
+  await page.locator("#site-footer .online-badge summary").click();
+  await expect(page.locator("#site-footer .online-detail")).toBeVisible();
+  await page.waitForTimeout(300);
+  await page.screenshot({ ...photo("online-display"), clip: { x: 640, y: 380, width: 640, height: 420 } });
+});
