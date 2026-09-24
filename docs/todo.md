@@ -124,6 +124,16 @@ _Zuletzt aktualisiert: 2026-09-17 von der F-C-Session._
 - [x] Schwellenwert entschieden: **3 verschiedene Geräte** (Konfigurationswert, Standard 3)
 - [ ] Wertebereich für Korrekturen festlegen (Plausibilitätsgrenzen)
 
+## Zusatz E — Grundstock ganz Europa (einmalig, aktueller Stand)
+- [x] Entschieden: ganz Europa, **einmaliger** Import des aktuellsten Stands; kein wiederkehrender Update-Lauf vorerst
+- [x] Entschieden: statische Daten weiterhin **vollständig an jedes Gerät** — Machbarkeit wird nach dem Import gemessen, nicht geraten
+- [x] Zusatz-Prompts erstellt (`docs/prompt-addon-europe-basemap.md`)
+- [ ] E-A Ingestion: Machbarkeitsbericht (Platz, RAM, Dauer), dann Europa-Import in Abschnitten, Update-Weg nur dokumentiert
+- [ ] E-B Server: Größen und Antwortzeiten messen, Pakete/Manifest bei Europa-Größe, zwischenspeicherbare Auslieferung
+- [ ] E-C Client-Bibliothek: vollständigen Bootstrap messen und berichten (Datenmenge, Dauer, Speicher)
+- [ ] E-D Web: Startansicht Europa, nur sichtbaren Ausschnitt laden, Cluster bei kleiner Zoomstufe
+- [ ] Nach den Messungen entscheiden, ob „alles auf jedem Gerät" so bleibt
+
 ## Launch P — Öffentlicher Betrieb (gemieteter Server + Domain)
 - [x] Claude-Code-Prompt erstellt (`docs/prompt-launch-public-server.md`)
 - [ ] Server und Domain besorgen
