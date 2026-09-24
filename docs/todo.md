@@ -121,7 +121,8 @@ _Zuletzt aktualisiert: 2026-09-17 von der F-C-Session._
 - [ ] K-A Server: Korrektur als überlagernder Datensatz (Import bleibt erhalten), Schwellenwert, Widerspruch, Verteilung über Pakete/Events, Betreiber kann zurücksetzen
 - [ ] K-B Web: „Stimmt nicht?"-Formular, Herkunft des Werts sichtbar
 - [ ] K-C Client-Bibliothek: `reportWrongSpeedLimit()` über den Offline-Puffer, Herkunft in `getSpeedLimitAt()`
-- [ ] Entscheiden: Schwellenwert (Vorschlag 3 Geräte) und Wertebereich für Korrekturen
+- [x] Schwellenwert entschieden: **3 verschiedene Geräte** (Konfigurationswert, Standard 3)
+- [ ] Wertebereich für Korrekturen festlegen (Plausibilitätsgrenzen)
 
 ## Launch P — Öffentlicher Betrieb (gemieteter Server + Domain)
 - [x] Claude-Code-Prompt erstellt (`docs/prompt-launch-public-server.md`)
