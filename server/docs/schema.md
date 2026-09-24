@@ -34,7 +34,69 @@ Postgres extension): `hazard_reports`.
 ### `speed_limit_segments`
 `geometry(LineString,4326)`, `speed_limit`, `speed_limit_unit` (`kmh`|`mph`),
 provenance (`source`, `source_license`, `imported_at`, `last_confirmed_at`).
-GIST index on `geometry`.
+GIST index on `geometry`. **This table is the *imported* truth and is never
+written by the community-corrections feature** — see below.
+
+**`geometry_key` (K-A, migration 0007):** a *stored generated column* (`text`,
+32 lowercase hex chars, btree-indexed) computed by the SQL function
+`speed_limit_geometry_key(geometry)`. It is the cross-server-stable identity of
+a segment's geometry — what community corrections and device-signed votes
+reference, because `id` is a random per-server, per-row UUID. It can't be
+written or drift; nothing in the import code has to know about it. The formula
+(also implemented independently in `tests/integration/speed-limit-geometry-key.test.ts`
+so other implementations can check themselves):
+
+```
+pts(g)  = for each vertex in order:  round(X * 1e7) "," round(Y * 1e7)       -- integer micro-degrees, X = lng, Y = lat
+fwd     = join(";", pts(g))            rev = join(";", reverse(pts(g)))
+key     = first 32 hex chars of sha256( min(fwd, rev) )                       -- UTF-8, plain ASCII (C collation) comparison
+```
+
+Rounding to 1e-7° (≈1 cm) makes the key independent of float formatting and
+of sub-centimetre noise; `min(fwd, rev)` gives a road digitised in the opposite
+direction the same key. Rows with identical geometry (a re-import creates
+them) share a key, so a correction applies to all of them. If a later import
+changes a segment's *geometry*, its key changes and the corrections of the old
+key become orphans (`npm run corrections -- orphans`).
+The function binds PostGIS via its own `search_path`, so it keeps working under
+`pg_restore` (which empties `search_path`) and on hosts that install PostGIS
+outside `public`.
+
+### `speed_limit_correction_votes`
+Append-only log of every vote — the **source of truth** of community
+corrections (`docs/speed-limit-corrections.md` D2). `seq` (bigserial PK — this
+server's insertion order and the federation pull cursor, never comparable across
+servers), `id` (unique; sha256 over the signed envelope for a signed vote,
+`local:<uuid>` for an unsigned one), `segment_key`, `reporter_id`
+(`device:<key id>` or `local:<client id>` — pseudonymous, never returned by any
+endpoint), `submitted_by` (the calling client's JWT subject, null for a replicated
+vote — what the per-client rate limit counts), `kind` (`support`|`deny`),
+`value`, `unit`, `reason`, `vote_timestamp` (the signed timestamp, or receive
+time for an unsigned vote — the ordering key), `received_at`, `envelope` (the
+verbatim `SignedEnvelope`, null for an unsigned/node-local vote), `origin_node_id`.
+No foreign key to `speed_limit_segments`: a vote may arrive before its segment is
+imported, and must survive a wipe-and-reimport.
+
+### `speed_limit_corrections`
+Materialised view of the votes: one row per `(segment_key, unit, value)` that a
+vote names. `id` is deterministic — first 128 bits of
+`sha256("speedLimitCorrection|<key>|<unit>|<value>")` as a UUID — so it addresses
+the same record on every server. `status` (`proposed`|`applied`|`superseded`|
+`reverted`), `support_count`, `deny_count`, `reason` (of the earliest supporting
+vote), `first_proposed_at`, `last_vote_at`. Node-local bookkeeping (not part of
+what federation converges on): `applied_at`, `reverted_at`, `base_value` (the
+imported value it was proposed against — the reference for `needsReview`),
+`blocked_at`/`blocked_reason` (operator reset: the candidate can never win until
+restored). Re-derived from the votes on every vote (`recomputeSegment`); the
+*effective* value is joined in at read time (an `applied` row on the same key and
+unit whose value differs from the imported one), never written into
+`speed_limit_segments`.
+
+### `speed_limit_correction_bans`
+`reporter_id` (PK), `reason`, `banned_at`. Operator-maintained; votes by a banned
+reporter are excluded from every tally (retroactively; unbanning restores them)
+and a banned reporter's local submissions are refused. Local policy — never
+replicated.
 
 ### `static_signs`
 `position` (Point), `sign_type` — a country-prefixed catalog reference (e.g.
@@ -179,7 +241,9 @@ contact). `last_pulled_sequence` is local-only bookkeeping for the
 anti-entropy pull worker — the highest `event_log.sequence` this server has
 already pulled *from this specific peer*; never sent to or compared against
 any other server, since sequence numbers aren't comparable across servers
-(each is its own per-process bigserial).
+(each is its own per-process bigserial). `last_pulled_votes_sequence` (K-A) is
+the same bookkeeping for the separate speed-limit vote stream
+(`speed_limit_correction_votes.seq`).
 
 **Reputation columns (F-S4, `modules/federation/reputation.ts`):**
 `successful_health_checks` / `consecutive_health_check_failures` — updated
@@ -202,7 +266,12 @@ increasing counter bumped transactionally by `appendEvent()` (for
 `StaticDataUpdated`/`StaticDataRemoved`) and by every bulk-import insert
 (client-lib P2.0's `/v1/static-data/manifest` calls this `staticDataVersion`
 — see `docs/api.md`). A row `UPDATE`, not a `SEQUENCE`, so the bump rolls
-back with the rest of its transaction if that transaction fails.
+back with the rest of its transaction if that transaction fails. Also bumped
+(K-A) whenever the *effective* speed limit of a segment changes through a
+community correction, and once when a boot finds
+`COMMUNITY_CORRECTIONS_ENABLED` flipped: `corrections_overlay_enabled` remembers
+the switch value of the last boot so that flip can be detected and announced.
+Migration 0007 bumps it once too, because every segment now carries `segmentKey`.
 
 ## Migrations
 
@@ -210,3 +279,16 @@ back with the rest of its transaction if that transaction fails.
 IF NOT EXISTS postgis`) then `0001_...sql` (drizzle-kit generated from the
 schema). Regenerate with `npm run db:generate` after changing
 `src/db/schema/*.ts`; apply with `npm run db:migrate`.
+
+`0007_speed_limit_corrections.sql` (K-A) is generated plus two hand-written
+parts: it first creates the SQL function `speed_limit_geometry_key()` (the
+generated column needs it), and ends by bumping the static-data version. Adding
+the stored generated column **rewrites `speed_limit_segments` once** and holds an
+exclusive lock while it does — measured on a throwaway `postgis/postgis:16-3.4`
+container with 1,000,000 synthetic 4-vertex segments: about **18 s for the
+rewrite plus 3 s for the index**, i.e. roughly 20 s per million segments (a
+Europe-wide import of tens of millions of rows would be several minutes). Run the
+migration before starting the new server, not while it serves traffic
+(`docs/operating.md`). Afterwards the key costs about 12 µs per inserted segment
+(one SQL-function call per row, measured over 200,000 geometries), which
+lengthens a bulk import by roughly 12 s per million rows.

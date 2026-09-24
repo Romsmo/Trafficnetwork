@@ -181,6 +181,59 @@ A background worker (`FEDERATION_ANTI_ENTROPY_INTERVAL_SECONDS`, default
 failed push — a server that was briefly offline, or a peer relationship
 established after an event was already pushed elsewhere, both heal this way.
 
+### 5.3 Speed-limit votes (add-on K-A)
+
+Community speed-limit corrections (`docs/speed-limit-corrections.md`) are
+federated the same way — device-signed, self-certifying, deterministically
+merged — with two differences that follow from being *durable state* instead of a
+72-hour hazard report.
+
+```
+SpeedLimitVote = {
+  kind: "speedLimitVote", vote: "support" | "deny",
+  segmentKey,                       // 32 hex, content-derived from the geometry (schema.md) — never a server-local id
+  value, unit: "kmh" | "mph", reason?: "wrong_value" | "limit_lifted" | "sign_missing_or_new" | "other",
+  devicePublicKey, timestamp
+}
+voteId   = sha256(canonical({ payload, signature }))       // same scheme as federationEventId
+reporter = "device:" + keyId(devicePublicKey)               // identical on every server → identical tally
+```
+
+* **Own stream.** Push: the optional `speedLimitVotes` array next to `events` in
+  `POST /v1/federation/events` (an older peer's schema drops the unknown key
+  instead of rejecting the batch). Pull: `GET /v1/federation/speed-limit-votes?after=&limit=`
+  with a separate per-peer cursor (`network_peers.last_pulled_votes_sequence`).
+  Votes are **never purged** by event-log retention, so a server that joins
+  later or heals a long partition catches up on all of them. A peer answering
+  `404` (older server, or corrections off) is skipped without counting a failed
+  health check.
+* **Ingest** (`modules/speed-limit-corrections/ingest.ts`): signature verifies
+  against the key the payload names; timestamp not more than 5 minutes in the
+  future — **no maximum age**; value passes this server's own range/step;
+  insert `ON CONFLICT (id) DO NOTHING` (idempotent under concurrent
+  push+pull — no unique-violation race to catch); recompute the segment. A vote
+  for a segment this server doesn't have is stored anyway (the segment may be
+  imported later, and the pull cursor won't come back for it).
+* **Deterministic merge.** The effective value of a segment is a pure function
+  of the *set* of non-banned votes (per reporter, in `(timestamp, id)` order: one
+  support per segment, denials per value; `net = supporters − deniers`; highest
+  net at or above `COMMUNITY_CORRECTIONS_CONFIRMATIONS_REQUIRED` wins; a tie for
+  first place has no winner). No arrival-order dependence, no hysteresis — so
+  two servers holding the same votes serve the same value, which the multi-node
+  test (`tests/integration/federation-speed-limit-corrections.test.ts`) checks
+  including a partition healed by pulls in a different order on each server.
+* **What is *not* federated:** unsigned votes (a web session has no device key —
+  they count on the server they were sent to only), operator resets, bans and
+  the operator's threshold/range — all local policy. Keep the range/step/threshold
+  equal across servers you federate with, or they will disagree about which
+  votes count.
+* **Trust.** A relay cannot alter a vote (signature) and a bad signature costs
+  the sender its reputation like any bad event. What signatures cannot stop is
+  a party that controls many *device keys* (a Sybil): a local vote is therefore
+  only accepted with the key bound to the calling client (which bounds
+  registrations by the per-app-key daily cap), but a malicious *server* can still
+  mint keys — see `docs/threat-model.md`, "Community speed-limit corrections".
+
 ## 6. Overload signaling
 
 `POST /v1/federation/events` returns `503` + `Retry-After` once

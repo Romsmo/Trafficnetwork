@@ -47,6 +47,7 @@ Siehe [`.env.example`](.env.example) — alle Werte sind dokumentiert und haben 
 - `STATIC_DATA_PARTITION_H3_RESOLUTION` / `DEVICE_REGISTRATION_RATE_LIMIT_MAX_PER_DAY` — client-lib-P2.0-Tuning (Paket-Kachelgröße bzw. Geräteregistrierungen pro App-Schlüssel und Tag).
 - `FEDERATION_ENABLED` / `NETWORK_ROOT_PUBLIC_KEY` / `NETWORK_CONFIG_PATH` — Föderation (F-S2), siehe "Network keys & signed config" unten.
 - `FEDERATION_PUBLIC_ADDRESS` / `FEDERATION_SEEDS` / `FEDERATION_HEARTBEAT_INTERVAL_SECONDS` / `FEDERATION_ANTI_ENTROPY_INTERVAL_SECONDS` / `FEDERATION_EVENT_MAX_AGE_HOURS` / `FEDERATION_PEER_TIMEOUT_MS` — Föderationsprotokoll (F-S3), siehe "Föderation: Beitritt, Peers, Replikation" unten.
+- `COMMUNITY_CORRECTIONS_ENABLED` / `COMMUNITY_CORRECTIONS_CONFIRMATIONS_REQUIRED` / `COMMUNITY_CORRECTIONS_KMH_MIN` / `_KMH_MAX` / `_MPH_MIN` / `_MPH_MAX` / `_VALUE_STEP` / `COMMUNITY_CORRECTIONS_RATE_LIMIT_MAX` / `_WINDOW_MINUTES` — Community-Korrekturen falscher Tempolimits (Zusatz K-A): Schalter, Schwellwert (Standard 3 verschiedene Geräte), Plausibilitätsbereich je Einheit und eigenes, strengeres Limit pro Gerät. Siehe "Community-Korrekturen von Tempolimits" unten.
 - `REPUTATION_PROBATION_MIN_HOURS` / `REPUTATION_MIN_SUCCESSFUL_HEALTH_CHECKS` / `REPUTATION_TRUSTED_MIN_HOURS` / `REPUTATION_TRUSTED_MIN_SUCCESSFUL_HEALTH_CHECKS` / `REPUTATION_DEMOTE_AFTER_CONSECUTIVE_FAILURES` / `REPUTATION_DIRECTORY_PROBATION_MAX_SHARE` / `FEDERATION_OVERLOAD_MAX_CONCURRENT_PUSHES` — Reputation & Überlast-Signal (F-S4), siehe "Reputation, Verzeichnis & Überlast-Signal" unten.
 
 ## Network keys & signed config (F-S2)
@@ -90,6 +91,15 @@ npm run network:export-directory -- --url https://mein-server.example --out ./di
 ```
 
 **Überlast-Signal**: `POST /v1/federation/events` liefert `503` + `Retry-After`, sobald `FEDERATION_OVERLOAD_MAX_CONCURRENT_PUSHES` gleichzeitig verarbeitete Pushes erreicht sind — eine Nebenläufigkeits-Bremse, kein Ersatz für den bestehenden IP-basierten Rate-Limit auf derselben Route. Der Heartbeat-Versand trägt zusätzlich einen selbstberichteten `capacityHint` (0–1), damit sich wohlverhaltende Peers proaktiv zurückhalten können — für die eigene Reputationsberechnung wird dieser Wert aber nie vertraut (siehe `docs/threat-model.md`).
+
+## Community-Korrekturen von Tempolimits (Zusatz K-A)
+
+Nutzer können ein falsches Tempolimit melden und einen Wert vorschlagen. Die Korrektur ist ein **Overlay**: Die importierte Zeile wird nie verändert, der wirksame Wert wird beim Lesen aus Import + aktiver Korrektur bestimmt (`speedLimit` in allen bestehenden Antworten ist bereits der wirksame Wert; zusätzlich `correctedBy: "community"`, `importedSpeedLimit`, `correction` mit Bestätigungen/Datum/`needsReview`). Wirksam wird sie erst, wenn `COMMUNITY_CORRECTIONS_CONFIRMATIONS_REQUIRED` (Standard **3**) *verschiedene Geräte* übereinstimmen — ein Widerspruch zählt dagegen. Verteilung über Ereignisprotokoll, Snapshot, versionierte Pakete und (gerätesigniert, deterministisch zusammengeführt) über die Föderation.
+
+- Endpunkte: `POST /v1/speed-limit-segments/:id/corrections`, `POST /v1/speed-limit-corrections/:id/confirmations`, `GET /v1/speed-limit-corrections` — siehe [`docs/api.md`](docs/api.md).
+- Entwurf und Begründung jeder Entscheidung (Schwelle, Gleichstand, Einheit, „zu prüfen" nach Importänderung, Föderation): [`docs/speed-limit-corrections.md`](docs/speed-limit-corrections.md).
+- Betreiber: `npm run corrections -- list | show | reset | restore | ban | unban | orphans` (Zurücksetzen mit **einem Befehl**: `reset --all`), Funktion abschalten mit `COMMUNITY_CORRECTIONS_ENABLED=false` — siehe [`docs/operating.md`](docs/operating.md).
+- **Upgrade-Hinweis:** Migration 0007 schreibt die Tabelle `speed_limit_segments` einmalig um (neue berechnete Spalte `geometry_key`), ca. 20 s pro Million Segmente unter exklusivem Lock — vor dem Start des neuen Servers ausführen.
 
 ## API
 

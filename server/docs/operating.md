@@ -88,7 +88,93 @@ design. You can always keep running with `FEDERATION_ENABLED=false` (or
 simply without a `NETWORK_CONFIG_PATH`) as a fully functional, isolated
 single server in the meantime.
 
+## Community speed-limit corrections (K-A)
+
+Users can propose a corrected speed limit; once `COMMUNITY_CORRECTIONS_CONFIRMATIONS_REQUIRED`
+distinct devices agree (default 3) it overlays the imported value. The imported
+row is never modified — everything below is about what *this server counts and
+serves*, and none of it replicates: another operator may judge the same votes
+differently. Design and reasons: [`speed-limit-corrections.md`](speed-limit-corrections.md).
+
+Run the tool from a checkout of the repository with `DATABASE_URL` pointing at
+the server's database (the same way as `npm run create-client`); it needs no
+running server, but it cannot push WebSocket messages, so clients pick a change
+up on their next delta/manifest poll.
+
+```bash
+npm run corrections -- list [--status applied,proposed] [--needs-review] [--limit 100]
+npm run corrections -- show <segment-id | segment-key>     # rows, corrections and every vote of one segment
+npm run corrections -- reset <correction-id> [--reason "..."]
+npm run corrections -- reset --all [--reason "..."]        # roll back every correction in effect
+npm run corrections -- restore <correction-id>
+npm run corrections -- ban <reporter-id> [--reason "..."]  # reporter ids are shown by `show`
+npm run corrections -- unban <reporter-id>
+npm run corrections -- bans
+npm run corrections -- orphans
+```
+
+**A wrong correction is in effect.** `show <segment-id>` (a segment id from the
+client, or the `segmentKey`) lists the corrections and who voted. Then
+`reset <correction-id>`: the candidate can never win again until you `restore`
+it, the imported value is served at once (and announced as a static-data change
+so package and delta clients converge), and further votes cannot quietly bring it
+back. Votes are kept. If another value was waiting just below the threshold it
+takes over — the tool prints that change; `reset` it too if it is wrong as well.
+
+**Roll everything back.** `reset --all` resets every applied correction
+(repeating until nothing is applied, because resetting a winner can promote a
+runner-up). For switching the *feature* off, see the next point; a reset
+correction stays reset even if the feature is switched on again.
+
+**Switch the whole feature off.** `COMMUNITY_CORRECTIONS_ENABLED=false` and
+restart: reads return the imported values again, `POST/GET /v1/speed-limit-corrections*`
+and `/v1/federation/speed-limit-votes` disappear (404), `GET /v1/config` says
+`communityCorrections.enabled: false` (clients hide the feature), pushed votes
+are `ignored`. Votes and corrections stay in the database. On the boot that
+sees the flip the server bumps the static-data version and announces every
+segment that had an applied correction, so clients drop (or, when you switch it
+back on, regain) the overlay without waiting for anything else.
+
+**Ban a reporter.** `ban <reporter-id>` excludes that reporter's votes from
+every tally — retroactively, which can turn an applied correction back into the
+imported value — and refuses their new submissions. `unban` restores them.
+Reporter ids are pseudonyms (`device:<key id>` for a device key,
+`local:<client id>` for an unsigned caller); a `device:` id is what appears in
+`show`. A ban is per server; it does not stop the same device on another server.
+
+**Needs review.** `list --needs-review` shows applied corrections where a later
+import changed the imported value to something else than what the correction
+replaced or now says. They keep being served (an import never silently
+overwrites a community-confirmed value — nor silently brings back one the
+community removed). Decide with `show`, and `reset` if the new import is right.
+
+**Orphans.** `orphans` lists corrections whose segment does not exist on this
+server: votes replicated from a peer with other regional data, or segments whose
+geometry changed in a re-import (their `segmentKey` changed). They cost only a
+few rows and take effect if the geometry ever appears; nothing to do.
+
+Tuning (all in `.env.example`): the threshold, the plausible range per unit
+(`..._KMH_MIN/MAX`, `..._MPH_MIN/MAX`), the value step, and the per-client rate
+limit. Keep the range/step/threshold the same as the servers you federate with —
+votes are checked against *your* limits on arrival, so different limits make servers
+disagree about which votes count.
+
 ## Restarting, upgrading, backing up
+
+**Upgrading to the release with community corrections (migration 0007)** adds a
+stored generated column (`speed_limit_segments.geometry_key`) and therefore
+**rewrites the segment table once, under an exclusive lock**: roughly 20 seconds
+per million segments (measured, see `schema.md`). Run `npm run db:migrate` (or the
+container's migrate step) *before* starting the new server and expect the
+segment table to be unavailable for that time on a large database. (In the Docker
+setup the migration runs when the container starts, before the server begins
+listening — the server is simply not up for that long after `docker compose up -d --build`,
+and on a very large table the container can show as `unhealthy` until the migration
+finishes; that is expected, nothing restarts it.)
+The migration also bumps the static-data version once, so clients re-download their packages
+(every segment now carries `segmentKey`). Take a database backup first, as for any migration.
+A restore from `pg_dump` works without extra steps (the key function pins its own
+`search_path`).
 
 Your **node identity** (the Ed25519 keypair other servers know you by) lives
 in your database (`node_identity` table), not on disk or in an env var — it
@@ -145,6 +231,10 @@ away from their defaults:
 
 | Symptom | Likely cause |
 |---|---|
+| A speed-limit correction I expected isn't showing | Below threshold (`list --status proposed`, needs `COMMUNITY_CORRECTIONS_CONFIRMATIONS_REQUIRED` *net* confirmations — denials count against it), a tie between two values (imported value stays), reset by an operator (`show <segment>`), or the votes came from a banned reporter |
+| Corrections proposed on another server never arrive | That server's votes were unsigned (node-local by design), it has corrections off, or your vote pull can't reach it — look for `federation: speed-limit vote pull from peer failed` in the logs |
+| Users get `422 CORRECTION_VALUE_NOT_ON_STEP` / `..._OUT_OF_RANGE` | The configured step/range (`GET /v1/config` → `communityCorrections`); relax `COMMUNITY_CORRECTIONS_VALUE_STEP` or the bounds if real limits are being refused |
+| Migration 0007 seems stuck | It is rewriting the segment table (about 20 s per million rows); check `pg_stat_activity` before interrupting |
 | `FEDERATION_PUBLIC_ADDRESS is required whenever FEDERATION_ENABLED=true` at startup | Set both together — see "Joining the network" step 2 |
 | Join to a seed fails at startup, logged as a warning | Seed unreachable, wrong URL, or its `excludedNodeIds` includes you — check the seed's own logs/directory if you can reach an operator |
 | A peer never shows up in `GET /v1/federation/peers` even though you're sure they joined | Discovery is one-hop, join-time only (`federation-protocol.md` §7) — if you learned about them only via a third party's gossip and never joined them directly, and that third party never re-gossips, you may simply never have a direct relationship; join them directly if you need one |

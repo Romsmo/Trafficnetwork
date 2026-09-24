@@ -237,9 +237,10 @@ not what makes an event trustworthy — each event's own device signature is
 (`docs/threat-model.md`'s "Trust signatures, not servers").
 
 ```
-Request:  { "senderNodeId": "...", "events": [SignedEnvelope<DeviceCreateEvent>, ...] }   (max 100 events)
-Response: { "results": [ { "federationEventId": "<sha256 hex>", "status": "created"|"merged"|"duplicate"|"rejected",
-                            "reason"?: "...", "code"?: "invalid_signature"|"stale_timestamp"|"camera_out_of_scope"|"implausible" } ] }
+Request:  { "senderNodeId": "...", "events": [SignedEnvelope<DeviceCreateEvent>, ...],   (max 100 events)
+            "speedLimitVotes"?: [SignedEnvelope<SpeedLimitVote>, ...] }                    (K-A, max 100; see below)
+Response: { "results": [ { "federationEventId": "<sha256 hex>", "status": "created"|"merged"|"duplicate"|"rejected"|"recorded"|"ignored",
+                            "reason"?: "...", "code"?: "invalid_signature"|"stale_timestamp"|"camera_out_of_scope"|"implausible"|"future_timestamp" } ] }
 
 DeviceCreateEvent: { "kind": "create", "type": "<hazard type, not fixedSpeedCamera>",
                      "lat", "lng", "speedKmh"?, "devicePublicKey", "timestamp" }
@@ -291,6 +292,32 @@ Response: { "events": [ { "sequence", "federationEventId", "envelope": SignedEnv
 broadcast across the whole network anyway, so there's nothing to gate on a
 read.
 
+### Speed-limit votes over federation (K-A)
+
+Device-signed speed-limit votes (see "Speed-limit corrections") travel in two
+ways, both kept apart from the report events so an older peer is never handed a
+body it would reject:
+
+* **Push:** the optional `speedLimitVotes` array of `POST /v1/federation/events`
+  above. Per vote the result is `recorded`, `duplicate`, `rejected`
+  (`invalid_signature` — recorded against the sender's reputation like a bad
+  report signature — `future_timestamp` (more than 5 minutes ahead), or
+  `implausible` (value outside this server's configured range/step)) or
+  `ignored` (this server has `COMMUNITY_CORRECTIONS_ENABLED=false`; nothing
+  stored). There is **no maximum age** for a vote: votes are durable state, so a
+  late-joining server must be able to take all of them.
+* **Pull:** `GET /v1/federation/speed-limit-votes?after=<seq>&limit=<n>` →
+  `{ "votes": [ { "sequence", "voteId", "envelope": SignedEnvelope<SpeedLimitVote>, "receivedAt" } ], "nextAfter": number|null }`,
+  the signed votes this server holds in its own insertion order (cursor per
+  peer, never comparable across servers; `limit` default 200, max 500). Open
+  like `/events`. **404** when this server has corrections switched off or
+  predates the feature — the pulling peer skips that stream quietly and does
+  *not* count it as a failed health check.
+
+`voteId` = sha256 over the envelope's own `(payload, signature)`, the same
+scheme as `federationEventId`. Unsigned (node-local) votes are never part of
+either stream.
+
 ## Reads
 
 All reads require a valid token; none require a specific scope beyond having
@@ -298,8 +325,9 @@ one.
 
 | Method | Path | Notes |
 |---|---|---|
-| GET | `/v1/speed-limit?lat&lng` | Nearest segment within `SPEED_LIMIT_LOOKUP_MAX_DISTANCE_METERS`; 404 if none |
-| GET | `/v1/speed-limit-segments/nearby?lat&lng&radiusM` | |
+| GET | `/v1/speed-limit?lat&lng` | Nearest segment within `SPEED_LIMIT_LOOKUP_MAX_DISTANCE_METERS`; 404 if none. Effective value, plus `correctedBy`/`importedSpeedLimit`/`correction` when it is a community correction — see "Speed-limit corrections" |
+| GET | `/v1/speed-limit-segments/nearby?lat&lng&radiusM` | Same additive correction fields per segment |
+| GET | `/v1/speed-limit-corrections?tiles\|segmentId&status&limit` | Open proposals and applied corrections — see "Speed-limit corrections" (absent when the feature is off) |
 | GET | `/v1/static-signs/nearby?lat&lng&radiusM` | |
 | GET | `/v1/hazard-reports/nearby?lat&lng&radiusM&types` | Never returns camera-adjacent types (see below) |
 | GET | `/v1/hazard-reports/by-tile?tile&k&types` | `k` = ring radius (0–5) around `tile`, an H3 resolution-7 cell id |
@@ -393,6 +421,129 @@ Response: { "camera": {...}, "recorded": boolean, "removed": boolean }
 One "this camera is gone" vote per reporter. Once distinct votes reach
 `CAMERA_REMOVAL_THRESHOLD`, the camera is marked `removed` and disappears
 from reads. Works regardless of the namespace flag.
+
+## Speed-limit corrections (add-on K-A)
+
+Users can report a wrong speed limit and propose the right value. A proposal
+is an **overlay**: the imported row is never changed. It becomes effective only
+when enough *distinct devices* agree (`COMMUNITY_CORRECTIONS_CONFIRMATIONS_REQUIRED`,
+default **3**; a denial counts against it), and it is served with its origin.
+The reasoning behind every rule is in
+[`speed-limit-corrections.md`](speed-limit-corrections.md); this section is the
+wire contract. With `COMMUNITY_CORRECTIONS_ENABLED=false` **none of these
+endpoints exist** (404) and every read returns the imported value — clients
+learn that from `GET /v1/config` → `communityCorrections.enabled`.
+
+### How a correction shows up in the existing reads
+
+Every place that returns a speed-limit segment (`/v1/speed-limit-segments/nearby`,
+`/v1/snapshot`, the static-data partitions, the `StaticDataUpdated` delta
+events) — and the lookup `GET /v1/speed-limit` — is **additive**: all existing
+fields keep their meaning, and `speedLimit` is the *effective* value, so a
+client that changes nothing already shows corrected limits.
+
+```
+{ "id", "geometry", "speedLimit": 50, "speedLimitUnit": "kmh", "source", "sourceLicense", "importedAt", "lastConfirmedAt",
+  "segmentKey": "<32 hex>",                       // always: cross-server-stable identity, what a signed vote references
+  // only when speedLimit is a community correction (absent otherwise):
+  "correctedBy": "community",
+  "importedSpeedLimit": 30,                       // the value from the import source
+  "correction": { "id": "<uuid>", "confirmations": 3, "denials": 0,
+                  "appliedAt": "2026-09-24T12:00:00.000Z", "needsReview": false } }
+```
+
+`needsReview: true` means the import changed to a third value after the
+correction was proposed — the correction is still served (an import never
+silently overwrites it), but the operator or the community should re-check
+([`speed-limit-corrections.md`](speed-limit-corrections.md) D7). Counts inside a
+static package are "as of the last change of the effective value"; the live
+numbers come from the endpoints below. `GET /v1/speed-limit` returns the same
+additive fields next to `segmentId` and `segmentKey`.
+
+### `POST /v1/speed-limit-segments/:id/corrections`
+
+Propose a value (or confirm someone else's identical one — same value merges).
+`:id` is the segment's `id` (UUID).
+
+```
+Request:  { "value": 50, "unit": "kmh", "reason"?: "wrong_value"|"limit_lifted"|"sign_missing_or_new"|"other",
+            "deviceAssertion"?: SignedEnvelope<SpeedLimitVote> }
+Response: { "correction": Correction, "recorded": boolean, "merged": boolean, "segment": <segment as above, without geometry> }
+          201 = a new correction record, 200 = merged into an existing one / no-op
+```
+
+* `unit` must equal the segment's own unit (a correction never converts) and
+  `value` must be a whole number in the configured range for that unit and a
+  multiple of the step (defaults: 5–150 km/h, 5–85 mph, step 5) and differ from
+  the imported value. Otherwise **422** with a machine-readable `error.code`:
+  `CORRECTION_VALUE_OUT_OF_RANGE`, `CORRECTION_VALUE_NOT_ON_STEP`
+  (both with `details: { unit, min, max, step }`), `CORRECTION_UNIT_MISMATCH`
+  (`details: { segmentUnit }`), `CORRECTION_NO_CHANGE`.
+* A caller supports **one value per segment**: proposing another value withdraws
+  the earlier one. Repeating the same proposal is a no-op (`recorded: false`,
+  not counted against the rate limit).
+* `recorded: false` means nothing was stored (already holds that stance).
+* `429` when the calling client exceeded `COMMUNITY_CORRECTIONS_RATE_LIMIT_MAX`
+  proposals/confirmations/denials in `COMMUNITY_CORRECTIONS_RATE_LIMIT_WINDOW_MINUTES`
+  (default 5 per 60 min — stricter than reports).
+* `403` `FORBIDDEN` if the reporter was barred by the operator.
+* `404` unknown segment, `400` malformed id/body.
+
+**Device signature** (optional, exactly like a hazard report's): a client that
+has bound a device key (`POST /v1/devices/bind-key`) sends the same vote as a
+signed envelope. The server checks that the payload matches the request, that
+the signature verifies, that the timestamp is within 60 s — and that the key is
+**the one bound to the calling client** (`403 DEVICE_KEY_NOT_BOUND` otherwise;
+otherwise one client could mint unlimited "distinct devices"). A signed vote
+is replicated to peers; an unsigned one counts on this server only.
+
+```
+SpeedLimitVote (the envelope payload):
+  { "kind": "speedLimitVote", "vote": "support"|"deny", "segmentKey": "<32 hex, from the segment>",
+    "value": 50, "unit": "kmh"|"mph", "reason"?: "...", "devicePublicKey": "<raw base64url>", "timestamp": "<ISO>" }
+```
+
+### `POST /v1/speed-limit-corrections/:id/confirmations`
+
+Confirm ("stimmt") or object ("stimmt nicht") to an existing correction; `:id`
+is the correction's `id` (deterministic: the same on every server).
+
+```
+Request:  { "kind": "confirm" | "deny", "deviceAssertion"?: SignedEnvelope<SpeedLimitVote> }   (vote = "support" | "deny")
+Response: same as above
+```
+
+A denial counts against the value; **an applied correction whose net
+confirmations (supporters − deniers) fall below the threshold stops being
+applied** and the imported value is served again — announced through the
+event log like any other change. A device can change its mind by voting again.
+`404` if the correction is unknown or this server has no segment for it (it was
+proposed on a server with other data).
+
+### `GET /v1/speed-limit-corrections?tiles=<H3 cells>|segmentId=<uuid>&status=<list>&limit=<n>`
+
+Discovery of open proposals (so a client can ask a driver "still true?") and
+applied corrections. One of `tiles` (comma-separated H3 cell ids, any
+resolution, max 100 — the spatial filter is the union of those cells) or
+`segmentId` is required. `status` is a comma-separated subset of
+`proposed, applied, superseded, reverted` (default `proposed,applied`);
+`limit` defaults to 200, max 1000.
+
+```
+Response: { "corrections": [ Correction ] }
+
+Correction: { "id", "segmentKey", "segmentId": "<first local row>"|null, "value", "unit",
+              "status": "proposed"|"applied"|"superseded"|"reverted", "reason": "..."|null,
+              "confirmations", "denials", "firstProposedAt", "lastVoteAt", "appliedAt"|null,
+              "importedSpeedLimit": <the local segment's imported value>|null, "needsReview": boolean,
+              "source": "community", "geometry"?: <GeoJSON, only with ?tiles> }
+```
+
+`GET /v1/speed-limit-segments/:id/corrections[?status=]` returns
+`{ "segment": <summary>, "corrections": [Correction] }` for one segment.
+
+Corrections carry a pseudonymous reporter internally (`device:<key id>`), which
+is **never** part of any response.
 
 ## Sync (snapshot / delta)
 
@@ -498,6 +649,13 @@ otherwise — so a client can independently re-verify it against the network
 root public key it already trusts, rather than taking this server's word for
 `speedCameraNamespaceEnabled` above (which already reflects the network
 config's value if one is loaded — see "Signed network configuration" below).
+
+**K-A addition:** `communityCorrections` — `{ enabled, confirmationsRequired,
+valueRange: { kmh: {min,max}, mph: {min,max} }, valueStep, rateLimit: { max,
+windowMinutes } }`. A client hides the whole correction feature when `enabled`
+is false (the endpoints don't exist then) and mirrors the range/step so it can
+reject implausible input before sending; an older server simply lacks the key
+(treat "absent" as "not offered").
 
 ### Signed network configuration (F-S2)
 
