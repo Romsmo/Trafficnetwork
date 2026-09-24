@@ -104,11 +104,12 @@ _Zuletzt aktualisiert: 2026-09-17 von der F-C-Session._
 
 ## Zusatz W — Weboberfläche des Servers (Karte, Melden, Anleitung)
 - [x] Claude-Code-Prompt erstellt (`docs/prompt-server-web-ui.md`) — reine Ergänzung, API bleibt unverändert
-- [ ] W1: Auslieferung durch den Server (`WEB_UI_ENABLED`), Grundgerüst, GitHub-Link in der Fußzeile, Deutsch/Englisch
-- [ ] W2: Karte (OpenStreetMap) mit Meldungen und Tempolimit-Abfrage, Live-Aktualisierung
-- [ ] W3: Melden und Bestätigen aus dem Browser, ohne Geheimnis im Quelltext, mit eigener Begrenzung
-- [ ] W4: Seiten „Verbinden" (App, eigener Knoten, API) und „Über das Projekt"
-- [ ] W5: E2E-Tests, `server/docs/web-ui.md`, Pull Request
+- [x] W1: Auslieferung durch den Server (`WEB_UI_ENABLED`), Grundgerüst, GitHub-Link in der Fußzeile, Deutsch/Englisch
+- [x] W2: Karte (OpenStreetMap) mit Meldungen und Tempolimit-Abfrage, Live-Aktualisierung
+- [x] W3: Melden und Bestätigen aus dem Browser, ohne Geheimnis im Quelltext, mit eigener Begrenzung
+- [x] W4: Seiten „Verbinden" (App, eigener Knoten, API) und „Über das Projekt"
+- [x] W5: E2E-Tests (Playwright), `server/docs/web-ui.md`, `docs/privacy.md` (Entwurf) — Branch `feature/server-web-ui`
+- [ ] W-PR: Pull Request (wartet auf Freigabe), zusammen mit der separaten Performance-Korrektur `fix/spatial-index-prefilter`
 
 ## Zusatz O — Anzeige „aktuell online" (Server + Web + Client-Bibliothek)
 - [x] Zusatz-Prompts erstellt (`docs/prompt-addon-online-counter.md`)
