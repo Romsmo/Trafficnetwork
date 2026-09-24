@@ -110,6 +110,20 @@ _Zuletzt aktualisiert: 2026-09-17 von der F-C-Session._
 - [ ] W4: Seiten „Verbinden" (App, eigener Knoten, API) und „Über das Projekt"
 - [ ] W5: E2E-Tests, `server/docs/web-ui.md`, Pull Request
 
+## Zusatz O — Anzeige „aktuell online" (Server + Web + Client-Bibliothek)
+- [x] Zusatz-Prompts erstellt (`docs/prompt-addon-online-counter.md`)
+- [ ] O-A Server: `GET /v1/stats/online`, eigene Zahl im Heartbeat, Schwellenwert gegen Rückschlüsse
+- [ ] O-B Web: Anzeige unten rechts, Aktualisierung, Textfall unter dem Schwellenwert
+- [ ] O-C Client-Bibliothek: Felder in `getNetworkStatus()` (optional)
+
+## Zusatz K — Falsche Tempolimits melden und korrigieren
+- [x] Zusatz-Prompts erstellt (`docs/prompt-addon-speed-limit-corrections.md`)
+- [ ] K-A Server: Korrektur als überlagernder Datensatz (Import bleibt erhalten), Schwellenwert, Widerspruch, Verteilung über Pakete/Events, Betreiber kann zurücksetzen
+- [ ] K-B Web: „Stimmt nicht?"-Formular, Herkunft des Werts sichtbar
+- [ ] K-C Client-Bibliothek: `reportWrongSpeedLimit()` über den Offline-Puffer, Herkunft in `getSpeedLimitAt()`
+- [x] Schwellenwert entschieden: **3 verschiedene Geräte** (Konfigurationswert, Standard 3)
+- [ ] Wertebereich für Korrekturen festlegen (Plausibilitätsgrenzen)
+
 ## Launch P — Öffentlicher Betrieb (gemieteter Server + Domain)
 - [x] Claude-Code-Prompt erstellt (`docs/prompt-launch-public-server.md`)
 - [ ] Server und Domain besorgen
