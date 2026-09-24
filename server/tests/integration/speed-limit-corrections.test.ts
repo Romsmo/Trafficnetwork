@@ -234,9 +234,13 @@ describe("community speed-limit corrections (K-A)", () => {
       const d = await createDevice();
       await propose(seg, d, 50);
       await propose(seg, d, 60);
-      const all = await correctionsOf(seg);
-      expect(all.find((c) => c.value === 50)!.confirmations).toBe(0);
-      expect(all.find((c) => c.value === 60)!.confirmations).toBe(1);
+      // Clients see only what someone currently supports...
+      const listed = await correctionsOf(seg);
+      expect(listed.map((c) => c.value)).toEqual([60]);
+      expect(listed[0]!.confirmations).toBe(1);
+      // ...while the operator's view still shows the withdrawn value with no supporters.
+      const report = await showSegment(testDb.db, env, seg.key);
+      expect(report.corrections.find((c) => c.value === 50)).toMatchObject({ confirmations: 0 });
     });
   });
 
