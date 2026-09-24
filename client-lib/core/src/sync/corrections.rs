@@ -402,9 +402,7 @@ fn withdraw_own_proposal(
         .map_err(store_error)?
         .into_iter()
         .find(|p| {
-            p.segment_key == target.segment_key
-                && p.unit == target.unit
-                && p.value == target.value
+            p.segment_key == target.segment_key && p.unit == target.unit && p.value == target.value
         });
     let Some(own) = own else {
         return Ok(false);
