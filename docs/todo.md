@@ -118,11 +118,12 @@ _Zuletzt aktualisiert: 2026-09-17 von der F-C-Session._
 
 ## Zusatz K — Falsche Tempolimits melden und korrigieren
 - [x] Zusatz-Prompts erstellt (`docs/prompt-addon-speed-limit-corrections.md`)
-- [ ] K-A Server: Korrektur als überlagernder Datensatz (Import bleibt erhalten), Schwellenwert, Widerspruch, Verteilung über Pakete/Events, Betreiber kann zurücksetzen
-- [ ] K-B Web: „Stimmt nicht?"-Formular, Herkunft des Werts sichtbar
-- [ ] K-C Client-Bibliothek: `reportWrongSpeedLimit()` über den Offline-Puffer, Herkunft in `getSpeedLimitAt()`
+- [x] K-A Server: Korrektur als überlagernder Datensatz (Import bleibt erhalten), Schwellenwert, Widerspruch, Verteilung über Pakete/Events und Föderation, Betreiber kann zurücksetzen (Branch `feature/speed-limit-corrections`, lokal 339 Tests grün (Gesamtlauf 338/339, der eine Fehler war eine veraltete Testerwartung, behoben und nachgelaufen), PR wartet auf Freigabe; Plan: `server/docs/speed-limit-corrections.md`; **Migration 0007 schreibt `speed_limit_segments` einmalig um, ~20 s pro Mio. Segmente** — Backup + Wartungsfenster einplanen)
+- [ ] K-B Web: „Stimmt nicht?"-Formular, Herkunft des Werts sichtbar (Allowlist der Web-Sitzungen um die vier Korrektur-Pfade erweitern; Hinweise im Status-Abschnitt "Zusatz K-A")
+- [ ] K-C Client-Bibliothek: `reportWrongSpeedLimit()` über den Offline-Puffer, Herkunft in `getSpeedLimitAt()` (Signatur beim Senden, gebundener Schlüssel, `segmentKey` — siehe Status-Abschnitt "Zusatz K-A")
 - [x] Schwellenwert entschieden: **3 verschiedene Geräte** (Konfigurationswert, Standard 3)
-- [ ] Wertebereich für Korrekturen festlegen (Plausibilitätsgrenzen)
+- [x] Wertebereich für Korrekturen festgelegt: ganzzahlig, **5–150 km/h bzw. 5–85 mph**, nur Vielfache von **5**, in der Einheit des Segments (alles per Umgebungsvariable änderbar); Gleichstand ⇒ kein Gewinner; Importänderung ⇒ Korrektur bleibt, Markierung „zu prüfen"
+- [ ] Folgeaufgaben K-A (nicht Teil des Auftrags): temporäre Korrekturen (Baustelle) automatisch auslaufen lassen; `deviceAssertion` bei Meldungen an den gebundenen Schlüssel knüpfen (siehe Nebenbefund im Status); Stimmen nach Ruf des weiterleitenden Knotens gewichten
 
 ## Zusatz E — Grundstock ganz Europa (einmalig, aktueller Stand)
 - [x] Entschieden: ganz Europa, **einmaliger** Import des aktuellsten Stands; kein wiederkehrender Update-Lauf vorerst
