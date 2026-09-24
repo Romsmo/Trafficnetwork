@@ -128,16 +128,24 @@ pub struct WrongSpeedLimitReport {
     pub reason: Option<CorrectionReason>,
 }
 
-fn find_segment<'a>(
-    segments: &'a [SpeedLimitSegment],
+/// Looks the segment up through the store's indexed queries — never by
+/// loading every segment, which with a large dataset would be millions.
+fn find_segment(
+    store: &dyn Store,
     by: &SegmentRef,
     max_distance_meters: f64,
-) -> Option<&'a SpeedLimitSegment> {
+) -> Result<Option<SpeedLimitSegment>, CorrectionError> {
     match by {
-        SegmentRef::Id(id) => segments.iter().find(|s| &s.id == id),
+        SegmentRef::Id(id) => store.speed_limit_segment(id).map_err(store_error),
         SegmentRef::Position { lat, lng } => {
-            let nearest = nearest_speed_limit(*lat, *lng, segments, max_distance_meters)?;
-            segments.iter().find(|s| s.id == nearest.segment_id)
+            let nearby = store
+                .speed_limit_segments_near(*lat, *lng, max_distance_meters)
+                .map_err(store_error)?;
+            let Some(nearest) = nearest_speed_limit(*lat, *lng, &nearby, max_distance_meters)
+            else {
+                return Ok(None);
+            };
+            Ok(nearby.into_iter().find(|s| s.id == nearest.segment_id))
         }
     }
 }
@@ -216,18 +224,17 @@ pub fn report_wrong_speed_limit(
         .filter(|c| c.enabled)
         .ok_or(CorrectionError::NotOffered)?;
 
-    let entities = store.all_entities().map_err(store_error)?;
     let segment = find_segment(
-        &entities.speed_limit_segments,
+        store,
         &report.segment,
         config.speed_limit_lookup_max_distance_meters,
-    )
+    )?
     .ok_or(CorrectionError::UnknownSegment)?;
     let segment_key = segment
         .segment_key
         .clone()
         .ok_or(CorrectionError::NoSegmentKey)?;
-    validate_value(&rules, segment, report.proposed_value, report.unit)?;
+    validate_value(&rules, &segment, report.proposed_value, report.unit)?;
 
     let now = clock.now_unix_ms();
     let mut body = serde_json::json!({

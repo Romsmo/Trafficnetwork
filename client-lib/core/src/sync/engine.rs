@@ -25,11 +25,11 @@ use serde::de::DeserializeOwned;
 
 use crate::discovery::{DiscoveryError, DiscoveryService, KnownServer};
 use crate::platform::{Clock, HttpRequest, HttpResponse};
-use crate::storage::{Store, StoreError, StoredEntities};
+use crate::storage::{is_storage_full, Store, StoreError, StoredEntities};
 
 use super::types::{
-    ClientConfig, DeltaPage, EventLogEntry, HazardReport, PartitionContent, SnapshotResult,
-    SpeedLimitSegment, StaticDataManifest, StaticSign,
+    ClientConfig, DeltaPage, EventLogEntry, HazardReport, PartitionContent, PartitionSummary,
+    SnapshotResult, SpeedLimitSegment, StaticDataManifest, StaticSign,
 };
 use super::withholding;
 
@@ -40,6 +40,11 @@ pub enum SyncError {
     Discovery(DiscoveryError),
     InvalidResponse(String),
     Store(StoreError),
+    /// The local store ran out of space. Nothing is lost: what was stored so
+    /// far stays, and the next sync resumes from there — free some space (or
+    /// ask [`SyncEngine::plan_static_bootstrap`] how much a bootstrap still
+    /// needs, before starting) and call again.
+    StorageFull,
     /// The server answered with a non-2xx status that isn't a transport
     /// failure — most notably `409 SNAPSHOT_REQUIRED` on a stale delta
     /// cursor, which [`SyncEngine::sync_server`] specifically catches and
@@ -56,6 +61,7 @@ impl std::fmt::Display for SyncError {
             SyncError::Discovery(e) => write!(f, "discovery error: {e}"),
             SyncError::InvalidResponse(msg) => write!(f, "invalid response: {msg}"),
             SyncError::Store(e) => write!(f, "storage error: {e}"),
+            SyncError::StorageFull => write!(f, "the local store is out of space"),
             SyncError::Rejected { status, body } => {
                 write!(f, "server rejected the request (HTTP {status}): {body}")
             }
@@ -65,6 +71,19 @@ impl std::fmt::Display for SyncError {
 
 impl std::error::Error for SyncError {}
 
+impl SyncError {
+    /// A store that has run out of room says so with a `StorageFullError`;
+    /// that one storage failure is something a host app can act on, so it
+    /// gets its own variant.
+    fn from_store(error: StoreError) -> Self {
+        if is_storage_full(&error) {
+            SyncError::StorageFull
+        } else {
+            SyncError::Store(error)
+        }
+    }
+}
+
 fn parse_ok<T: DeserializeOwned>(response: &HttpResponse) -> Result<T, SyncError> {
     if !response.is_success() {
         let body = String::from_utf8_lossy(&response.body).to_string();
@@ -73,10 +92,11 @@ fn parse_ok<T: DeserializeOwned>(response: &HttpResponse) -> Result<T, SyncError
             body,
         });
     }
-    let value = response
-        .json()
-        .map_err(|e| SyncError::InvalidResponse(e.to_string()))?;
-    serde_json::from_value(value).map_err(|e| SyncError::InvalidResponse(e.to_string()))
+    // Straight from the bytes into the typed value: going through a
+    // `serde_json::Value` first would keep a second, several times larger
+    // copy of a partition (tens of MB of JSON) in memory at the same time.
+    serde_json::from_slice(&response.body)
+        .map_err(|e| SyncError::InvalidResponse(e.to_string()))
 }
 
 /// `0.0..=1.0`. Falls back to `1.0` (never sample) rather than `0.0` (always
@@ -98,10 +118,40 @@ fn auth_header(bearer_token: &str) -> (String, String) {
     )
 }
 
+/// Progress of the static-data part of a sync, relative to *this* run: after
+/// an interruption the next run's totals cover only what was still missing.
+/// Byte counts are the server's `sizeBytes` (the JSON size, which is what
+/// crosses the wire).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BootstrapProgress {
+    pub partitions_total: usize,
+    pub partitions_done: usize,
+    pub bytes_total: u64,
+    pub bytes_done: u64,
+}
+
+/// What a static-data bootstrap still has to download — see
+/// [`SyncEngine::plan_static_bootstrap`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BootstrapPlan {
+    pub partitions_total: usize,
+    pub partitions_pending: usize,
+    pub bytes_total: u64,
+    pub bytes_pending: u64,
+}
+
+/// Receives progress while [`SyncEngine::sync_static_data`] runs — once at
+/// the start and after every partition. Called on the syncing task itself,
+/// so keep it quick.
+pub trait SyncObserver: Send + Sync {
+    fn on_bootstrap_progress(&self, progress: &BootstrapProgress);
+}
+
 pub struct SyncEngine {
     discovery: Arc<DiscoveryService>,
     store: Arc<dyn Store>,
     clock: Arc<dyn Clock>,
+    observer: Option<Arc<dyn SyncObserver>>,
 }
 
 impl SyncEngine {
@@ -114,7 +164,13 @@ impl SyncEngine {
             discovery,
             store,
             clock,
+            observer: None,
         }
+    }
+
+    pub fn with_observer(mut self, observer: Arc<dyn SyncObserver>) -> Self {
+        self.observer = Some(observer);
+        self
     }
 
     /// One full sync cycle against the current pool: static data first
@@ -135,13 +191,18 @@ impl SyncEngine {
     /// the real count — so it is dropped. One for a value nobody confirmed
     /// stays: it is still this device's standing vote.
     fn prune_redundant_proposals(&self) -> Result<(), SyncError> {
-        let proposals = self.store.local_proposals().map_err(SyncError::Store)?;
+        let proposals = self.store.local_proposals().map_err(SyncError::from_store)?;
         if proposals.is_empty() {
             return Ok(());
         }
-        let entities = self.store.all_entities().map_err(SyncError::Store)?;
         for proposal in proposals {
-            let confirmed = entities.speed_limit_segments.iter().any(|s| {
+            // Looked up by id (indexed), not by scanning every segment: with a
+            // large dataset this runs at the end of every sync.
+            let segment = self
+                .store
+                .speed_limit_segment(&proposal.segment_id)
+                .map_err(SyncError::from_store)?;
+            let confirmed = segment.is_some_and(|s| {
                 s.segment_key.as_deref() == Some(proposal.segment_key.as_str())
                     && s.corrected_by.as_deref() == Some("community")
                     && s.speed_limit_unit == proposal.unit.as_str()
@@ -150,7 +211,7 @@ impl SyncEngine {
             if confirmed {
                 self.store
                     .remove_local_proposal(&proposal.segment_key)
-                    .map_err(SyncError::Store)?;
+                    .map_err(SyncError::from_store)?;
             }
         }
         Ok(())
@@ -181,7 +242,7 @@ impl SyncEngine {
         let cursor = self
             .store
             .get_cursor(&server.node_id)
-            .map_err(SyncError::Store)?;
+            .map_err(SyncError::from_store)?;
         match cursor {
             Some(since) => match self.pull_delta(bearer_token, server, since, tiles).await {
                 Ok(()) => Ok(()),
@@ -207,10 +268,10 @@ impl SyncEngine {
         let snapshot = self.fetch_snapshot(bearer_token, server, tiles).await?;
         self.store
             .upsert_hazard_reports(&snapshot.hazard_reports)
-            .map_err(SyncError::Store)?;
+            .map_err(SyncError::from_store)?;
         self.store
             .set_cursor(&server.node_id, snapshot.snapshot_sequence)
-            .map_err(SyncError::Store)?;
+            .map_err(SyncError::from_store)?;
         Ok(())
     }
 
@@ -261,7 +322,7 @@ impl SyncEngine {
             if let Some(next) = page.next_since {
                 self.store
                     .set_cursor(&server.node_id, next)
-                    .map_err(SyncError::Store)?;
+                    .map_err(SyncError::from_store)?;
                 cursor = next;
             }
             if !has_more {
@@ -336,7 +397,7 @@ impl SyncEngine {
         if event.event_type == "ReportExpired" {
             self.store
                 .remove_hazard_report(&event.entity_id)
-                .map_err(SyncError::Store)?;
+                .map_err(SyncError::from_store)?;
             return Ok(());
         }
         let report: HazardReport = serde_json::from_value(event.payload.clone())
@@ -344,11 +405,11 @@ impl SyncEngine {
         if report.status == "active" {
             self.store
                 .upsert_hazard_reports(&[report])
-                .map_err(SyncError::Store)?;
+                .map_err(SyncError::from_store)?;
         } else {
             self.store
                 .remove_hazard_report(&report.id)
-                .map_err(SyncError::Store)?;
+                .map_err(SyncError::from_store)?;
         }
         Ok(())
     }
@@ -357,7 +418,7 @@ impl SyncEngine {
         if event.event_type == "StaticDataRemoved" {
             self.store
                 .remove_static_entity(&event.entity_type, &event.entity_id)
-                .map_err(SyncError::Store)?;
+                .map_err(SyncError::from_store)?;
             return Ok(());
         }
         let mut data = StoredEntities::default();
@@ -382,7 +443,7 @@ impl SyncEngine {
                     return self
                         .store
                         .remove_static_entity("fixedSpeedCamera", &camera.id)
-                        .map_err(SyncError::Store);
+                        .map_err(SyncError::from_store);
                 }
                 data.fixed_speed_cameras.push(camera);
             }
@@ -390,19 +451,60 @@ impl SyncEngine {
         }
         self.store
             .upsert_static_data(&data)
-            .map_err(SyncError::Store)
+            .map_err(SyncError::from_store)
     }
 
-    async fn sync_static_data(&self, bearer_token: &str) -> Result<(), SyncError> {
+    /// What a static-data bootstrap still has to download, from the server's
+    /// manifest and what is already stored — so a host app can compare
+    /// `bytes_pending` with the free space *before* starting, and show
+    /// "3 of 120 regions". Costs one manifest request.
+    pub async fn plan_static_bootstrap(
+        &self,
+        bearer_token: &str,
+    ) -> Result<BootstrapPlan, SyncError> {
         let manifest = self.fetch_manifest(bearer_token).await?;
+        let pending = self.pending_partitions(&manifest)?;
+        Ok(BootstrapPlan {
+            partitions_total: manifest.partitions.len(),
+            partitions_pending: pending.len(),
+            bytes_total: manifest.partitions.iter().map(|p| p.size_bytes).sum(),
+            bytes_pending: pending.iter().map(|p| p.size_bytes).sum(),
+        })
+    }
+
+    fn pending_partitions<'a>(
+        &self,
+        manifest: &'a StaticDataManifest,
+    ) -> Result<Vec<&'a PartitionSummary>, SyncError> {
+        let mut pending = Vec::new();
         for partition in &manifest.partitions {
-            let current_hash = self
+            let current = self
                 .store
                 .get_partition_hash(&partition.tile)
-                .map_err(SyncError::Store)?;
-            if current_hash.as_deref() == Some(partition.hash.as_str()) {
-                continue;
+                .map_err(SyncError::from_store)?;
+            if current.as_deref() != Some(partition.hash.as_str()) {
+                pending.push(partition);
             }
+        }
+        Ok(pending)
+    }
+
+    /// Brings the static data (speed-limit segments, signs, cameras) up to
+    /// date, one partition at a time. Each partition is stored together with
+    /// its hash, so a bootstrap that is interrupted — killed, offline, out of
+    /// space — picks up at the next partition the next time this is called
+    /// instead of starting over. Progress goes to the observer, if any.
+    pub async fn sync_static_data(&self, bearer_token: &str) -> Result<(), SyncError> {
+        let manifest = self.fetch_manifest(bearer_token).await?;
+        let pending = self.pending_partitions(&manifest)?;
+        let mut progress = BootstrapProgress {
+            partitions_total: pending.len(),
+            partitions_done: 0,
+            bytes_total: pending.iter().map(|p| p.size_bytes).sum(),
+            bytes_done: 0,
+        };
+        self.report(&progress);
+        for partition in pending {
             let content = self.fetch_partition(bearer_token, &partition.tile).await?;
             let data = StoredEntities {
                 speed_limit_segments: content.speed_limit_segments,
@@ -411,13 +513,19 @@ impl SyncEngine {
                 hazard_reports: Vec::new(),
             };
             self.store
-                .upsert_static_data(&data)
-                .map_err(SyncError::Store)?;
-            self.store
-                .set_partition_hash(&partition.tile, &partition.hash)
-                .map_err(SyncError::Store)?;
+                .upsert_static_partition(&partition.tile, &partition.hash, &data)
+                .map_err(SyncError::from_store)?;
+            progress.partitions_done += 1;
+            progress.bytes_done += partition.size_bytes;
+            self.report(&progress);
         }
         Ok(())
+    }
+
+    fn report(&self, progress: &BootstrapProgress) {
+        if let Some(observer) = &self.observer {
+            observer.on_bootstrap_progress(progress);
+        }
     }
 
     async fn fetch_manifest(&self, bearer_token: &str) -> Result<StaticDataManifest, SyncError> {
@@ -479,12 +587,22 @@ mod tests {
 
     struct MockTransport {
         responses: Mutex<HashMap<String, HttpResponse>>,
+        requested: Mutex<Vec<String>>,
     }
     impl MockTransport {
         fn new() -> Self {
             Self {
                 responses: Mutex::new(HashMap::new()),
+                requested: Mutex::new(Vec::new()),
             }
+        }
+        fn request_count(&self, url: &str) -> usize {
+            self.requested
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|u| u.as_str() == url)
+                .count()
         }
         fn set(&self, url: &str, status: u16, body: serde_json::Value) {
             self.responses.lock().unwrap().insert(
@@ -499,6 +617,7 @@ mod tests {
     #[async_trait::async_trait]
     impl HttpTransport for MockTransport {
         async fn send(&self, request: HttpRequest) -> Result<HttpResponse, HttpError> {
+            self.requested.lock().unwrap().push(request.url.clone());
             self.responses
                 .lock()
                 .unwrap()
@@ -509,6 +628,11 @@ mod tests {
     }
 
     fn engine_with_one_server(transport: Arc<MockTransport>) -> (SyncEngine, Arc<InMemoryStore>) {
+        let store = Arc::new(InMemoryStore::new());
+        (engine_with_store(transport, store.clone()), store)
+    }
+
+    fn engine_with_store(transport: Arc<MockTransport>, store: Arc<dyn Store>) -> SyncEngine {
         let clock = Arc::new(FixedClock(AtomicI64::new(0)));
         let discovery = Arc::new(DiscoveryService::new(
             transport,
@@ -516,8 +640,7 @@ mod tests {
             DiscoveryConfig::default(),
         ));
         discovery.seed_fixed_nodes(&[("node1".to_string(), "https://a.example".to_string())]);
-        let store = Arc::new(InMemoryStore::new());
-        (SyncEngine::new(discovery, store.clone(), clock), store)
+        SyncEngine::new(discovery, store, clock)
     }
 
     fn empty_manifest() -> serde_json::Value {
@@ -811,5 +934,187 @@ mod tests {
         engine.sync("token", &[]).await.unwrap();
 
         assert_eq!(store.local_proposals().unwrap().len(), 1);
+    }
+
+    const MANIFEST_URL: &str = "https://a.example/v1/static-data/manifest";
+
+    fn partition_url(tile: &str) -> String {
+        format!("https://a.example/v1/static-data/partitions/{tile}")
+    }
+
+    fn plain_segment_json(id: &str) -> serde_json::Value {
+        serde_json::json!({
+            "id": id,
+            "geometry": { "type": "LineString", "coordinates": [[13.0, 52.0], [13.01, 52.0]] },
+            "speedLimit": 50,
+            "speedLimitUnit": "kmh",
+            "source": "osm",
+            "sourceLicense": null,
+            "importedAt": "2026-01-01T00:00:00Z",
+            "lastConfirmedAt": null
+        })
+    }
+
+    /// Three partitions of 100 bytes each: A and B hold two segments, C one.
+    fn set_three_partitions(transport: &MockTransport, available: &[&str]) {
+        transport.set(
+            MANIFEST_URL,
+            200,
+            serde_json::json!({
+                "staticDataVersion": 1,
+                "generatedAt": "2026-01-01T00:00:00Z",
+                "partitions": [
+                    { "tile": "tileA", "hash": "hash-a", "sizeBytes": 100 },
+                    { "tile": "tileB", "hash": "hash-b", "sizeBytes": 100 },
+                    { "tile": "tileC", "hash": "hash-c", "sizeBytes": 100 }
+                ]
+            }),
+        );
+        let contents = [
+            ("tileA", vec!["a1", "a2"]),
+            ("tileB", vec!["b1", "b2"]),
+            ("tileC", vec!["c1"]),
+        ];
+        for (tile, ids) in contents {
+            if !available.contains(&tile) {
+                continue;
+            }
+            let segments: Vec<serde_json::Value> =
+                ids.into_iter().map(plain_segment_json).collect();
+            transport.set(
+                &partition_url(tile),
+                200,
+                serde_json::json!({
+                    "tile": tile,
+                    "speedLimitSegments": segments,
+                    "staticSigns": [],
+                    "fixedSpeedCameras": []
+                }),
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn a_bootstrap_that_runs_out_of_space_resumes_at_the_next_partition() {
+        let transport = Arc::new(MockTransport::new());
+        set_three_partitions(&transport, &["tileA", "tileB", "tileC"]);
+        // Room for the first partition (2 entities) but not the second.
+        let store = Arc::new(InMemoryStore::with_static_entity_limit(3));
+        let engine = engine_with_store(transport.clone(), store.clone());
+
+        let first = engine.sync_static_data("token").await;
+
+        assert!(matches!(first, Err(SyncError::StorageFull)));
+        assert_eq!(
+            store.get_partition_hash("tileA").unwrap().as_deref(),
+            Some("hash-a")
+        );
+        assert_eq!(store.get_partition_hash("tileB").unwrap(), None);
+
+        // The user frees space; the same call carries on.
+        store.set_static_entity_limit(None);
+        engine.sync_static_data("token").await.unwrap();
+
+        assert_eq!(transport.request_count(&partition_url("tileA")), 1);
+        assert_eq!(transport.request_count(&partition_url("tileB")), 2);
+        assert_eq!(transport.request_count(&partition_url("tileC")), 1);
+        assert_eq!(store.all_entities().unwrap().speed_limit_segments.len(), 5);
+    }
+
+    struct Recorder(Mutex<Vec<BootstrapProgress>>);
+    impl SyncObserver for Recorder {
+        fn on_bootstrap_progress(&self, progress: &BootstrapProgress) {
+            self.0.lock().unwrap().push(progress.clone());
+        }
+    }
+
+    #[tokio::test]
+    async fn progress_is_reported_at_the_start_and_after_every_partition() {
+        let transport = Arc::new(MockTransport::new());
+        set_three_partitions(&transport, &["tileA", "tileB", "tileC"]);
+        let recorder = Arc::new(Recorder(Mutex::new(Vec::new())));
+        let (engine, _store) = engine_with_one_server(transport);
+        let engine = engine.with_observer(recorder.clone());
+
+        engine.sync_static_data("token").await.unwrap();
+
+        let seen = recorder.0.lock().unwrap();
+        let steps: Vec<(usize, u64)> = seen
+            .iter()
+            .map(|p| (p.partitions_done, p.bytes_done))
+            .collect();
+        assert_eq!(steps, vec![(0, 0), (1, 100), (2, 200), (3, 300)]);
+        assert!(seen.iter().all(|p| p.partitions_total == 3 && p.bytes_total == 300));
+    }
+
+    #[tokio::test]
+    async fn the_plan_shrinks_as_partitions_complete() {
+        let transport = Arc::new(MockTransport::new());
+        set_three_partitions(&transport, &["tileA", "tileB", "tileC"]);
+        let store = Arc::new(InMemoryStore::with_static_entity_limit(3));
+        let engine = engine_with_store(transport, store);
+
+        let before = engine.plan_static_bootstrap("token").await.unwrap();
+        let _ = engine.sync_static_data("token").await;
+        let after = engine.plan_static_bootstrap("token").await.unwrap();
+
+        assert_eq!(
+            before,
+            BootstrapPlan {
+                partitions_total: 3,
+                partitions_pending: 3,
+                bytes_total: 300,
+                bytes_pending: 300
+            }
+        );
+        assert_eq!(
+            after,
+            BootstrapPlan {
+                partitions_total: 3,
+                partitions_pending: 2,
+                bytes_total: 300,
+                bytes_pending: 200
+            }
+        );
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[tokio::test]
+    async fn a_bootstrap_killed_midway_resumes_from_the_file_on_the_next_start() {
+        use crate::storage::SqliteStore;
+
+        let path = std::env::temp_dir().join(format!("tn-resume-{}.db", std::process::id()));
+        for suffix in ["", "-wal", "-shm"] {
+            let _ = std::fs::remove_file(format!("{}{suffix}", path.display()));
+        }
+
+        // First run: only partition A can be fetched; B and C fail — as if the
+        // connection dropped, or the app was killed, after the first partition.
+        let first_transport = Arc::new(MockTransport::new());
+        set_three_partitions(&first_transport, &["tileA"]);
+        let store = Arc::new(SqliteStore::open(&path).unwrap());
+        let engine = engine_with_store(first_transport.clone(), store.clone());
+        assert!(engine.sync_static_data("token").await.is_err());
+        assert_eq!(first_transport.request_count(&partition_url("tileA")), 1);
+        drop(engine);
+        drop(store);
+
+        // Second run: a fresh process, a fresh engine, the same file.
+        let second_transport = Arc::new(MockTransport::new());
+        set_three_partitions(&second_transport, &["tileA", "tileB", "tileC"]);
+        let store = Arc::new(SqliteStore::open(&path).unwrap());
+        let engine = engine_with_store(second_transport.clone(), store.clone());
+        engine.sync_static_data("token").await.unwrap();
+
+        assert_eq!(second_transport.request_count(&partition_url("tileA")), 0);
+        assert_eq!(second_transport.request_count(&partition_url("tileB")), 1);
+        assert_eq!(second_transport.request_count(&partition_url("tileC")), 1);
+        assert_eq!(store.all_entities().unwrap().speed_limit_segments.len(), 5);
+
+        drop(engine);
+        drop(store);
+        for suffix in ["", "-wal", "-shm"] {
+            let _ = std::fs::remove_file(format!("{}{suffix}", path.display()));
+        }
     }
 }

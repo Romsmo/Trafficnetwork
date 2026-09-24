@@ -7,8 +7,11 @@
 use std::collections::HashMap;
 use std::sync::Mutex;
 
-use super::{LocalCorrectionProposal, PendingWrite, Store, StoreError, StoredEntities};
-use crate::sync::types::HazardReport;
+use super::{
+    boxes_intersect, query_box, segment_bbox, LocalCorrectionProposal, PendingWrite, StorageFullError,
+    Store, StoreError, StoredEntities,
+};
+use crate::sync::types::{HazardReport, SpeedLimitSegment};
 
 #[derive(Default)]
 struct Inner {
@@ -17,6 +20,7 @@ struct Inner {
     entities: StoredEntities,
     pending_writes: Vec<PendingWrite>,
     local_proposals: Vec<LocalCorrectionProposal>,
+    static_entity_limit: Option<usize>,
 }
 
 #[derive(Default)]
@@ -28,6 +32,27 @@ impl InMemoryStore {
     pub fn new() -> Self {
         Self::default()
     }
+
+    /// A store that refuses static data beyond `limit` entities with a
+    /// [`StorageFullError`] — the deterministic stand-in for a full disk, so
+    /// the "out of space, then space again" path can be tested.
+    pub fn with_static_entity_limit(limit: usize) -> Self {
+        let store = Self::default();
+        store.set_static_entity_limit(Some(limit));
+        store
+    }
+
+    /// Raises, lowers or (`None`) removes the limit — "the user freed space".
+    pub fn set_static_entity_limit(&self, limit: Option<usize>) {
+        self.inner.lock().unwrap().static_entity_limit = limit;
+    }
+}
+
+fn count_new<T>(existing: &[T], incoming: &[T], id_of: impl Fn(&T) -> &str) -> usize {
+    incoming
+        .iter()
+        .filter(|item| !existing.iter().any(|e| id_of(e) == id_of(item)))
+        .count()
 }
 
 fn upsert_by_id<T: Clone>(existing: &mut Vec<T>, incoming: &[T], id_of: impl Fn(&T) -> &str) {
@@ -84,6 +109,25 @@ impl Store for InMemoryStore {
 
     fn upsert_static_data(&self, data: &StoredEntities) -> Result<(), StoreError> {
         let mut inner = self.inner.lock().unwrap();
+        if let Some(limit) = inner.static_entity_limit {
+            let entities = &inner.entities;
+            let current = entities.speed_limit_segments.len()
+                + entities.static_signs.len()
+                + entities.fixed_speed_cameras.len();
+            let added = count_new(
+                &entities.speed_limit_segments,
+                &data.speed_limit_segments,
+                |s| &s.id,
+            ) + count_new(&entities.static_signs, &data.static_signs, |s| &s.id)
+                + count_new(
+                    &entities.fixed_speed_cameras,
+                    &data.fixed_speed_cameras,
+                    |c| &c.id,
+                );
+            if current + added > limit {
+                return Err(Box::new(StorageFullError));
+            }
+        }
         upsert_by_id(
             &mut inner.entities.speed_limit_segments,
             &data.speed_limit_segments,
@@ -141,6 +185,33 @@ impl Store for InMemoryStore {
 
     fn all_entities(&self) -> Result<StoredEntities, StoreError> {
         Ok(self.inner.lock().unwrap().entities.clone())
+    }
+
+    fn speed_limit_segment(&self, id: &str) -> Result<Option<SpeedLimitSegment>, StoreError> {
+        let inner = self.inner.lock().unwrap();
+        Ok(inner
+            .entities
+            .speed_limit_segments
+            .iter()
+            .find(|s| s.id == id)
+            .cloned())
+    }
+
+    fn speed_limit_segments_near(
+        &self,
+        lat: f64,
+        lng: f64,
+        radius_meters: f64,
+    ) -> Result<Vec<SpeedLimitSegment>, StoreError> {
+        let wanted = query_box(lat, lng, radius_meters);
+        let inner = self.inner.lock().unwrap();
+        Ok(inner
+            .entities
+            .speed_limit_segments
+            .iter()
+            .filter(|s| segment_bbox(s).is_some_and(|bbox| boxes_intersect(bbox, wanted)))
+            .cloned()
+            .collect())
     }
 
     fn enqueue_write(&self, item: &PendingWrite) -> Result<(), StoreError> {
@@ -293,6 +364,26 @@ mod tests {
 
         store.remove_local_proposal("keyA").unwrap();
         assert_eq!(store.local_proposals().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn behaves_like_every_other_store() {
+        crate::storage::contract::run(&|| Box::new(InMemoryStore::new()));
+    }
+
+    #[test]
+    fn a_store_with_a_limit_refuses_static_data_beyond_it_until_room_is_made() {
+        let store = InMemoryStore::with_static_entity_limit(1);
+        let data = crate::storage::contract::sample_static_data();
+
+        let refused = store.upsert_static_data(&data).unwrap_err();
+
+        assert!(crate::storage::is_storage_full(&refused));
+        assert!(store.all_entities().unwrap().speed_limit_segments.is_empty());
+
+        store.set_static_entity_limit(None);
+        store.upsert_static_data(&data).unwrap();
+        assert_eq!(store.all_entities().unwrap().speed_limit_segments.len(), 2);
     }
 
     #[test]

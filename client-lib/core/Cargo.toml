@@ -40,5 +40,16 @@ async-trait = "0.1"
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 getrandom = { version = "0.4", features = ["wasm_js"] }
 
+# Persistent store (`storage::SqliteStore`), native targets only — a browser
+# build brings its own `Store` with the WASM binding (F-C4). `bundled` compiles
+# SQLite (with its R*Tree module) into the library, so no system SQLite is
+# needed on any platform.
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+rusqlite = { version = "0.37", features = ["bundled"] }
+
 [dev-dependencies]
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+# Only for `examples/measure_bootstrap.rs`: compressed size of what crosses the
+# wire, and a process-memory sampler that works on Linux and Windows alike.
+flate2 = "1"
+memory-stats = "1"

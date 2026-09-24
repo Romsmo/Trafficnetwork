@@ -7,28 +7,84 @@
 //! `writebuffer` depending on any one of them — the same pattern already
 //! used for `platform::{Clock, HttpTransport}`.
 //!
-//! Deliberately **not** a concrete `rusqlite`-backed implementation yet: the
-//! trait shape is what the rest of the core needs to stabilize against now,
-//! and a real embedded-database implementation (with the R*Tree spatial
-//! indexing the F-C0 plan calls for) is naturally a per-platform concern —
-//! it lands with F-C4's bindings, where each target's actual storage
-//! constraints (native file access vs. `sqlite-wasm-rs` in a browser) are
-//! known, rather than being guessed at here. [`InMemoryStore`] is the
-//! reference implementation every test in this crate runs against in the
-//! meantime — deterministic, no I/O, and exercises the exact same trait a
-//! real backend must satisfy.
+//! [`SqliteStore`] (native targets) is the persistent implementation: SQLite
+//! through `rusqlite`, with an R*Tree over the segments' bounding boxes so a
+//! position lookup touches a handful of rows instead of the whole dataset.
+//! [`InMemoryStore`] is the reference implementation the engine tests run
+//! against. Browser targets (`sqlite-wasm-rs`/IndexedDB) bring their own
+//! `Store` with F-C4's WASM binding. Both implementations here are held to
+//! the same behaviour by one shared contract test.
 
+#[cfg(test)]
+mod contract;
 mod memory;
+#[cfg(not(target_arch = "wasm32"))]
+mod sqlite;
 
 pub use memory::InMemoryStore;
+#[cfg(not(target_arch = "wasm32"))]
+pub use sqlite::SqliteStore;
 
 use serde::{Deserialize, Serialize};
 
 use crate::sync::types::{
-    CorrectionReason, FixedSpeedCamera, HazardReport, SpeedLimitSegment, SpeedLimitUnit, StaticSign,
+    CorrectionReason, FixedSpeedCamera, Geometry, HazardReport, SpeedLimitSegment, SpeedLimitUnit,
+    StaticSign,
 };
 
 pub type StoreError = Box<dyn std::error::Error + Send + Sync>;
+
+/// What a store puts inside its [`StoreError`] when it has run out of room
+/// (a full disk, a quota) — the one storage failure a host app can act on, so
+/// the sync engine recognises it ([`is_storage_full`]) and reports it as
+/// `SyncError::StorageFull` instead of an opaque storage error.
+#[derive(Debug)]
+pub struct StorageFullError;
+
+impl std::fmt::Display for StorageFullError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "the local store is out of space")
+    }
+}
+
+impl std::error::Error for StorageFullError {}
+
+pub fn is_storage_full(error: &StoreError) -> bool {
+    error.downcast_ref::<StorageFullError>().is_some()
+}
+
+/// `(min_lng, max_lng, min_lat, max_lat)` of a segment's line string.
+pub(crate) fn segment_bbox(segment: &SpeedLimitSegment) -> Option<(f64, f64, f64, f64)> {
+    let Geometry::LineString { coordinates } = &segment.geometry else {
+        return None;
+    };
+    let first = coordinates.first()?;
+    let mut bbox = (first[0], first[0], first[1], first[1]);
+    for c in coordinates {
+        bbox.0 = bbox.0.min(c[0]);
+        bbox.1 = bbox.1.max(c[0]);
+        bbox.2 = bbox.2.min(c[1]);
+        bbox.3 = bbox.3.max(c[1]);
+    }
+    Some(bbox)
+}
+
+/// The box around a point that holds everything within `radius_meters` of
+/// it, as `(min_lng, max_lng, min_lat, max_lat)`. Slightly generous on
+/// purpose (111,000 m per degree, below the real 111,195): the exact
+/// distance is measured afterwards, so a box that is a little too large
+/// costs nothing and one that is too small would lose segments.
+pub(crate) fn query_box(lat: f64, lng: f64, radius_meters: f64) -> (f64, f64, f64, f64) {
+    const METERS_PER_DEGREE: f64 = 111_000.0;
+    let lat_margin = radius_meters / METERS_PER_DEGREE;
+    let cos_lat = lat.to_radians().cos().abs().max(0.01);
+    let lng_margin = radius_meters / (METERS_PER_DEGREE * cos_lat);
+    (lng - lng_margin, lng + lng_margin, lat - lat_margin, lat + lat_margin)
+}
+
+pub(crate) fn boxes_intersect(a: (f64, f64, f64, f64), b: (f64, f64, f64, f64)) -> bool {
+    a.0 <= b.1 && a.1 >= b.0 && a.2 <= b.3 && a.3 >= b.2
+}
 
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct StoredEntities {
@@ -155,4 +211,47 @@ pub trait Store: Send + Sync {
     fn upsert_local_proposal(&self, proposal: &LocalCorrectionProposal) -> Result<(), StoreError>;
     fn local_proposals(&self) -> Result<Vec<LocalCorrectionProposal>, StoreError>;
     fn remove_local_proposal(&self, segment_key: &str) -> Result<(), StoreError>;
+
+    /// Adds one static-data partition's entities *and* records its hash. A
+    /// store with transactions should make this atomic: a bootstrap killed
+    /// between the two steps would otherwise download that partition again
+    /// for nothing when it resumes. (The default is the two calls in a row.)
+    fn upsert_static_partition(
+        &self,
+        tile: &str,
+        hash: &str,
+        data: &StoredEntities,
+    ) -> Result<(), StoreError> {
+        self.upsert_static_data(data)?;
+        self.set_partition_hash(tile, hash)
+    }
+
+    /// Segments that may lie within `radius_meters` of a point — a superset
+    /// is fine (the matcher measures exactly), but a store with a spatial
+    /// index should return only the handful nearby, not the whole dataset.
+    /// (The default returns every segment.)
+    fn speed_limit_segments_near(
+        &self,
+        _lat: f64,
+        _lng: f64,
+        _radius_meters: f64,
+    ) -> Result<Vec<SpeedLimitSegment>, StoreError> {
+        Ok(self.all_entities()?.speed_limit_segments)
+    }
+
+    /// One segment by its id — indexed in a real store. (The default scans
+    /// everything.)
+    fn speed_limit_segment(&self, id: &str) -> Result<Option<SpeedLimitSegment>, StoreError> {
+        Ok(self
+            .all_entities()?
+            .speed_limit_segments
+            .into_iter()
+            .find(|s| s.id == id))
+    }
+
+    /// How many bytes the store occupies, if it can tell — for reports and
+    /// for a host app's own free-space checks.
+    fn storage_bytes(&self) -> Option<u64> {
+        None
+    }
 }

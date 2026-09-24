@@ -197,19 +197,21 @@ pub fn nearest_speed_limit_with_proposals(
 
 /// The speed limit at a position, straight from the local store — the
 /// synced segments plus this device's own correction proposals. Never
-/// touches the network.
+/// touches the network, and asks the store only for the segments near the
+/// position ([`Store::speed_limit_segments_near`]), so with a spatial index
+/// the cost does not grow with the size of the dataset.
 pub fn speed_limit_at(
     store: &dyn Store,
     lat: f64,
     lng: f64,
     max_distance_meters: f64,
 ) -> Result<Option<NearestSpeedLimit>, StoreError> {
-    let entities = store.all_entities()?;
+    let nearby = store.speed_limit_segments_near(lat, lng, max_distance_meters)?;
     let proposals = store.local_proposals()?;
     Ok(nearest_speed_limit_with_proposals(
         lat,
         lng,
-        &entities.speed_limit_segments,
+        &nearby,
         &proposals,
         max_distance_meters,
     ))
