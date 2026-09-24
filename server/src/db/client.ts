@@ -1,6 +1,6 @@
 import postgres from "postgres";
 import { drizzle, type PostgresJsQueryResultHKT } from "drizzle-orm/postgres-js";
-import type { PgDatabase } from "drizzle-orm/pg-core";
+import type { PgDatabase, PgTransaction } from "drizzle-orm/pg-core";
 import type { Env } from "../config/env.js";
 import * as schema from "./schema/index.js";
 
@@ -17,6 +17,10 @@ export type Database = ReturnType<typeof createDb>;
  */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export type Queryable = PgDatabase<PostgresJsQueryResultHKT, any, any>;
+
+/** The `tx` handle inside `db.transaction(async (tx) => ...)` — what appendEvent() requires. Also a Queryable. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export type Transaction = PgTransaction<PostgresJsQueryResultHKT, any, any>;
 
 export function createDb(env: Pick<Env, "DATABASE_URL">) {
   const client = postgres(env.DATABASE_URL, {

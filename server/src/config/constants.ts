@@ -105,5 +105,23 @@ export const ENTITY_TYPES = [
 ] as const;
 export type EntityType = (typeof ENTITY_TYPES)[number];
 
+export const SPEED_LIMIT_UNITS = ["kmh", "mph"] as const;
+export type SpeedLimitUnit = (typeof SPEED_LIMIT_UNITS)[number];
+
+/**
+ * Community speed-limit corrections (add-on K-A, docs/speed-limit-corrections.md).
+ * Lifecycle order matches the prompt: proposed -> applied -> reverted/superseded.
+ */
+export const CORRECTION_STATUSES = ["proposed", "applied", "superseded", "reverted"] as const;
+export type CorrectionStatus = (typeof CORRECTION_STATUSES)[number];
+
+/** "support" = "the limit here is X" (a proposal or a confirmation of one), "deny" = "X is wrong". */
+export const CORRECTION_VOTE_KINDS = ["support", "deny"] as const;
+export type CorrectionVoteKind = (typeof CORRECTION_VOTE_KINDS)[number];
+
+/** Optional, informational: why the reporter thinks the imported value is wrong (prompt: falscher Wert, Limit aufgehoben, Schild fehlt/neu). */
+export const CORRECTION_REASONS = ["wrong_value", "limit_lifted", "sign_missing_or_new", "other"] as const;
+export type CorrectionReason = (typeof CORRECTION_REASONS)[number];
+
 export const CLIENT_SCOPES = ["client", "bulk-import", "device-registration"] as const;
 export type ClientScope = (typeof CLIENT_SCOPES)[number];

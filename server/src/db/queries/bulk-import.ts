@@ -1,6 +1,7 @@
 import { sql } from "drizzle-orm";
 import type { Queryable } from "../client.js";
 import { bumpStaticDataVersion } from "./sync-state.js";
+import { fillMissingBaseValues } from "./speed-limit-corrections.js";
 
 /**
  * Bulk-import writes go straight to the materialized tables without appending
@@ -41,6 +42,11 @@ export async function bulkInsertSpeedLimitSegments(db: Queryable, rows: SpeedLim
         )
       `);
     }
+    // Import only ever *adds* rows — it never touches an applied community
+    // correction (those live in their own table, keyed by geometry, and are
+    // overlaid at read time). The one bookkeeping step: a correction that was
+    // voted on before its segment existed learns the value it now sits on.
+    await fillMissingBaseValues(tx);
     await bumpStaticDataVersion(tx);
     return rows.length;
   });

@@ -50,6 +50,13 @@
       "when": 1789746727541,
       "tag": "0006_warm_tomas",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1790270510461,
+      "tag": "0007_speed_limit_corrections",
+      "breakpoints": true
     }
   ]
 }

@@ -1,4 +1,4 @@
-import { integer, pgTable } from "drizzle-orm/pg-core";
+import { boolean, integer, pgTable } from "drizzle-orm/pg-core";
 
 /**
  * Single-row table (id is always 1) tracking a global, monotonically
@@ -14,4 +14,9 @@ import { integer, pgTable } from "drizzle-orm/pg-core";
 export const staticDataState = pgTable("static_data_state", {
   id: integer("id").primaryKey(),
   version: integer("version").notNull().default(1),
+  // The COMMUNITY_CORRECTIONS_ENABLED value the last boot ran with. The overlay
+  // changes what every static read returns, so a flip has to bump `version`
+  // (and emit events) for clients to drop/regain corrected values — see
+  // modules/speed-limit-corrections/switch.ts.
+  correctionsOverlayEnabled: boolean("corrections_overlay_enabled").notNull().default(true),
 });

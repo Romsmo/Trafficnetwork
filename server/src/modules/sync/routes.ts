@@ -18,6 +18,7 @@ export async function registerSyncRoutes(app: FastifyInstance) {
       tiles,
       types,
       cameraNamespaceEnabled: app.deps.env.SPEED_CAMERA_NAMESPACE_ENABLED,
+      communityCorrectionsEnabled: app.deps.env.COMMUNITY_CORRECTIONS_ENABLED,
       // ?staticData=false (client-lib P2.0): omit the static-entity payload for
       // a client that already has it via /v1/static-data/{manifest,partitions}.
       includeStaticData: query.staticData !== "false",

@@ -22,6 +22,8 @@ import { registerNetworkRoutes } from "./modules/network/routes.js";
 import { applyNetworkConfigCameraOverride, loadSignedNetworkConfig, type NetworkConfigPayload } from "./modules/network/config.js";
 import type { SignedEnvelope } from "./modules/crypto/envelope.js";
 import { registerFederationRoutes } from "./modules/federation/routes.js";
+import { registerSpeedLimitCorrectionRoutes } from "./modules/speed-limit-corrections/routes.js";
+import { syncCorrectionsOverlaySwitch } from "./modules/speed-limit-corrections/switch.js";
 
 export interface AppDependencies {
   env: Env;
@@ -104,6 +106,13 @@ export async function buildApp(deps: AppDependencies): Promise<FastifyInstance> 
   await registerDeviceRoutes(app);
   await registerConfigRoutes(app);
   await registerNetworkRoutes(app);
+  // Community speed-limit corrections (add-on K-A): with the switch off the
+  // endpoints don't exist and reads skip the overlay. A flip since the last
+  // boot is recorded (and announced) here, before the first request is served.
+  await syncCorrectionsOverlaySwitch(deps.db, deps.env, app.log);
+  if (deps.env.COMMUNITY_CORRECTIONS_ENABLED) {
+    await registerSpeedLimitCorrectionRoutes(app);
+  }
   // Only registered when federating (F-S3) — an isolated server (the
   // default) has no join/heartbeat/push/pull endpoints at all, exactly like
   // before this milestone, rather than exposing them but rejecting every

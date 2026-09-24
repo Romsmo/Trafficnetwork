@@ -96,4 +96,47 @@ describe("loadEnv", () => {
     expect(env.REPUTATION_DIRECTORY_PROBATION_MAX_SHARE).toBe(0.5);
     expect(env.FEDERATION_OVERLOAD_MAX_CONCURRENT_PUSHES).toBe(20);
   });
+
+  describe("community speed-limit corrections (K-A)", () => {
+    it("is on by default, with the operator-decided threshold of 3 and a stricter rate limit than reports", () => {
+      resetEnvCache();
+      const env = loadEnv(validEnv);
+      expect(env.COMMUNITY_CORRECTIONS_ENABLED).toBe(true);
+      expect(env.COMMUNITY_CORRECTIONS_CONFIRMATIONS_REQUIRED).toBe(3);
+      expect(env.COMMUNITY_CORRECTIONS_KMH_MIN).toBe(5);
+      expect(env.COMMUNITY_CORRECTIONS_KMH_MAX).toBe(150);
+      expect(env.COMMUNITY_CORRECTIONS_MPH_MIN).toBe(5);
+      expect(env.COMMUNITY_CORRECTIONS_MPH_MAX).toBe(85);
+      expect(env.COMMUNITY_CORRECTIONS_VALUE_STEP).toBe(5);
+      expect(env.COMMUNITY_CORRECTIONS_RATE_LIMIT_MAX).toBe(5);
+      expect(env.COMMUNITY_CORRECTIONS_RATE_LIMIT_WINDOW_MINUTES).toBe(60);
+      // "eigenes, strengeres Limit": fewer submissions per hour than reports allow.
+      const perHourReports = env.REPORT_RATE_LIMIT_MAX * (60 / env.REPORT_RATE_LIMIT_WINDOW_MINUTES);
+      expect(env.COMMUNITY_CORRECTIONS_RATE_LIMIT_MAX / (env.COMMUNITY_CORRECTIONS_RATE_LIMIT_WINDOW_MINUTES / 60)).toBeLessThan(perHourReports);
+    });
+
+    it("can be switched off and its numbers tuned from the environment", () => {
+      resetEnvCache();
+      const env = loadEnv({
+        ...validEnv,
+        COMMUNITY_CORRECTIONS_ENABLED: "false",
+        COMMUNITY_CORRECTIONS_CONFIRMATIONS_REQUIRED: "5",
+        COMMUNITY_CORRECTIONS_KMH_MAX: "130",
+        COMMUNITY_CORRECTIONS_VALUE_STEP: "1",
+      });
+      expect(env.COMMUNITY_CORRECTIONS_ENABLED).toBe(false);
+      expect(env.COMMUNITY_CORRECTIONS_CONFIRMATIONS_REQUIRED).toBe(5);
+      expect(env.COMMUNITY_CORRECTIONS_KMH_MAX).toBe(130);
+      expect(env.COMMUNITY_CORRECTIONS_VALUE_STEP).toBe(1);
+    });
+
+    it("rejects an inverted range and a zero threshold", () => {
+      resetEnvCache();
+      expect(() => loadEnv({ ...validEnv, COMMUNITY_CORRECTIONS_KMH_MIN: "200", COMMUNITY_CORRECTIONS_KMH_MAX: "100" })).toThrow(/KMH_MIN/);
+      resetEnvCache();
+      expect(() => loadEnv({ ...validEnv, COMMUNITY_CORRECTIONS_MPH_MIN: "90" })).toThrow(/MPH_MIN/);
+      resetEnvCache();
+      expect(() => loadEnv({ ...validEnv, COMMUNITY_CORRECTIONS_CONFIRMATIONS_REQUIRED: "0" })).toThrow(/CONFIRMATIONS_REQUIRED/);
+    });
+  });
 });

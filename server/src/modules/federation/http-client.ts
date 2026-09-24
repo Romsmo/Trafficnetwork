@@ -1,6 +1,7 @@
 import type { SignedEnvelope } from "../crypto/envelope.js";
 import type { NetworkPeerApi } from "../../db/queries/network-peers.js";
 import type { DeviceCreateEventPayload } from "./device-event.js";
+import type { SpeedLimitVoteEnvelope } from "../speed-limit-corrections/vote.js";
 import type { JoinRequestPayload, HeartbeatPayload } from "./protocol.js";
 
 /**
@@ -48,8 +49,36 @@ export async function pushEvents(
   senderNodeId: string,
   events: SignedEnvelope<DeviceCreateEventPayload>[],
   timeoutMs: number,
+  /**
+   * Device-signed speed-limit votes (add-on K-A). A separate field, and only
+   * sent when there is something in it, so an older peer — whose schema simply
+   * doesn't know the key — is never handed a body it would reject.
+   */
+  speedLimitVotes: SpeedLimitVoteEnvelope[] = [],
 ): Promise<PushEventsResponse> {
-  return postJson<PushEventsResponse>(`${baseUrl}/v1/federation/events`, { senderNodeId, events }, timeoutMs);
+  const body = speedLimitVotes.length > 0 ? { senderNodeId, events, speedLimitVotes } : { senderNodeId, events };
+  return postJson<PushEventsResponse>(`${baseUrl}/v1/federation/events`, body, timeoutMs);
+}
+
+export interface PullSpeedLimitVotesResponse {
+  votes: { sequence: number; voteId: string; envelope: SpeedLimitVoteEnvelope; receivedAt: string }[];
+  nextAfter: number | null;
+}
+
+/** Returns null when the peer doesn't offer the stream (older server, or corrections switched off there) — not an error, not a failed health check. */
+export async function pullSpeedLimitVotes(
+  baseUrl: string,
+  after: number,
+  limit: number,
+  timeoutMs: number,
+): Promise<PullSpeedLimitVotesResponse | null> {
+  const url = `${baseUrl}/v1/federation/speed-limit-votes?after=${after}&limit=${limit}`;
+  const res = await fetch(url, { signal: AbortSignal.timeout(timeoutMs) });
+  if (res.status === 404) return null;
+  if (!res.ok) {
+    throw new Error(`${url} responded ${res.status}`);
+  }
+  return (await res.json()) as PullSpeedLimitVotesResponse;
 }
 
 export interface PullEventsResponse {

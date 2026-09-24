@@ -11,6 +11,7 @@ function speedLimitSegment(id: string, coordinates: [number, number][]): SpeedLi
   return {
     id,
     geometry: { type: "LineString", coordinates },
+    segmentKey: "0".repeat(32),
     speedLimit: 50,
     speedLimitUnit: "kmh",
     source: "test",

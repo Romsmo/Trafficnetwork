@@ -80,6 +80,22 @@ describe("auth hook: PUBLIC_PATHS coverage", () => {
     expect(res.statusCode).not.toBe(401);
   });
 
+  it("GET /v1/federation/speed-limit-votes is reachable with no Authorization header (not a 401)", async () => {
+    const res = await app.inject({ method: "GET", url: "/v1/federation/speed-limit-votes?after=0" });
+    expect(res.statusCode).toBe(200);
+  });
+
+  it("the correction endpoints for clients (not peers) do require auth", async () => {
+    for (const [method, url] of [
+      ["GET", "/v1/speed-limit-corrections?tiles=x"],
+      ["POST", "/v1/speed-limit-segments/00000000-0000-0000-0000-000000000000/corrections"],
+      ["POST", "/v1/speed-limit-corrections/00000000-0000-0000-0000-000000000000/confirmations"],
+    ] as const) {
+      const res = await app.inject({ method, url, payload: {} });
+      expect(res.statusCode, `${method} ${url}`).toBe(401);
+    }
+  });
+
   it("sanity check: an ordinary route still requires auth (control case, so the assertions above are meaningful)", async () => {
     const res = await app.inject({ method: "GET", url: "/v1/config" });
     expect(res.statusCode).toBe(401);

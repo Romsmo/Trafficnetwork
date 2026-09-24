@@ -1,6 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import type { SignedEnvelope } from "../crypto/envelope.js";
 import type { DeviceCreateEventPayload } from "./device-event.js";
+import type { SpeedLimitVoteEnvelope } from "../speed-limit-corrections/vote.js";
 import { listPeers } from "../../db/queries/network-peers.js";
 import { pushEvents } from "./http-client.js";
 
@@ -29,4 +30,26 @@ export function broadcastFederationEvents(
       }
     })
     .catch((err) => app.log.warn({ err }, "federation: gossip fan-out could not list peers"));
+}
+
+/**
+ * Same best-effort fan-out for device-signed speed-limit votes (add-on K-A).
+ * Only when this server both federates and runs corrections; a peer that has
+ * corrections switched off answers `ignored`, an older peer never sees the field.
+ */
+export function broadcastSpeedLimitVotes(
+  app: FastifyInstance,
+  votes: SpeedLimitVoteEnvelope[],
+  excludeNodeId: string | null,
+): void {
+  if (!app.deps.env.FEDERATION_ENABLED || !app.deps.env.COMMUNITY_CORRECTIONS_ENABLED || votes.length === 0) return;
+  listPeers(app.deps.db)
+    .then((peers) => {
+      for (const peer of peers.filter((p) => p.nodeId !== excludeNodeId)) {
+        pushEvents(peer.address, app.nodeIdentity.nodeId, [], app.deps.env.FEDERATION_PEER_TIMEOUT_MS, votes).catch((err) => {
+          app.log.warn({ err, peer: peer.nodeId }, "federation: speed-limit vote fan-out to peer failed");
+        });
+      }
+    })
+    .catch((err) => app.log.warn({ err }, "federation: speed-limit vote fan-out could not list peers"));
 }

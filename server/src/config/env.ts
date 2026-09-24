@@ -132,6 +132,40 @@ const envSchema = z.object({
   // Retry-After once this many pushes are being processed concurrently by
   // this process, rather than degrading everyone's latency under load.
   FEDERATION_OVERLOAD_MAX_CONCURRENT_PUSHES: z.coerce.number().int().positive().default(20),
+
+  // Community speed-limit corrections (add-on K-A, docs/speed-limit-corrections.md).
+  // Master switch: false removes the overlay from every read (imported values
+  // are served again), unregisters the write/list endpoints and makes
+  // federation ignore votes. Stored votes/corrections are kept, so switching
+  // it back on restores them.
+  COMMUNITY_CORRECTIONS_ENABLED: z
+    .enum(["true", "false"])
+    .default("true")
+    .transform((v) => v === "true"),
+  // Net confirmations (distinct supporting devices minus distinct denying
+  // devices) a proposed value needs before it overrides the imported one. The
+  // operator's safety decision — 3 by default, never a constant in code.
+  COMMUNITY_CORRECTIONS_CONFIRMATIONS_REQUIRED: z.coerce.number().int().positive().default(3),
+  // Plausible range per unit, in the segment's own unit (a correction never
+  // converts). Bounds cover what is actually posted in Europe (140 km/h at
+  // most on a few motorways; 70 mph UK, 85 mph as a generous ceiling).
+  COMMUNITY_CORRECTIONS_KMH_MIN: z.coerce.number().int().positive().default(5),
+  COMMUNITY_CORRECTIONS_KMH_MAX: z.coerce.number().int().positive().default(150),
+  COMMUNITY_CORRECTIONS_MPH_MIN: z.coerce.number().int().positive().default(5),
+  COMMUNITY_CORRECTIONS_MPH_MAX: z.coerce.number().int().positive().default(85),
+  // Proposed values must be a multiple of this (posted limits are multiples of
+  // 5 almost everywhere; catches fat-finger values like 55 for 5). 1 disables.
+  COMMUNITY_CORRECTIONS_VALUE_STEP: z.coerce.number().int().positive().default(5),
+  // Per calling client, deliberately stricter than the 10-per-10-minutes budget
+  // for hazard reports: a correction is a durable, safety-relevant claim.
+  COMMUNITY_CORRECTIONS_RATE_LIMIT_MAX: z.coerce.number().int().positive().default(5),
+  COMMUNITY_CORRECTIONS_RATE_LIMIT_WINDOW_MINUTES: z.coerce.number().int().positive().default(60),
+}).refine((env) => env.COMMUNITY_CORRECTIONS_KMH_MIN <= env.COMMUNITY_CORRECTIONS_KMH_MAX, {
+  message: "COMMUNITY_CORRECTIONS_KMH_MIN must not exceed COMMUNITY_CORRECTIONS_KMH_MAX",
+  path: ["COMMUNITY_CORRECTIONS_KMH_MIN"],
+}).refine((env) => env.COMMUNITY_CORRECTIONS_MPH_MIN <= env.COMMUNITY_CORRECTIONS_MPH_MAX, {
+  message: "COMMUNITY_CORRECTIONS_MPH_MIN must not exceed COMMUNITY_CORRECTIONS_MPH_MAX",
+  path: ["COMMUNITY_CORRECTIONS_MPH_MIN"],
 }).refine((env) => !env.NETWORK_CONFIG_PATH || env.NETWORK_ROOT_PUBLIC_KEY, {
   message: "NETWORK_ROOT_PUBLIC_KEY is required whenever NETWORK_CONFIG_PATH is set — a signed config can't be verified without it",
   path: ["NETWORK_ROOT_PUBLIC_KEY"],
