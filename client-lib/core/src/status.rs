@@ -252,10 +252,10 @@ mod tests {
             self.set_raw(status, serde_json::to_vec(&body).unwrap());
         }
         fn set_raw(&self, status: u16, body: Vec<u8>) {
-            self.responses.lock().unwrap().insert(
-                URL.to_string(),
-                Ok(HttpResponse { status, body }),
-            );
+            self.responses
+                .lock()
+                .unwrap()
+                .insert(URL.to_string(), Ok(HttpResponse { status, body }));
         }
         fn set_error(&self) {
             self.responses
@@ -438,7 +438,8 @@ mod tests {
     #[tokio::test]
     async fn a_disabled_feature_leaves_the_fields_empty() {
         let f = fixture();
-        f.transport.set(200, serde_json::json!({ "enabled": false }));
+        f.transport
+            .set(200, serde_json::json!({ "enabled": false }));
 
         f.service.refresh().await;
 
