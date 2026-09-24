@@ -76,9 +76,7 @@ pub enum SpeedLimitOrigin {
     /// This device's own proposal, not (yet) confirmed by anyone else.
     /// `confirmations` is the server's count once it accepted the proposal
     /// (it includes this device), `0` while the proposal is still queued.
-    LocallyProposed {
-        confirmations: u32,
-    },
+    LocallyProposed { confirmations: u32 },
     /// A community correction the server has applied: enough distinct
     /// devices agreed. `needs_review` means the import changed to yet
     /// another value after it was proposed.

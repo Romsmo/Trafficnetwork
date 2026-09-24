@@ -62,10 +62,16 @@ impl std::fmt::Display for CorrectionError {
             CorrectionError::NotOffered => write!(f, "this server doesn't offer corrections"),
             CorrectionError::UnknownSegment => write!(f, "no such speed-limit segment"),
             CorrectionError::NoSegmentKey => {
-                write!(f, "the segment has no segmentKey (server predates corrections)")
+                write!(
+                    f,
+                    "the segment has no segmentKey (server predates corrections)"
+                )
             }
             CorrectionError::UnitMismatch { segment_unit } => {
-                write!(f, "the segment's unit is {segment_unit}; a correction never converts")
+                write!(
+                    f,
+                    "the segment's unit is {segment_unit}; a correction never converts"
+                )
             }
             CorrectionError::ValueOutOfRange { min, max } => {
                 write!(f, "value must be between {min} and {max}")
@@ -144,9 +150,7 @@ fn validate_value(
             step: rules.value_step,
         });
     }
-    let imported = segment
-        .imported_speed_limit
-        .unwrap_or(segment.speed_limit);
+    let imported = segment.imported_speed_limit.unwrap_or(segment.speed_limit);
     if (imported - f64::from(value)).abs() < 0.5 {
         return Err(CorrectionError::NoChange);
     }
@@ -248,7 +252,9 @@ pub fn report_wrong_speed_limit(
         confirmations: 0,
         proposed_at_unix_ms: now,
     };
-    store.upsert_local_proposal(&proposal).map_err(store_error)?;
+    store
+        .upsert_local_proposal(&proposal)
+        .map_err(store_error)?;
     Ok(proposal)
 }
 
@@ -401,8 +407,7 @@ pub async fn fetch_corrections(
                     "{}/v1/speed-limit-corrections?tiles={joined}",
                     server.address.trim_end_matches('/')
                 );
-                HttpRequest::get(url)
-                    .with_header("Authorization", format!("Bearer {bearer_token}"))
+                HttpRequest::get(url).with_header("Authorization", format!("Bearer {bearer_token}"))
             })
             .await?;
         if response.status == 404 {
@@ -465,7 +470,13 @@ fn vote_payload(
                 .request_body
                 .get("reason")
                 .and_then(|r| serde_json::from_value::<CorrectionReason>(r.clone()).ok());
-            ("support", segment_key.clone(), queued_value(item)?, unit, reason)
+            (
+                "support",
+                segment_key.clone(),
+                queued_value(item)?,
+                unit,
+                reason,
+            )
         }
         WriteKind::SpeedLimitConfirmation {
             segment_key,
@@ -803,11 +814,8 @@ mod tests {
     fn fixture(nodes: &[(&str, &str)]) -> Fixture {
         let transport = Arc::new(MockTransport::new());
         let clock = Arc::new(FixedClock(AtomicI64::new(T0)));
-        let discovery = DiscoveryService::new(
-            transport.clone(),
-            clock.clone(),
-            DiscoveryConfig::default(),
-        );
+        let discovery =
+            DiscoveryService::new(transport.clone(), clock.clone(), DiscoveryConfig::default());
         let nodes: Vec<(String, String)> = nodes
             .iter()
             .map(|(id, address)| (id.to_string(), address.to_string()))
@@ -930,10 +938,7 @@ mod tests {
     #[test]
     fn implausible_input_is_rejected_before_anything_is_queued() {
         let f = one_server();
-        add_segments(
-            &f,
-            vec![segment("s1", Some(KEY)), segment("no-key", None)],
-        );
+        add_segments(&f, vec![segment("s1", Some(KEY)), segment("no-key", None)]);
         let clock = FixedClock(AtomicI64::new(T0));
         let cfg = config(Some(rules(true)));
         let propose = |r: &WrongSpeedLimitReport| {
@@ -1079,9 +1084,10 @@ mod tests {
         assert_eq!(payload["value"], 30);
         assert_eq!(payload["unit"], "kmh");
         assert_eq!(payload["devicePublicKey"], key.public_key_raw);
-        let signed_at = chrono::DateTime::parse_from_rfc3339(payload["timestamp"].as_str().unwrap())
-            .unwrap()
-            .timestamp_millis();
+        let signed_at =
+            chrono::DateTime::parse_from_rfc3339(payload["timestamp"].as_str().unwrap())
+                .unwrap()
+                .timestamp_millis();
         assert_eq!(signed_at, T0 + 5 * 60 * 1000);
         let envelope: SignedEnvelope<serde_json::Value> =
             serde_json::from_value(sent["deviceAssertion"].clone()).unwrap();

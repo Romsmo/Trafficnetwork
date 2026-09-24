@@ -739,7 +739,9 @@ mod tests {
 
         engine.sync("token", &[]).await.unwrap();
 
-        let result = speed_limit_at(&*store, 52.0, 13.005, 100.0).unwrap().unwrap();
+        let result = speed_limit_at(&*store, 52.0, 13.005, 100.0)
+            .unwrap()
+            .unwrap();
         assert_eq!(result.speed_limit, 30.0);
         assert!(matches!(
             result.origin,
@@ -764,7 +766,9 @@ mod tests {
 
         engine.sync("token", &[]).await.unwrap();
 
-        let result = speed_limit_at(&*store, 52.0, 13.005, 100.0).unwrap().unwrap();
+        let result = speed_limit_at(&*store, 52.0, 13.005, 100.0)
+            .unwrap()
+            .unwrap();
         assert_eq!(result.speed_limit, 50.0);
         assert_eq!(result.origin, SpeedLimitOrigin::Imported);
     }
