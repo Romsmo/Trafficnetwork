@@ -23,8 +23,8 @@ pub use auth::{
     BindKeyResponse, DeviceRegistration, TokenResponse,
 };
 pub use corrections::{
-    confirm_speed_limit_correction, fetch_corrections, report_wrong_speed_limit, Correction,
-    CorrectionError, CorrectionTarget, SegmentRef, WrongSpeedLimitReport,
+    confirm_speed_limit_correction, correction_id, fetch_corrections, report_wrong_speed_limit,
+    Correction, CorrectionError, CorrectionTarget, SegmentRef, WrongSpeedLimitReport,
 };
 pub use engine::{SyncEngine, SyncError};
 pub use expiry::{expires_at_unix_ms, expiry_ms_for, is_expired};

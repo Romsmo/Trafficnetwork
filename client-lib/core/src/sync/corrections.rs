@@ -16,6 +16,7 @@
 //! device's own proposal (marked as unconfirmed), else the imported value.
 
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 
 use crate::crypto::{sign_envelope, Ed25519KeyPair};
 use crate::discovery::{DiscoveryError, DiscoveryService, KnownServer};
@@ -89,6 +90,26 @@ impl std::error::Error for CorrectionError {}
 
 fn store_error(e: StoreError) -> CorrectionError {
     CorrectionError::Store(e.to_string())
+}
+
+/// The deterministic, cross-server-stable id of a correction record —
+/// `server/src/modules/speed-limit-corrections/tally.ts`'s `correctionId`:
+/// the first 128 bits of `sha256("speedLimitCorrection|<segmentKey>|<unit>|
+/// <value>")`, formatted as a UUID. It is a pure function of what a
+/// proposal says, so a device knows the id of its own proposal before the
+/// server has ever seen it.
+pub fn correction_id(segment_key: &str, unit: SpeedLimitUnit, value: u32) -> String {
+    let unit = unit.as_str();
+    let natural_key = format!("speedLimitCorrection|{segment_key}|{unit}|{value}");
+    let hex = hex::encode(Sha256::digest(natural_key.as_bytes()));
+    format!(
+        "{}-{}-{}-{}-{}",
+        &hex[0..8],
+        &hex[8..12],
+        &hex[12..16],
+        &hex[16..20],
+        &hex[20..32]
+    )
 }
 
 /// Which segment a report is about: by the id the client already holds, or
@@ -241,6 +262,7 @@ pub fn report_wrong_speed_limit(
     };
     store.enqueue_write(&item).map_err(store_error)?;
 
+    let proposal_id = correction_id(&segment_key, report.unit, report.proposed_value);
     let proposal = LocalCorrectionProposal {
         segment_key,
         segment_id: segment.id.clone(),
@@ -248,7 +270,7 @@ pub fn report_wrong_speed_limit(
         unit: report.unit,
         reason: report.reason,
         state: ProposalState::Queued,
-        correction_id: None,
+        correction_id: Some(proposal_id),
         confirmations: 0,
         proposed_at_unix_ms: now,
     };
@@ -310,21 +332,31 @@ impl CorrectionTarget {
 }
 
 /// Queues a confirmation ("stimmt", `agrees: true`) or objection ("stimmt
-/// nicht") to an existing correction. Only the queueing happens locally —
-/// nothing changes in what a limit is shown as until the server's answer
-/// comes back through sync, since one vote alone never flips a correction.
-/// The newest stance on a correction wins over a still-queued older one.
+/// nicht") to an existing correction and returns the queue id. Nothing
+/// changes in what a limit is shown as until the server's answer comes back
+/// through sync, since one vote alone never flips a correction. The newest
+/// stance on a correction wins over a still-queued older one.
+///
+/// One case does change locally: objecting to this device's *own* proposal
+/// withdraws it (the server drops a device's support when it objects), so
+/// its overlay goes away at once. If that proposal was still queued there is
+/// nothing on the server to withdraw — it is simply cancelled, nothing is
+/// queued, and the result is `None`.
 pub fn confirm_speed_limit_correction(
     store: &dyn Store,
     clock: &dyn Clock,
     config: &ClientConfig,
     target: &CorrectionTarget,
     agrees: bool,
-) -> Result<String, CorrectionError> {
+) -> Result<Option<String>, CorrectionError> {
     config
         .community_corrections
         .filter(|c| c.enabled)
         .ok_or(CorrectionError::NotOffered)?;
+
+    if !agrees && withdraw_own_proposal(store, target)? {
+        return Ok(None);
+    }
 
     drop_queued_writes(store, |kind| {
         matches!(
@@ -355,7 +387,41 @@ pub fn confirm_speed_limit_correction(
         },
     };
     store.enqueue_write(&item).map_err(store_error)?;
-    Ok(id)
+    Ok(Some(id))
+}
+
+/// Objecting to a value this device itself proposed: the overlay goes away.
+/// `true` if that proposal was still queued and has been cancelled outright,
+/// so there is nothing to send.
+fn withdraw_own_proposal(
+    store: &dyn Store,
+    target: &CorrectionTarget,
+) -> Result<bool, CorrectionError> {
+    let own = store
+        .local_proposals()
+        .map_err(store_error)?
+        .into_iter()
+        .find(|p| {
+            p.segment_key == target.segment_key
+                && p.unit == target.unit
+                && p.value == target.value
+        });
+    let Some(own) = own else {
+        return Ok(false);
+    };
+    store
+        .remove_local_proposal(&own.segment_key)
+        .map_err(store_error)?;
+    if own.state != ProposalState::Queued {
+        return Ok(false);
+    }
+    drop_queued_writes(store, |kind| {
+        matches!(
+            kind,
+            WriteKind::SpeedLimitCorrection { segment_key: key, .. } if key == &own.segment_key
+        )
+    })?;
+    Ok(true)
 }
 
 /// One entry of `GET /v1/speed-limit-corrections`
@@ -1319,6 +1385,95 @@ mod tests {
             needs_review: false,
         });
         assert_eq!(CorrectionTarget::from_segment(&corrected), Some(target()));
+    }
+
+    #[test]
+    fn the_correction_id_is_derived_exactly_like_the_servers() {
+        assert_eq!(
+            correction_id(KEY, SpeedLimitUnit::Kmh, 30),
+            "acfbf09f-e41f-0981-0363-822e37b8f80f"
+        );
+        assert_eq!(
+            correction_id(KEY, SpeedLimitUnit::Mph, 40),
+            "0598f390-e544-7e15-681c-cc0828044ab6"
+        );
+    }
+
+    #[test]
+    fn a_proposal_knows_its_correction_id_before_it_is_sent() {
+        let f = one_server();
+        add_segments(&f, vec![segment("s1", Some(KEY))]);
+        let cfg = config(Some(rules(true)));
+
+        let proposal =
+            report_wrong_speed_limit(&f.store, &*f.clock, &cfg, &report("s1", 30)).unwrap();
+
+        assert_eq!(
+            proposal.correction_id.as_deref(),
+            Some("acfbf09f-e41f-0981-0363-822e37b8f80f")
+        );
+    }
+
+    fn own_target() -> CorrectionTarget {
+        CorrectionTarget {
+            correction_id: correction_id(KEY, SpeedLimitUnit::Kmh, 30),
+            segment_key: KEY.to_string(),
+            value: 30,
+            unit: SpeedLimitUnit::Kmh,
+        }
+    }
+
+    #[test]
+    fn objecting_to_ones_own_still_queued_proposal_just_cancels_it() {
+        let f = one_server();
+        add_segments(&f, vec![segment("s1", Some(KEY))]);
+        let cfg = config(Some(rules(true)));
+        report_wrong_speed_limit(&f.store, &*f.clock, &cfg, &report("s1", 30)).unwrap();
+
+        let queued =
+            confirm_speed_limit_correction(&f.store, &*f.clock, &cfg, &own_target(), false)
+                .unwrap();
+
+        assert_eq!(queued, None);
+        assert!(f.store.pending_writes().unwrap().is_empty());
+        assert!(f.store.local_proposals().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn objecting_to_ones_own_sent_proposal_withdraws_the_overlay_and_queues_the_objection() {
+        let f = one_server();
+        add_segments(&f, vec![segment("s1", Some(KEY))]);
+        f.transport.set(S1_URL, 201, accepted("c1", 1));
+        let cfg = config(Some(rules(true)));
+        report_wrong_speed_limit(&f.store, &*f.clock, &cfg, &report("s1", 30)).unwrap();
+        flush_pending(&f.store, &f.discovery, &*f.clock, "token", None)
+            .await
+            .unwrap();
+
+        let queued =
+            confirm_speed_limit_correction(&f.store, &*f.clock, &cfg, &own_target(), false)
+                .unwrap();
+
+        assert!(queued.is_some());
+        assert!(f.store.local_proposals().unwrap().is_empty());
+        let pending = f.store.pending_writes().unwrap();
+        assert_eq!(pending.len(), 1);
+        assert!(matches!(
+            pending[0].kind,
+            WriteKind::SpeedLimitConfirmation { agrees: false, .. }
+        ));
+    }
+
+    #[test]
+    fn confirming_ones_own_proposal_changes_nothing_locally() {
+        let f = one_server();
+        add_segments(&f, vec![segment("s1", Some(KEY))]);
+        let cfg = config(Some(rules(true)));
+        report_wrong_speed_limit(&f.store, &*f.clock, &cfg, &report("s1", 30)).unwrap();
+
+        confirm_speed_limit_correction(&f.store, &*f.clock, &cfg, &own_target(), true).unwrap();
+
+        assert_eq!(f.store.local_proposals().unwrap().len(), 1);
     }
 
     fn open_proposal_json() -> serde_json::Value {
