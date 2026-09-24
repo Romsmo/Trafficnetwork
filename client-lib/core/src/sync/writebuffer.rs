@@ -17,8 +17,9 @@ use serde::Serialize;
 use crate::crypto::{sign_envelope, CanonicalError, Ed25519KeyPair, SignedEnvelope};
 use crate::discovery::DiscoveryService;
 use crate::platform::{Clock, HttpRequest};
-use crate::storage::{PendingWrite, Store, StoreError};
+use crate::storage::{PendingWrite, Store, StoreError, WriteKind};
 
+use super::corrections;
 use super::types::HazardType;
 
 #[derive(Debug)]
@@ -69,6 +70,7 @@ pub fn submit_report(
         request_body: body,
         created_at_unix_ms: now,
         attempts: 0,
+        kind: WriteKind::HazardReport,
     };
     store
         .enqueue_write(&item)
@@ -91,11 +93,12 @@ pub enum FlushOutcome {
     Failed { local_id: String },
 }
 
-/// Retries every currently queued submission, signing each fresh (see the
-/// module doc) when `device_key` is `Some`. Submissions without a bound
-/// device key are sent unsigned, exactly as before device identity existed
-/// — federation replication just won't pick them up
-/// (`server/docs/api.md`'s `deviceAssertion` is optional).
+/// Retries every currently queued write — hazard reports and speed-limit
+/// corrections/confirmations alike — signing each fresh (see the module doc)
+/// when `device_key` is `Some`. Writes without a bound device key are sent
+/// unsigned, exactly as before device identity existed — federation
+/// replication just won't pick them up (`deviceAssertion` is optional on
+/// every write endpoint).
 pub async fn flush_pending(
     store: &dyn Store,
     discovery: &DiscoveryService,
@@ -107,67 +110,91 @@ pub async fn flush_pending(
     let mut outcomes = Vec::with_capacity(pending.len());
 
     for item in pending {
-        let mut body = item.request_body.clone();
-        if let Some(key) = device_key {
-            let assertion = build_device_assertion(&body, clock.now_unix_ms(), key)
-                .map_err(|e| WriteBufferError::Signing(e.to_string()))?;
-            body["deviceAssertion"] = serde_json::to_value(&assertion)
-                .map_err(|e| WriteBufferError::Signing(e.to_string()))?;
-        }
-
-        let result = discovery
-            .request_with_failover(|server| {
-                let url = format!("{}/v1/hazard-reports", server.address.trim_end_matches('/'));
-                HttpRequest::post_json(url, &body)
-                    .expect("pending write body always serializes")
-                    .with_header("Authorization", format!("Bearer {bearer_token}"))
-            })
-            .await;
-
-        match result {
-            Ok((_, response)) if response.is_success() => {
-                store
-                    .remove_pending_write(&item.id)
-                    .map_err(WriteBufferError::Store)?;
-                let merged = response
-                    .json()
-                    .ok()
-                    .and_then(|v| v.get("merged").and_then(|m| m.as_bool()))
-                    .unwrap_or(false);
-                outcomes.push(FlushOutcome::Submitted {
-                    local_id: item.id,
-                    merged,
-                });
-            }
-            Ok((_, response)) if response.status == 409 => {
-                store
-                    .remove_pending_write(&item.id)
-                    .map_err(WriteBufferError::Store)?;
-                outcomes.push(FlushOutcome::Submitted {
-                    local_id: item.id,
-                    merged: false,
-                });
-            }
-            Ok((_, response)) => {
-                store
-                    .remove_pending_write(&item.id)
-                    .map_err(WriteBufferError::Store)?;
-                outcomes.push(FlushOutcome::Rejected {
-                    local_id: item.id,
-                    status: response.status,
-                });
-            }
-            Err(_) => {
-                let mut retried = item.clone();
-                retried.attempts += 1;
-                store
-                    .enqueue_write(&retried)
-                    .map_err(WriteBufferError::Store)?;
-                outcomes.push(FlushOutcome::Failed { local_id: item.id });
-            }
-        }
+        let outcome = if matches!(item.kind, WriteKind::HazardReport) {
+            flush_hazard_report(store, discovery, clock, bearer_token, device_key, item).await?
+        } else {
+            corrections::flush_correction_write(
+                store,
+                discovery,
+                clock,
+                bearer_token,
+                device_key,
+                item,
+            )
+            .await?
+        };
+        outcomes.push(outcome);
     }
     Ok(outcomes)
+}
+
+async fn flush_hazard_report(
+    store: &dyn Store,
+    discovery: &DiscoveryService,
+    clock: &dyn Clock,
+    bearer_token: &str,
+    device_key: Option<&Ed25519KeyPair>,
+    item: PendingWrite,
+) -> Result<FlushOutcome, WriteBufferError> {
+    let mut body = item.request_body.clone();
+    if let Some(key) = device_key {
+        let assertion = build_device_assertion(&body, clock.now_unix_ms(), key)
+            .map_err(|e| WriteBufferError::Signing(e.to_string()))?;
+        body["deviceAssertion"] = serde_json::to_value(&assertion)
+            .map_err(|e| WriteBufferError::Signing(e.to_string()))?;
+    }
+
+    let result = discovery
+        .request_with_failover(|server| {
+            let url = format!("{}/v1/hazard-reports", server.address.trim_end_matches('/'));
+            HttpRequest::post_json(url, &body)
+                .expect("pending write body always serializes")
+                .with_header("Authorization", format!("Bearer {bearer_token}"))
+        })
+        .await;
+
+    match result {
+        Ok((_, response)) if response.is_success() => {
+            store
+                .remove_pending_write(&item.id)
+                .map_err(WriteBufferError::Store)?;
+            let merged = response
+                .json()
+                .ok()
+                .and_then(|v| v.get("merged").and_then(|m| m.as_bool()))
+                .unwrap_or(false);
+            Ok(FlushOutcome::Submitted {
+                local_id: item.id,
+                merged,
+            })
+        }
+        Ok((_, response)) if response.status == 409 => {
+            store
+                .remove_pending_write(&item.id)
+                .map_err(WriteBufferError::Store)?;
+            Ok(FlushOutcome::Submitted {
+                local_id: item.id,
+                merged: false,
+            })
+        }
+        Ok((_, response)) => {
+            store
+                .remove_pending_write(&item.id)
+                .map_err(WriteBufferError::Store)?;
+            Ok(FlushOutcome::Rejected {
+                local_id: item.id,
+                status: response.status,
+            })
+        }
+        Err(_) => {
+            let mut retried = item.clone();
+            retried.attempts += 1;
+            store
+                .enqueue_write(&retried)
+                .map_err(WriteBufferError::Store)?;
+            Ok(FlushOutcome::Failed { local_id: item.id })
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -206,13 +233,13 @@ fn build_device_assertion(
     sign_envelope(payload, key)
 }
 
-fn unix_ms_to_rfc3339(unix_ms: i64) -> String {
+pub(super) fn unix_ms_to_rfc3339(unix_ms: i64) -> String {
     chrono::DateTime::from_timestamp_millis(unix_ms)
         .map(|dt| dt.to_rfc3339())
         .unwrap_or_default()
 }
 
-fn local_write_id(body: &serde_json::Value, now_unix_ms: i64) -> String {
+pub(super) fn local_write_id(body: &serde_json::Value, now_unix_ms: i64) -> String {
     use sha2::{Digest, Sha256};
     let mut hasher = Sha256::new();
     hasher.update(body.to_string().as_bytes());

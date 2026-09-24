@@ -127,6 +127,32 @@ impl SyncEngine {
         for server in self.discovery.current_pool() {
             self.sync_server(bearer_token, &server, tiles).await?;
         }
+        self.prune_redundant_proposals()
+    }
+
+    /// A local correction proposal whose value the community has since
+    /// confirmed is redundant — the synced segment now says the same, with
+    /// the real count — so it is dropped. One for a value nobody confirmed
+    /// stays: it is still this device's standing vote.
+    fn prune_redundant_proposals(&self) -> Result<(), SyncError> {
+        let proposals = self.store.local_proposals().map_err(SyncError::Store)?;
+        if proposals.is_empty() {
+            return Ok(());
+        }
+        let entities = self.store.all_entities().map_err(SyncError::Store)?;
+        for proposal in proposals {
+            let confirmed = entities.speed_limit_segments.iter().any(|s| {
+                s.segment_key.as_deref() == Some(proposal.segment_key.as_str())
+                    && s.corrected_by.as_deref() == Some("community")
+                    && s.speed_limit_unit == proposal.unit.as_str()
+                    && (s.speed_limit - f64::from(proposal.value)).abs() < 0.5
+            });
+            if confirmed {
+                self.store
+                    .remove_local_proposal(&proposal.segment_key)
+                    .map_err(SyncError::Store)?;
+            }
+        }
         Ok(())
     }
 
@@ -437,7 +463,9 @@ mod tests {
     use super::*;
     use crate::discovery::DiscoveryConfig;
     use crate::platform::{Clock, HttpError, HttpTransport};
-    use crate::storage::InMemoryStore;
+    use crate::storage::{InMemoryStore, LocalCorrectionProposal, ProposalState};
+    use crate::sync::matching::{speed_limit_at, SpeedLimitOrigin};
+    use crate::sync::types::SpeedLimitUnit;
     use std::collections::HashMap;
     use std::sync::atomic::{AtomicI64, Ordering};
     use std::sync::Mutex;
@@ -647,5 +675,137 @@ mod tests {
         store.set_partition_hash("tileA", "hash-1").unwrap();
 
         engine.sync("token", &[]).await.unwrap();
+    }
+
+    const KEY: &str = "0123456789abcdef0123456789abcdef";
+
+    fn segment_event(sequence: u64, speed_limit: u32, corrected: bool) -> serde_json::Value {
+        let mut payload = serde_json::json!({
+            "id": "seg1",
+            "geometry": {
+                "type": "LineString",
+                "coordinates": [[13.0, 52.0], [13.01, 52.0]]
+            },
+            "speedLimit": speed_limit,
+            "speedLimitUnit": "kmh",
+            "source": "osm",
+            "sourceLicense": null,
+            "importedAt": "2026-01-01T00:00:00Z",
+            "lastConfirmedAt": null,
+            "segmentKey": KEY
+        });
+        if corrected {
+            payload["correctedBy"] = serde_json::json!("community");
+            payload["importedSpeedLimit"] = serde_json::json!(50);
+            payload["correction"] = serde_json::json!({
+                "id": "c1",
+                "confirmations": 3,
+                "denials": 0,
+                "appliedAt": "2026-09-24T12:00:00.000Z",
+                "needsReview": false
+            });
+        }
+        serde_json::json!({
+            "sequence": sequence,
+            "occurredAt": "2026-09-24T12:00:00Z",
+            "type": "StaticDataUpdated",
+            "entityType": "speedLimitSegment",
+            "entityId": "seg1",
+            "payload": payload,
+            "regionTile": null,
+            "source": "community"
+        })
+    }
+
+    fn set_delta(transport: &MockTransport, events: Vec<serde_json::Value>, next_since: u64) {
+        transport.set(
+            "https://a.example/v1/static-data/manifest",
+            200,
+            empty_manifest(),
+        );
+        transport.set(
+            "https://a.example/v1/delta?since=5&limit=500",
+            200,
+            serde_json::json!({ "events": events, "nextSince": next_since, "hasMore": false }),
+        );
+    }
+
+    #[tokio::test]
+    async fn a_community_correction_arrives_through_delta_with_its_origin() {
+        let transport = Arc::new(MockTransport::new());
+        set_delta(&transport, vec![segment_event(6, 30, true)], 6);
+        let (engine, store) = engine_with_one_server(transport);
+        store.set_cursor("node1", 5).unwrap();
+
+        engine.sync("token", &[]).await.unwrap();
+
+        let result = speed_limit_at(&*store, 52.0, 13.005, 100.0).unwrap().unwrap();
+        assert_eq!(result.speed_limit, 30.0);
+        assert!(matches!(
+            result.origin,
+            SpeedLimitOrigin::CommunityCorrected {
+                confirmations: 3,
+                ..
+            }
+        ));
+        assert_eq!(result.imported_speed_limit, Some(50.0));
+    }
+
+    #[tokio::test]
+    async fn a_reverted_correction_falls_back_to_the_imported_value() {
+        let transport = Arc::new(MockTransport::new());
+        set_delta(
+            &transport,
+            vec![segment_event(6, 30, true), segment_event(7, 50, false)],
+            7,
+        );
+        let (engine, store) = engine_with_one_server(transport);
+        store.set_cursor("node1", 5).unwrap();
+
+        engine.sync("token", &[]).await.unwrap();
+
+        let result = speed_limit_at(&*store, 52.0, 13.005, 100.0).unwrap().unwrap();
+        assert_eq!(result.speed_limit, 50.0);
+        assert_eq!(result.origin, SpeedLimitOrigin::Imported);
+    }
+
+    fn sent_proposal(value: u32) -> LocalCorrectionProposal {
+        LocalCorrectionProposal {
+            segment_key: KEY.to_string(),
+            segment_id: "seg1".to_string(),
+            value,
+            unit: SpeedLimitUnit::Kmh,
+            reason: None,
+            state: ProposalState::Sent,
+            correction_id: Some("c1".to_string()),
+            confirmations: 1,
+            proposed_at_unix_ms: 0,
+        }
+    }
+
+    #[tokio::test]
+    async fn a_proposal_the_community_confirmed_is_dropped_after_sync() {
+        let transport = Arc::new(MockTransport::new());
+        set_delta(&transport, vec![segment_event(6, 30, true)], 6);
+        let (engine, store) = engine_with_one_server(transport);
+        store.set_cursor("node1", 5).unwrap();
+        store.upsert_local_proposal(&sent_proposal(30)).unwrap();
+
+        engine.sync("token", &[]).await.unwrap();
+
+        assert!(store.local_proposals().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_proposal_for_a_different_value_stays_after_sync() {
+        let transport = Arc::new(MockTransport::new());
+        set_delta(&transport, vec![segment_event(6, 30, true)], 6);
+        let (engine, store) = engine_with_one_server(transport);
+        store.set_cursor("node1", 5).unwrap();
+        store.upsert_local_proposal(&sent_proposal(70)).unwrap();
+
+        engine.sync("token", &[]).await.unwrap();
+
+        assert_eq!(store.local_proposals().unwrap().len(), 1);
     }
 }

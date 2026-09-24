@@ -63,6 +63,7 @@ mod tests {
             static_data_version: 1,
             federation_enabled: false,
             network_config: None,
+            community_corrections: None,
         }
     }
 

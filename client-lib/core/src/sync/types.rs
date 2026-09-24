@@ -53,6 +53,52 @@ impl Geometry {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum SpeedLimitUnit {
+    Kmh,
+    Mph,
+}
+
+impl SpeedLimitUnit {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            SpeedLimitUnit::Kmh => "kmh",
+            SpeedLimitUnit::Mph => "mph",
+        }
+    }
+}
+
+/// Why a correction is proposed (`CORRECTION_REASONS` in
+/// `server/src/config/constants.ts`) — optional on the wire.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CorrectionReason {
+    WrongValue,
+    LimitLifted,
+    SignMissingOrNew,
+    Other,
+}
+
+/// Set on a segment whose `speedLimit` is a community correction
+/// (`server/docs/api.md`, "Speed-limit corrections"). Counts inside a static
+/// package are "as of the last change of the effective value" — the live
+/// numbers come from `GET /v1/speed-limit-corrections`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SegmentCorrection {
+    pub id: String,
+    pub confirmations: u32,
+    pub denials: u32,
+    #[serde(rename = "appliedAt")]
+    pub applied_at: Option<String>,
+    #[serde(rename = "needsReview")]
+    pub needs_review: bool,
+}
+
+/// `speed_limit` is always the *effective* value — the server already folds a
+/// community correction in — so a client that ignores the four additive
+/// fields below still shows corrected limits. They are all absent on a server
+/// that predates corrections.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SpeedLimitSegment {
     pub id: String,
@@ -68,6 +114,18 @@ pub struct SpeedLimitSegment {
     pub imported_at: String,
     #[serde(rename = "lastConfirmedAt")]
     pub last_confirmed_at: Option<String>,
+    /// Content-derived identity, stable across servers (`server/docs/
+    /// speed-limit-corrections.md` D1) — what a device-signed vote
+    /// references, since `id` is a random per-server row id.
+    #[serde(rename = "segmentKey")]
+    pub segment_key: Option<String>,
+    /// `Some("community")` when `speed_limit` is a correction.
+    #[serde(rename = "correctedBy")]
+    pub corrected_by: Option<String>,
+    /// The value from the import source, only while it is being overridden.
+    #[serde(rename = "importedSpeedLimit")]
+    pub imported_speed_limit: Option<f64>,
+    pub correction: Option<SegmentCorrection>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -271,6 +329,57 @@ pub struct ClientConfig {
     pub federation_enabled: bool,
     #[serde(rename = "networkConfig")]
     pub network_config: Option<SignedEnvelope<NetworkConfigPayload>>,
+    /// Absent on a server that predates community corrections — read that as
+    /// "not offered". Parsed leniently: an add-on section of an unexpected
+    /// shape becomes `None` instead of failing the whole config fetch that
+    /// every sync depends on.
+    #[serde(rename = "communityCorrections")]
+    #[serde(default, deserialize_with = "lenient_option")]
+    pub community_corrections: Option<CommunityCorrectionsConfig>,
+}
+
+fn lenient_option<'de, D, T>(deserializer: D) -> Result<Option<T>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: serde::de::DeserializeOwned,
+{
+    let value = serde_json::Value::deserialize(deserializer)?;
+    Ok(serde_json::from_value(value).ok())
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ValueRange {
+    pub min: u32,
+    pub max: u32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ValueRanges {
+    pub kmh: ValueRange,
+    pub mph: ValueRange,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CorrectionRateLimit {
+    pub max: u32,
+    #[serde(rename = "windowMinutes")]
+    pub window_minutes: u32,
+}
+
+/// `communityCorrections` of `GET /v1/config` (`server/docs/api.md`, K-A
+/// addition): the limits a client mirrors so it can reject implausible input
+/// before sending it, and the switch that hides the whole feature.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CommunityCorrectionsConfig {
+    pub enabled: bool,
+    #[serde(rename = "confirmationsRequired")]
+    pub confirmations_required: u32,
+    #[serde(rename = "valueRange")]
+    pub value_range: ValueRanges,
+    #[serde(rename = "valueStep")]
+    pub value_step: u32,
+    #[serde(rename = "rateLimit")]
+    pub rate_limit: CorrectionRateLimit,
 }
 
 /// The camera namespace is AND-gated, never OR-gated (`server/docs/api.md`
@@ -407,6 +516,82 @@ mod tests {
         assert!(effective_camera_namespace_enabled(&config, None));
     }
 
+    #[test]
+    fn a_segment_parses_with_and_without_the_correction_fields() {
+        let geometry = serde_json::json!({
+            "type": "LineString",
+            "coordinates": [[13.0, 52.0], [13.1, 52.1]]
+        });
+        let older_server = serde_json::json!({
+            "id": "s1",
+            "geometry": geometry,
+            "speedLimit": 50,
+            "speedLimitUnit": "kmh",
+            "source": "osm",
+            "sourceLicense": null,
+            "importedAt": "2026-01-01T00:00:00Z",
+            "lastConfirmedAt": null
+        });
+        let segment: SpeedLimitSegment = serde_json::from_value(older_server).unwrap();
+        assert_eq!(segment.segment_key, None);
+        assert_eq!(segment.corrected_by, None);
+        assert_eq!(segment.correction, None);
+
+        let corrected = serde_json::json!({
+            "id": "s1",
+            "geometry": geometry,
+            "speedLimit": 30,
+            "speedLimitUnit": "kmh",
+            "source": "osm",
+            "sourceLicense": null,
+            "importedAt": "2026-01-01T00:00:00Z",
+            "lastConfirmedAt": null,
+            "segmentKey": "0123456789abcdef0123456789abcdef",
+            "correctedBy": "community",
+            "importedSpeedLimit": 50,
+            "correction": {
+                "id": "c1",
+                "confirmations": 3,
+                "denials": 1,
+                "appliedAt": "2026-09-24T12:00:00.000Z",
+                "needsReview": false
+            }
+        });
+        let segment: SpeedLimitSegment = serde_json::from_value(corrected).unwrap();
+        assert_eq!(segment.corrected_by.as_deref(), Some("community"));
+        assert_eq!(segment.imported_speed_limit, Some(50.0));
+        let correction = segment.correction.unwrap();
+        assert_eq!(correction.confirmations, 3);
+        assert_eq!(correction.denials, 1);
+        assert!(!correction.needs_review);
+    }
+
+    #[test]
+    fn community_corrections_config_is_optional_and_never_breaks_the_config_parse() {
+        let mut json = serde_json::to_value(base_config()).unwrap();
+
+        json.as_object_mut().unwrap().remove("communityCorrections");
+        let absent: ClientConfig = serde_json::from_value(json.clone()).unwrap();
+        assert_eq!(absent.community_corrections, None);
+
+        json["communityCorrections"] = serde_json::json!({
+            "enabled": true,
+            "confirmationsRequired": 3,
+            "valueRange": { "kmh": { "min": 5, "max": 150 }, "mph": { "min": 5, "max": 85 } },
+            "valueStep": 5,
+            "rateLimit": { "max": 5, "windowMinutes": 60 }
+        });
+        let present: ClientConfig = serde_json::from_value(json.clone()).unwrap();
+        let corrections = present.community_corrections.unwrap();
+        assert!(corrections.enabled);
+        assert_eq!(corrections.value_range.mph.max, 85);
+        assert_eq!(corrections.value_step, 5);
+
+        json["communityCorrections"] = serde_json::json!({ "enabled": false });
+        let malformed: ClientConfig = serde_json::from_value(json).unwrap();
+        assert_eq!(malformed.community_corrections, None);
+    }
+
     fn base_config() -> ClientConfig {
         ClientConfig {
             region_tile_h3_resolution: 7,
@@ -422,6 +607,7 @@ mod tests {
             static_data_version: 1,
             federation_enabled: false,
             network_config: None,
+            community_corrections: None,
         }
     }
 

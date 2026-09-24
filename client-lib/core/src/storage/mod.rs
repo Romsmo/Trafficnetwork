@@ -24,7 +24,9 @@ pub use memory::InMemoryStore;
 
 use serde::{Deserialize, Serialize};
 
-use crate::sync::types::{FixedSpeedCamera, HazardReport, SpeedLimitSegment, StaticSign};
+use crate::sync::types::{
+    CorrectionReason, FixedSpeedCamera, HazardReport, SpeedLimitSegment, SpeedLimitUnit, StaticSign,
+};
 
 pub type StoreError = Box<dyn std::error::Error + Send + Sync>;
 
@@ -48,6 +50,69 @@ pub struct PendingWrite {
     pub request_body: serde_json::Value,
     pub created_at_unix_ms: i64,
     pub attempts: u32,
+    #[serde(default)]
+    pub kind: WriteKind,
+}
+
+/// What a queued write is. Most need more than the plain request body to be
+/// sent, so the extra routing/signing data travels with the write itself.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind")]
+pub enum WriteKind {
+    /// `POST /v1/hazard-reports`.
+    #[default]
+    HazardReport,
+    /// `POST /v1/speed-limit-segments/:id/corrections`. `segment_id` is a
+    /// server-local row id (of whichever server supplied the segment, so
+    /// another server may not know it); `segment_key` is the segment's
+    /// cross-server identity, used to find the right row on another server
+    /// and to sign; `resolve_hint` is `(lat, lng)` of a vertex of the
+    /// segment, where to look for it.
+    SpeedLimitCorrection {
+        segment_id: String,
+        segment_key: String,
+        resolve_hint: Option<(f64, f64)>,
+    },
+    /// `POST /v1/speed-limit-corrections/:id/confirmations`. The correction's
+    /// own `segment_key`/`value`/`unit` are what a device-signed vote must
+    /// name — the confirmation body itself carries none of them.
+    SpeedLimitConfirmation {
+        correction_id: String,
+        segment_key: String,
+        value: u32,
+        unit: SpeedLimitUnit,
+        agrees: bool,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ProposalState {
+    /// Still in the write buffer.
+    Queued,
+    /// The server accepted it — it stands as a vote there, but is not (yet)
+    /// a community-confirmed correction.
+    Sent,
+}
+
+/// This device's own, not-yet-confirmed correction proposal for one segment —
+/// an **overlay** next to the synced segment, never a change to it, so the
+/// imported value is always still there to fall back to. At most one per
+/// `segment_key`: a device supports one value per segment
+/// (`server/docs/speed-limit-corrections.md` D3).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct LocalCorrectionProposal {
+    pub segment_key: String,
+    pub segment_id: String,
+    pub value: u32,
+    pub unit: SpeedLimitUnit,
+    pub reason: Option<CorrectionReason>,
+    pub state: ProposalState,
+    /// Known once the server has accepted the proposal.
+    pub correction_id: Option<String>,
+    /// The server's count when it accepted it (it includes this device);
+    /// `0` while still queued.
+    pub confirmations: u32,
+    pub proposed_at_unix_ms: i64,
 }
 
 /// `entity_type` matches the server's `EntityType` values
@@ -85,4 +150,9 @@ pub trait Store: Send + Sync {
     fn enqueue_write(&self, item: &PendingWrite) -> Result<(), StoreError>;
     fn pending_writes(&self) -> Result<Vec<PendingWrite>, StoreError>;
     fn remove_pending_write(&self, id: &str) -> Result<(), StoreError>;
+
+    /// Insert-or-replace by `segment_key`.
+    fn upsert_local_proposal(&self, proposal: &LocalCorrectionProposal) -> Result<(), StoreError>;
+    fn local_proposals(&self) -> Result<Vec<LocalCorrectionProposal>, StoreError>;
+    fn remove_local_proposal(&self, segment_key: &str) -> Result<(), StoreError>;
 }

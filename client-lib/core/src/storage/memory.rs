@@ -7,7 +7,7 @@
 use std::collections::HashMap;
 use std::sync::Mutex;
 
-use super::{PendingWrite, Store, StoreError, StoredEntities};
+use super::{LocalCorrectionProposal, PendingWrite, Store, StoreError, StoredEntities};
 use crate::sync::types::HazardReport;
 
 #[derive(Default)]
@@ -16,6 +16,7 @@ struct Inner {
     partition_hashes: HashMap<String, String>,
     entities: StoredEntities,
     pending_writes: Vec<PendingWrite>,
+    local_proposals: Vec<LocalCorrectionProposal>,
 }
 
 #[derive(Default)]
@@ -161,12 +162,35 @@ impl Store for InMemoryStore {
             .retain(|w| w.id != id);
         Ok(())
     }
+
+    fn upsert_local_proposal(&self, proposal: &LocalCorrectionProposal) -> Result<(), StoreError> {
+        let mut inner = self.inner.lock().unwrap();
+        inner
+            .local_proposals
+            .retain(|p| p.segment_key != proposal.segment_key);
+        inner.local_proposals.push(proposal.clone());
+        Ok(())
+    }
+
+    fn local_proposals(&self) -> Result<Vec<LocalCorrectionProposal>, StoreError> {
+        Ok(self.inner.lock().unwrap().local_proposals.clone())
+    }
+
+    fn remove_local_proposal(&self, segment_key: &str) -> Result<(), StoreError> {
+        self.inner
+            .lock()
+            .unwrap()
+            .local_proposals
+            .retain(|p| p.segment_key != segment_key);
+        Ok(())
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::sync::types::{Geometry, HazardType};
+    use crate::storage::{ProposalState, WriteKind};
+    use crate::sync::types::{Geometry, HazardType, SpeedLimitUnit};
 
     fn sample_report(id: &str) -> HazardReport {
         HazardReport {
@@ -238,6 +262,39 @@ mod tests {
         assert_eq!(store.get_partition_hash("tileA").unwrap(), None);
     }
 
+    fn proposal(segment_key: &str, value: u32) -> LocalCorrectionProposal {
+        LocalCorrectionProposal {
+            segment_key: segment_key.to_string(),
+            segment_id: "seg1".to_string(),
+            value,
+            unit: SpeedLimitUnit::Kmh,
+            reason: None,
+            state: ProposalState::Queued,
+            correction_id: None,
+            confirmations: 0,
+            proposed_at_unix_ms: 1000,
+        }
+    }
+
+    #[test]
+    fn a_local_proposal_is_replaced_per_segment_key_and_removable() {
+        let store = InMemoryStore::new();
+        let first = proposal("keyA", 30);
+        let other = proposal("keyB", 50);
+        let second = proposal("keyA", 70);
+        store.upsert_local_proposal(&first).unwrap();
+        store.upsert_local_proposal(&other).unwrap();
+        store.upsert_local_proposal(&second).unwrap();
+
+        let all = store.local_proposals().unwrap();
+        assert_eq!(all.len(), 2);
+        let key_a = all.iter().find(|p| p.segment_key == "keyA").unwrap();
+        assert_eq!(key_a.value, 70);
+
+        store.remove_local_proposal("keyA").unwrap();
+        assert_eq!(store.local_proposals().unwrap().len(), 1);
+    }
+
     #[test]
     fn pending_write_queue_is_idempotent_on_id() {
         let store = InMemoryStore::new();
@@ -246,6 +303,7 @@ mod tests {
             request_body: serde_json::json!({ "type": "ice" }),
             created_at_unix_ms: 1000,
             attempts: 0,
+            kind: WriteKind::HazardReport,
         };
         store.enqueue_write(&item).unwrap();
         let mut retried = item.clone();
