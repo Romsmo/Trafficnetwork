@@ -11,7 +11,7 @@
 Ein falsch gesetztes Tempolimit ist **sicherheitsrelevant**: Wer „130" in eine Tempo-30-Zone schreibt, gefährdet Menschen. Gleichzeitig ist die Korrekturfunktion genau das, was die Datenqualität langfristig trägt. Daraus folgen harte Regeln:
 
 - **Der importierte Wert wird nie gelöscht oder überschrieben.** Eine Korrektur ist ein **zusätzlicher, eigener Datensatz** (Overlay), der den Import überlagert. So bleiben Herkunft und Prüfbarkeit erhalten, und ein erneuter Ingestion-Lauf zerstört nichts.
-- **Eine einzelne Meldung ändert nichts.** Erst mehrere unabhängige, übereinstimmende Vorschläge (konfigurierbarer Schwellenwert, Vorschlag: 3 verschiedene Geräte) machen eine Korrektur wirksam. Vorher wird sie höchstens als „gemeldet, unbestätigt" angezeigt.
+- **Eine einzelne Meldung ändert nichts.** Erst **drei** unabhängige, übereinstimmende Vorschläge von **drei verschiedenen Geräten** machen eine Korrektur wirksam (vom Betreiber entschieden; als Konfigurationswert mit Standard 3 umsetzen, keine feste Zahl im Code). Vorher wird sie höchstens als „gemeldet, unbestätigt" angezeigt.
 - **Plausibilitätsgrenzen:** nur Werte aus einem konfigurierbaren, sinnvollen Bereich und in der Einheit der Quelle; keine Korrektur ohne Bezug auf ein konkretes Segment.
 - **Zurücknehmbar:** Der Betreiber muss eine wirksame Korrektur mit einem Befehl zurücksetzen können, und die Funktion insgesamt abschaltbar (`COMMUNITY_CORRECTIONS_ENABLED`, Standard: an).
 - **Gerätesigniert und begrenzt:** Korrekturen laufen durch dasselbe Moderationsgate wie Meldungen, mit eigenem, strengerem Limit pro Gerät und Zeitraum.
