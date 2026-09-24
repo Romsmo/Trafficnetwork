@@ -14,7 +14,7 @@ async function main() {
   const expiryWorker = startExpiryWorker(db, app.log, app.realtime);
   const retentionWorker = startRetentionWorker(db, env, app.log);
   const federationWorkers: FederationWorkersHandle | null = env.FEDERATION_ENABLED
-    ? startFederationWorkers({ db, env, nodeIdentity: app.nodeIdentity, realtime: app.realtime, log: app.log })
+    ? startFederationWorkers({ db, env, nodeIdentity: app.nodeIdentity, realtime: app.realtime, log: app.log, online: app.online })
     : null;
 
   closeWithGrace(async ({ err }) => {

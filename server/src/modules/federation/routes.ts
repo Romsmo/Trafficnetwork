@@ -138,6 +138,10 @@ export async function registerFederationRoutes(app: FastifyInstance) {
     // persisted, just available to an operator inspecting logs) — never fed
     // into reputation scoring on its own, see reputation.ts's header comment.
     await recordPeerVersion(app.deps.db, peer.nodeId, envelope.payload.version);
+    // The peer's own head count (modules/online/) — a claim, kept in memory
+    // only, used for the estimated network total and nothing else. Unusable
+    // values are dropped silently; they never fail the heartbeat.
+    if (envelope.payload.onlineCount !== undefined) app.online.recordPeerReport(peer.nodeId, envelope.payload.onlineCount);
 
     return { acknowledged: true };
   });

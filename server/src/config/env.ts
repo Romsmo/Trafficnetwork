@@ -132,6 +132,29 @@ const envSchema = z.object({
   // Retry-After once this many pushes are being processed concurrently by
   // this process, rather than degrading everyone's latency under load.
   FEDERATION_OVERLOAD_MAX_CONCURRENT_PUSHES: z.coerce.number().int().positive().default(20),
+
+  // "Currently online" counter (add-on O-A, modules/online/, GET /v1/stats/online).
+  // Numbers only, kept in process memory — nothing here is ever stored or logged.
+  // false: the endpoint still answers, with `{ "enabled": false }`, and nothing is tracked.
+  ONLINE_COUNTER_ENABLED: z
+    .enum(["true", "false"])
+    .default("true")
+    .transform((v) => v === "true"),
+  // A client that made a sync or write request within this window counts as
+  // online (open WebSocket connections count for as long as they are open).
+  // 0 = only open WebSocket connections count.
+  ONLINE_WINDOW_SECONDS: z.coerce.number().int().nonnegative().default(300),
+  // Below this many, the endpoint says "fewer than N" instead of the exact
+  // number ("1 online" would be a statement about one person). 0 = never mask.
+  ONLINE_MIN_DISPLAY_THRESHOLD: z.coerce.number().int().nonnegative().default(5),
+  // How long a computed answer is reused. 0 = compute on every request.
+  ONLINE_CACHE_SECONDS: z.coerce.number().int().nonnegative().default(10),
+  // A peer's reported figure (carried in its signed heartbeat) stops counting
+  // towards the network estimate when its last heartbeat is older than this.
+  ONLINE_PEER_STALE_SECONDS: z.coerce.number().int().positive().default(300),
+  // Upper bound on distinct clients remembered for the activity window — keeps
+  // memory bounded (~100 bytes each); beyond it new clients are not added.
+  ONLINE_MAX_TRACKED: z.coerce.number().int().positive().default(100_000),
 }).refine((env) => !env.NETWORK_CONFIG_PATH || env.NETWORK_ROOT_PUBLIC_KEY, {
   message: "NETWORK_ROOT_PUBLIC_KEY is required whenever NETWORK_CONFIG_PATH is set — a signed config can't be verified without it",
   path: ["NETWORK_ROOT_PUBLIC_KEY"],

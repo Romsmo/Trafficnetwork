@@ -3,6 +3,16 @@ import type { NetworkPeerApi } from "../../db/queries/network-peers.js";
 
 export type ReputationTier = "probation" | "active" | "trusted";
 
+/** Just the thresholds computeReputationTier reads — lets a caller with a narrower env (or a test) use it without a full Env. */
+export type ReputationEnv = Pick<
+  Env,
+  | "REPUTATION_PROBATION_MIN_HOURS"
+  | "REPUTATION_MIN_SUCCESSFUL_HEALTH_CHECKS"
+  | "REPUTATION_TRUSTED_MIN_HOURS"
+  | "REPUTATION_TRUSTED_MIN_SUCCESSFUL_HEALTH_CHECKS"
+  | "REPUTATION_DEMOTE_AFTER_CONSECUTIVE_FAILURES"
+>;
+
 /**
  * The F-S0 plan's decision 5: signals are things *this server itself
  * measured* about a peer (successful/failed active health checks, invalid
@@ -16,7 +26,7 @@ export type ReputationTier = "probation" | "active" | "trusted";
  * (docs/threat-model.md) — nothing here can do that. Demotion only ever
  * moves a peer back to `probation`, never off this server's own peer list.
  */
-export function computeReputationTier(peer: NetworkPeerApi, env: Env): ReputationTier {
+export function computeReputationTier(peer: NetworkPeerApi, env: ReputationEnv): ReputationTier {
   // Any invalid signature is treated as disqualifying on its own, per the
   // plan's "jede ungültige Signatur von S ist ein starkes Negativsignal" —
   // not a threshold to cross, immediate demotion to probation.

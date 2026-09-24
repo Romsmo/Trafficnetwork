@@ -3,6 +3,7 @@ import type { Database } from "../../db/client.js";
 import type { Env } from "../../config/env.js";
 import type { NodeIdentity } from "../network/node-identity.js";
 import type { SubscriptionRegistry } from "../realtime/registry.js";
+import type { OnlineTracker } from "../online/tracker.js";
 import { publishEvent } from "../realtime/publisher.js";
 import { signEnvelope } from "../crypto/envelope.js";
 import {
@@ -38,6 +39,8 @@ export interface FederationWorkerDeps {
   nodeIdentity: NodeIdentity;
   realtime: SubscriptionRegistry;
   log: FastifyBaseLogger;
+  /** Source of the head count carried in outgoing heartbeats (modules/online/); without it no figure is sent. */
+  online?: OnlineTracker;
 }
 type Deps = FederationWorkerDeps;
 
@@ -82,6 +85,9 @@ export async function joinSeeds(deps: Deps): Promise<void> {
 
 export async function sendHeartbeats(deps: Deps): Promise<void> {
   const peers = await listPeers(deps.db);
+  // One head count for the whole round; left out entirely (not sent as
+  // undefined — the signature covers the exact JSON) when the counter is off.
+  const onlineCount = deps.online?.isEnabled ? deps.online.nodeCount() : undefined;
   for (const peer of peers) {
     const payload: HeartbeatPayload = {
       nodeId: deps.nodeIdentity.nodeId,
@@ -94,6 +100,7 @@ export async function sendHeartbeats(deps: Deps): Promise<void> {
       // for a well-behaved peer to back off before this server starts
       // actually returning 503s.
       capacityHint: getCapacityHint(deps.env),
+      ...(onlineCount !== undefined ? { onlineCount } : {}),
       timestamp: new Date().toISOString(),
     };
     const envelope = signEnvelope(payload, deps.nodeIdentity);
