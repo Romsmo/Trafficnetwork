@@ -52,6 +52,8 @@ export default {
   "map.layer.speedlimits.error": "Speed limits could not be loaded.",
   "map.layer.speedlimits.count_one": "{n} road section in view",
   "map.layer.speedlimits.count_other": "{n} road sections in view",
+  "map.layer.speedlimits.none": "no limit recorded",
+  "map.layer.speedlimits.note": "Only roads with a recorded speed limit are coloured (OpenStreetMap “maxspeed” entry). Roads without a colour have no entry – the general legal rule applies there.",
   "map.click.hint": "Clicking the map shows the speed limit at that spot.",
   "map.list.title": "Reports in this view",
   "map.list.empty": "No active reports in this view.",

@@ -9,39 +9,66 @@ import { mountLayout } from "./layout.js";
 import { LimitsLayer, limitsStateText } from "./limits-layer.js";
 import { LiveConnection } from "./live.js";
 import { describeSubmitFailure, ReportDialog } from "./report-dialog.js";
-import { latLngToCell } from "/web/vendor/h3/h3-js.es.js";
 
 const L = window.L;
 const LIVE_K = 2;
 const REFRESH_MS = 60_000;
+/** Ask for a bit more than the view needs, so small pans and zooming in are answered from what is already loaded. */
+const HAZARD_MARGIN = 1.5;
 const DEFAULT_VIEW = { center: [51.16, 10.45], zoom: 6 };
 
 initI18n();
+const $ = (id) => document.getElementById(id);
+const api = new ApiClient();
+// Everything below needs the anonymous session: request it right away, while the config is still downloading.
+api.ensureToken().catch(() => {});
 const config = await loadWebConfig();
 mountLayout(config, "map");
 
-const api = new ApiClient();
-const $ = (id) => document.getElementById(id);
-
-// ---- what this node allows -------------------------------------------------------------------------------------
-let serverConfig = null;
-try {
-  serverConfig = (await api.get("/v1/config")).data;
-} catch {
-  $("map-status").textContent = t("map.session.error");
-}
-const cameraEnabled = serverConfig?.speedCameraNamespaceEnabled === true;
-const tileResolution = serverConfig?.regionTileH3Resolution ?? 7;
-const types = selectableTypes(cameraEnabled);
+// What this node allows arrives while the map is already on screen; until then the general categories are assumed.
+let cameraEnabled = false;
+let tileResolution = 7;
+let types = selectableTypes(false);
 const enabledTypes = new Set(types);
 
 // ---- map -------------------------------------------------------------------------------------------------------
-const map = L.map("map", { zoomControl: false, attributionControl: false, worldCopyJump: true });
+const map = L.map("map", {
+  zoomControl: false,
+  attributionControl: false,
+  worldCopyJump: true,
+  // Zoom continuously instead of in whole levels: with Leaflet's defaults a mouse-wheel notch jumps a whole level (two on
+  // Linux/macOS), a trackpad gesture moves in coarse steps and a pinch snaps to a level when the fingers lift. Here a notch
+  // is a bit over half a level on Windows and about one on other systems (Leaflet halves the wheel delta of Chrome on Windows).
+  zoomSnap: 0,
+  zoomDelta: 1,
+  wheelPxPerZoomLevel: 50,
+  wheelDebounceTime: 30,
+  minZoom: 3,
+  maxZoom: config.tiles?.maxZoom ?? 19,
+  bounceAtZoomLimits: false,
+});
 L.control.zoom({ position: "topright" }).addTo(map);
-// The panel's size settles after the header/footer are built and after orientation changes: keep Leaflet in step.
-new ResizeObserver(() => map.invalidateSize()).observe($("map-panel"));
+// The panel's size settles after the header/footer are built and after orientation changes: keep Leaflet in step (only on a real change).
+const panel = $("map-panel");
+let panelSize = "";
+new ResizeObserver(() => {
+  const size = `${panel.clientWidth}x${panel.clientHeight}`;
+  if (size === panelSize) return;
+  panelSize = size;
+  map.invalidateSize({ animate: false });
+}).observe(panel);
+let tileLayer = null;
 if (config.tiles) {
-  L.tileLayer(config.tiles.url, { maxZoom: config.tiles.maxZoom, detectRetina: false }).addTo(map);
+  tileLayer = L.tileLayer(config.tiles.url, {
+    maxZoom: config.tiles.maxZoom,
+    detectRetina: false,
+    // Load tiles while the map is moving (on phones Leaflet waits until the finger lifts and shows grey), but only for the
+    // level the zoom ends on: intermediate levels of a smooth zoom would be requested and thrown away.
+    updateWhenIdle: false,
+    updateWhenZooming: false,
+    updateInterval: 150,
+    keepBuffer: 3,
+  }).addTo(map);
   const attribution = L.control({ position: "bottomright" });
   attribution.onAdd = () => {
     const box = h("div", { class: "leaflet-control-attribution leaflet-control" }, "© ", h("a", { href: config.tiles.attributionUrl, target: "_blank", rel: "noopener noreferrer" }, config.tiles.attributionText.replace(/^©\s*/, "")));
@@ -50,8 +77,10 @@ if (config.tiles) {
   attribution.addTo(map);
 }
 if (config.region) {
-  map.fitBounds(L.latLngBounds(config.region.bounds));
-  if (map.getZoom() < 9) map.setZoom(9);
+  // One initial view, not "fit, then zoom in to level 9": the second step would run as a zoom animation on load,
+  // request two sets of tiles and ignore any view change for the next quarter second.
+  const bounds = L.latLngBounds(config.region.bounds);
+  map.setView(bounds.getCenter(), Math.max(9, map.getBoundsZoom(bounds)));
 } else {
   map.setView(DEFAULT_VIEW.center, DEFAULT_VIEW.zoom);
 }
@@ -62,38 +91,46 @@ const hazards = new HazardLayer({ map, onVote: vote, onChange: () => renderList(
 hazards.setFilter(enabledTypes, cameraEnabled);
 
 let loadTicket = 0;
+let hazardAbort = null;
 let coverage = null;
-let lastLoad = { key: "", at: 0 };
-const DEDUPE_MS = 3_000;
-async function loadHazards({ force = false } = {}) {
-  const center = map.getCenter();
-  const wanted = map.distance(center, map.getBounds().getNorthEast());
-  const radius = Math.min(Math.ceil(wanted), config.limits.maxHazardRadiusM);
-  const tooLarge = wanted > config.limits.maxHazardRadiusM;
+/** The circle the current reports were loaded for, so a view inside it needs no new request. */
+let loadedArea = null;
 
-  // Map init fires several moveend events for one and the same view: do not ask the node three times.
-  const key = `${center.lat.toFixed(4)}|${center.lng.toFixed(4)}|${radius}`;
-  if (!force && key === lastLoad.key && Date.now() - lastLoad.at < DEDUPE_MS) return;
-  lastLoad = { key, at: Date.now() };
-  const ticket = ++loadTicket;
-
+function showCoverage(center, radius, tooLarge) {
   coverage?.remove();
   coverage = null;
-  if (tooLarge) {
-    coverage = L.circle(center, { radius, color: "#0b5cd5", weight: 1, dashArray: "6 6", fill: false, interactive: false }).addTo(map);
-  }
+  if (tooLarge) coverage = L.circle(center, { radius, color: "#0b5cd5", weight: 1, dashArray: "6 6", fill: false, interactive: false }).addTo(map);
   setChip("area-chip", tooLarge ? t("map.areaTooLarge", { km: formatKm(radius) }) : null);
+}
 
+async function loadHazards({ force = false } = {}) {
+  const center = map.getCenter();
+  const cap = config.limits.maxHazardRadiusM;
+  const wanted = Math.ceil(map.distance(center, map.getBounds().getNorthEast()));
+  const needed = Math.min(wanted, cap);
+  showCoverage(center, needed, wanted > cap);
+
+  // Map init fires several moveend events for one view, zooming in only shrinks it: answer from what is loaded.
+  if (!force && loadedArea && Date.now() - loadedArea.at < REFRESH_MS && map.distance(center, loadedArea.center) + needed <= loadedArea.radius) return;
+
+  const radius = Math.min(cap, Math.ceil(needed * HAZARD_MARGIN));
+  const ticket = ++loadTicket;
+  hazardAbort?.abort();
+  const controller = new AbortController();
+  hazardAbort = controller;
+  loadedArea = { center, radius, at: Date.now() };
   try {
     const query = { lat: center.lat.toFixed(6), lng: center.lng.toFixed(6), radiusM: radius };
-    const requests = [api.get("/v1/hazard-reports/nearby", query)];
-    if (cameraEnabled) requests.push(api.get("/v1/speed-cameras/nearby", query));
+    const requests = [api.get("/v1/hazard-reports/nearby", query, { signal: controller.signal })];
+    if (cameraEnabled) requests.push(api.get("/v1/speed-cameras/nearby", query, { signal: controller.signal }));
     const results = await Promise.all(requests);
     if (ticket !== loadTicket) return;
     hazards.replaceAll([...(results[0].data.reports ?? []), ...(results[1]?.data.cameras ?? [])]);
     $("list-status").textContent = "";
-  } catch {
-    if (ticket === loadTicket) $("list-status").textContent = t("map.loadError");
+  } catch (error) {
+    if (ticket !== loadTicket || error?.name === "AbortError") return;
+    loadedArea = null;
+    $("list-status").textContent = t("map.loadError");
   }
 }
 
@@ -117,9 +154,37 @@ function handleEvent(event) {
   }
 }
 
-function subscribeAroundCenter() {
+// The tile library only names the tile for live updates, and it is the biggest file of the page: fetch it on the side,
+// once the first map tiles are in (on a slow connection it would otherwise compete with them).
+let h3 = null;
+let liveReady = false;
+function enableLiveUpdates() {
+  if (liveReady) return;
+  liveReady = true;
+  void subscribeAroundCenter();
+}
+async function subscribeAroundCenter() {
+  if (!liveReady) return;
   const center = map.getCenter();
+  h3 ??= import("/web/vendor/h3/h3-js.es.js");
+  const { latLngToCell } = await h3;
   live.subscribe(latLngToCell(center.lat, center.lng, tileResolution), LIVE_K);
+}
+
+async function loadServerConfig() {
+  try {
+    const { data } = await api.get("/v1/config");
+    cameraEnabled = data?.speedCameraNamespaceEnabled === true;
+    tileResolution = data?.regionTileH3Resolution ?? tileResolution;
+    types = selectableTypes(cameraEnabled);
+    for (const type of types) enabledTypes.add(type);
+    hazards.setFilter(enabledTypes, cameraEnabled);
+    renderFilters();
+    if (cameraEnabled) void loadHazards({ force: true });
+    void subscribeAroundCenter();
+  } catch {
+    $("map-status").textContent = t("map.session.error");
+  }
 }
 
 // ---- speed limit on click ---------------------------------------------------------------------------------------
@@ -171,6 +236,7 @@ const limits = new LimitsLayer({
 });
 $("layer-limits").addEventListener("change", (event) => {
   limits.enabled = event.target.checked;
+  $("limits-note").hidden = !event.target.checked;
 });
 
 function renderList() {
@@ -286,8 +352,8 @@ map.on("moveend", () => {
   window.clearTimeout(moveTimer);
   moveTimer = window.setTimeout(() => {
     void loadHazards();
-    subscribeAroundCenter();
-  }, 400);
+    void subscribeAroundCenter();
+  }, 300);
   renderList();
 });
 
@@ -295,6 +361,7 @@ onLangChange(() => {
   renderFilters();
   renderList();
   renderLiveChip();
+  limits.renderLegend();
   $("map").setAttribute("aria-label", t("map.aria"));
   $("limits-hint").textContent = limitsStateText(limitsState);
   if (pendingPick) setChip("pick-chip", t("reportDialog.pick.hint"));
@@ -306,6 +373,13 @@ document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "visible") void loadHazards({ force: true });
 });
 
+// Start everything at once: the live connection, the node's settings and the first reports all wait for the same session.
 live.start();
-subscribeAroundCenter();
+void loadServerConfig();
 void loadHazards();
+if (tileLayer) {
+  tileLayer.once("load", enableLiveUpdates);
+  window.setTimeout(enableLiveUpdates, 4000);
+} else {
+  enableLiveUpdates();
+}

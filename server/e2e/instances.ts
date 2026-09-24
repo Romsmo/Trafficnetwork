@@ -15,6 +15,8 @@ export const INSTANCES = {
   limited: { port: PORT_BASE + 2, env: { WEB_REPORT_LIMIT_PER_SESSION: "1" } as Record<string, string> },
   /** Operator switched the web UI off. */
   disabled: { port: PORT_BASE + 3, env: { WEB_UI_ENABLED: "false" } as Record<string, string> },
+  /** No map background: the page must not talk to anyone but this node (also lets the browser cache be tested without request interception). */
+  notiles: { port: PORT_BASE + 4, env: { MAP_TILE_URL: "none" } as Record<string, string> },
 } as const;
 
 export type InstanceName = keyof typeof INSTANCES;

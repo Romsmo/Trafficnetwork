@@ -2,7 +2,8 @@
 
 Base path: `/v1`. All responses are JSON. All routes require authentication
 (`Authorization: Bearer <token>`) except `GET /v1/health`, `POST /v1/auth/token`,
-`POST /v1/auth/device-token`, `GET /v1/network/node-info`, the `/v1/federation/*`
+`POST /v1/auth/device-token`, `POST /v1/web/session` (only with the built-in web UI,
+see "Web sessions"), `GET /v1/network/node-info`, the `/v1/federation/*`
 endpoints (F-S3, only registered when `FEDERATION_ENABLED=true` — see
 "Federation" below; each authenticates itself via a signed envelope, not a
 client Bearer token), and the `/v1/ws` WebSocket upgrade (which authenticates
@@ -584,6 +585,50 @@ This is single-instance in Phase 1 — the subscription registry lives in
 process memory. Horizontal scaling would need it backed by something shared
 across instances (e.g. Postgres `LISTEN`/`NOTIFY`); explicitly out of scope
 here.
+
+Events of the speed-camera namespace (fixed/mobile/trailer/red-light/distance
+cameras) are pushed only while the node's effective camera flag is on — the
+same rule the REST reads apply. Connections of web sessions (below) receive
+events without `reporterId`, and may hold at most
+`WEB_WS_MAX_TILES_PER_CONNECTION` tile subscriptions.
+
+## Web sessions (built-in web UI)
+
+Only registered when `WEB_UI_ENABLED=true`; see [`web-ui.md`](web-ui.md).
+
+### `POST /v1/web/session`
+
+Public. Returns an anonymous, short-lived token for the node's own web page — no
+credential, no database row, nothing linking two sessions.
+
+```
+Response: { "accessToken": "<jwt>", "tokenType": "Bearer", "expiresIn": 900, "scopes": ["client"] }
+```
+
+The JWT's `sub` is `web:<random>` (real client ids are `client_<hex>`). Requests
+that a browser labels as coming from another site (`Sec-Fetch-Site` other than
+`same-origin`/`none`) are refused with 403; the endpoint is IP-rate-limited
+(`WEB_SESSION_MINT_LIMIT_PER_MINUTE`). Clients that send no such header (curl,
+scripts) can call it too and are held to the same guard and limits below.
+
+### What a web session may call
+
+A token with a `web:` subject is checked against a **default-deny allowlist** before
+the route runs; everything not listed answers `403 WEB_SESSION_FORBIDDEN`:
+
+| Endpoint | Conditions |
+|---|---|
+| `GET /v1/config`, `/v1/speed-limit`, `/v1/hazard-reports/by-tile`, `/v1/speed-cameras/nearby`, `/v1/speed-cameras/by-tile` | read limit per IP |
+| `GET /v1/hazard-reports/nearby` | `radiusM` ≤ `WEB_MAX_HAZARD_RADIUS_M` (else `400 WEB_RADIUS_TOO_LARGE`) |
+| `GET /v1/speed-limit-segments/nearby` | `radiusM` ≤ `WEB_MAX_SEGMENT_RADIUS_M`; additionally limited by `WEB_HEAVY_READ_LIMIT_PER_IP_PER_MINUTE` |
+| `POST /v1/hazard-reports` | no `deviceAssertion` (`403 WEB_NO_DEVICE_SIGNATURE`; web reports never federate); camera categories only when the node enables them (`403 WEB_TYPE_NOT_ALLOWED`) |
+| `POST /v1/hazard-reports/:id/confirmations` | — |
+
+Writes count against the session (`WEB_REPORT_LIMIT_PER_SESSION`), the client IP
+(`WEB_REPORT_LIMIT_PER_IP_PER_HOUR`) and the node (`WEB_REPORT_LIMIT_NODE_PER_HOUR`), on
+top of the ordinary moderation gate. A refused request answers `429 WEB_RATE_LIMITED`
+with `Retry-After` and `details: { scope: "session" | "network" | "node" | …, retryAfterSeconds }`.
+Responses to web sessions never contain `reporterId`.
 
 ## Environment / configuration
 

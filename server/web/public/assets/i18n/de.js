@@ -52,6 +52,8 @@ export default {
   "map.layer.speedlimits.error": "Tempolimits konnten nicht geladen werden.",
   "map.layer.speedlimits.count_one": "{n} Straßenabschnitt im Ausschnitt",
   "map.layer.speedlimits.count_other": "{n} Straßenabschnitte im Ausschnitt",
+  "map.layer.speedlimits.none": "kein Limit erfasst",
+  "map.layer.speedlimits.note": "Eingefärbt sind nur Straßen, für die ein Tempolimit erfasst ist (OpenStreetMap-Eintrag „maxspeed“). Straßen ohne Farbe haben keinen Eintrag – dort gilt die allgemeine gesetzliche Regelung.",
   "map.click.hint": "Ein Klick auf die Karte zeigt das Tempolimit an dieser Stelle.",
   "map.list.title": "Meldungen in diesem Ausschnitt",
   "map.list.empty": "Keine aktiven Meldungen in diesem Ausschnitt.",

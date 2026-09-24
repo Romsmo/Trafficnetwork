@@ -6,7 +6,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { buildCsp, securityHeaders } from "./csp.js";
 import { createRegionHint } from "./region.js";
 import { registerWebSessionRoute } from "./session.js";
-import { loadAssets, pickEncoding, type Asset, type AssetTable } from "./static.js";
+import { IMMUTABLE_CACHE, loadAssets, pickEncoding, type Asset, type AssetTable } from "./static.js";
 import { tileOrigin } from "./tile.js";
 
 const require = createRequire(import.meta.url);
@@ -35,19 +35,20 @@ export async function registerWebModule(app: FastifyInstance): Promise<void> {
   if (!env.WEB_UI_ENABLED) return;
 
   const root = serverRoot();
+  const origin = tileOrigin(env.MAP_TILE_URL);
   const assets: AssetTable = loadAssets({
     publicDir: join(root, "web", "public"),
     leafletDir: join(dirname(require.resolve("leaflet/package.json")), "dist"),
     h3File: join(dirname(require.resolve("h3-js/package.json")), "dist", "browser", "h3-js.es.js"),
+    tileOrigin: origin,
   });
 
   const version = readPackageVersion(root);
-  const origin = tileOrigin(env.MAP_TILE_URL);
   const regionHint = createRegionHint(app.deps.db);
 
-  const send = (req: FastifyRequest, reply: FastifyReply, asset: Asset) => {
+  const send = (req: FastifyRequest, reply: FastifyReply, asset: Asset, cacheControl = asset.cacheControl) => {
     reply.headers(securityHeaders(buildCsp({ tileOrigin: origin, host: req.headers.host })));
-    reply.header("cache-control", asset.cacheControl);
+    reply.header("cache-control", cacheControl);
     reply.header("etag", asset.etag);
     reply.header("vary", "Accept-Encoding");
     if (req.headers["if-none-match"] === asset.etag) return reply.code(304).send();
@@ -64,7 +65,10 @@ export async function registerWebModule(app: FastifyInstance): Promise<void> {
     const key = `/web/${(req.params as { "*": string })["*"]}`;
     const asset = assets.files.get(key);
     if (!asset) return reply.code(404).type("text/plain; charset=utf-8").send("Not found");
-    return send(req, reply, asset);
+    // Requests carrying the current build id come from this release's own pages: their URL changes with every release, so
+    // the browser may keep them for good. Anything else (bookmarks, old links, CSS-relative images) is revalidated as before.
+    const versioned = (req.query as { v?: string }).v === assets.buildId;
+    return send(req, reply, asset, versioned ? IMMUTABLE_CACHE : asset.cacheControl);
   });
 
   app.get("/web-config.json", async (req, reply) => {

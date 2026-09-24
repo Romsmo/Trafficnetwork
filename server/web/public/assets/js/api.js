@@ -44,13 +44,15 @@ export class ApiClient {
     return this.#token;
   }
 
-  async request(method, path, { query, body } = {}) {
+  /** `signal` (an AbortSignal) lets the caller drop a request that a newer one has made obsolete. */
+  async request(method, path, { query, body, signal } = {}) {
     const url = `${this.baseUrl}${path}${buildQuery(query)}`;
     const send = async (token) =>
       this.fetchImpl(url, {
         method,
         headers: { authorization: `Bearer ${token}`, ...(body !== undefined ? { "content-type": "application/json" } : {}) },
         body: body !== undefined ? JSON.stringify(body) : undefined,
+        signal,
       });
 
     let response = await send(await this.ensureToken());
@@ -60,8 +62,8 @@ export class ApiClient {
     return { status: response.status, data };
   }
 
-  get(path, query) {
-    return this.request("GET", path, { query });
+  get(path, query, { signal } = {}) {
+    return this.request("GET", path, { query, signal });
   }
 
   post(path, body) {

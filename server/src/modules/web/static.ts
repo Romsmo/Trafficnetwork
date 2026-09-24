@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { readdirSync, readFileSync, statSync } from "node:fs";
-import { basename, extname, join } from "node:path";
+import { basename, extname, join, posix } from "node:path";
 import { brotliCompressSync, gzipSync, constants as zlibConstants } from "node:zlib";
 
 /**
@@ -36,7 +36,15 @@ export interface AssetTable {
   pages: Map<string, Asset>;
   /** Static files, keyed by route under "/web/...". */
   files: Map<string, Asset>;
+  /**
+   * Fingerprint of every served file. All references between the pages and scripts carry it as `?v=<buildId>`, so a
+   * request with the current id may be cached for good (a new release changes every URL), while everything else is revalidated.
+   */
+  buildId: string;
 }
+
+/** Cache header for a request that carries the current build id. */
+export const IMMUTABLE_CACHE = "public, max-age=31536000, immutable";
 
 function makeAsset(body: Buffer, extension: string, cacheControl: string): Asset {
   const contentType = CONTENT_TYPES[extension];
@@ -77,34 +85,117 @@ export interface AssetSources {
   leafletDir: string;
   /** node_modules/h3-js/dist/browser/h3-js.es.js */
   h3File: string;
+  /** Origin of the map tile server (from MAP_TILE_URL), or null/undefined when the page shows no map background. */
+  tileOrigin?: string | null;
+}
+
+/** A module specifier that points into the web UI's own tree: "./x.js", "../i18n/de.js" or "/web/vendor/h3/h3-js.es.js". */
+const MODULE_SPECIFIER = /(\bfrom\s*|\bimport\s*\(?\s*)(["'])((?:\.{1,2}\/|\/web\/)[^"'?]+\.js)\2/g;
+const ASSET_ATTRIBUTE = /(\b(?:href|src)=")(\/web\/[^"?#]+)(")/g;
+const MODULE_ENTRY = /<script\s+type="module"\s+src="(\/web\/[^"?]+)"/;
+
+/** Only the app's own modules are rewritten; vendored files are served exactly as shipped. */
+const isAppModule = (route: string) => route.startsWith("/web/js/") || route.startsWith("/web/i18n/");
+
+function resolveSpecifier(fromRoute: string, specifier: string): string {
+  return specifier.startsWith("/") ? specifier : posix.normalize(posix.join(posix.dirname(fromRoute), specifier));
+}
+
+/**
+ * Appends `?v=<buildId>` to every import of an app module and returns the modules it imports. An import that does not
+ * resolve to a served file fails here, at startup, instead of as a 404 in a visitor's browser.
+ */
+export function versionModuleImports(route: string, source: string, known: ReadonlySet<string>, buildId: string): { text: string; imports: string[] } {
+  const imports: string[] = [];
+  const text = source.replace(MODULE_SPECIFIER, (_match, lead: string, quote: string, specifier: string) => {
+    const target = resolveSpecifier(route, specifier);
+    if (!known.has(target)) throw new Error(`web UI: ${route} imports ${specifier}, which is not a served file`);
+    // Only static imports are needed to start the page; a dynamic import() is fetched when the code asks for it.
+    if (!lead.includes("(")) imports.push(target);
+    return `${lead}${quote}${specifier}?v=${buildId}${quote}`;
+  });
+  return { text, imports };
+}
+
+/** Versions the page's own asset links and adds hints so the browser fetches the whole module graph and the config in parallel. */
+export function preparePage(html: string, known: ReadonlySet<string>, graph: ReadonlyMap<string, string[]>, buildId: string, tileOrigin: string | null = null): string {
+  const versioned = html.replace(ASSET_ATTRIBUTE, (_match, lead: string, route: string, tail: string) => {
+    if (!known.has(route)) throw new Error(`web UI: a page references ${route}, which is not a served file`);
+    return `${lead}${route}?v=${buildId}${tail}`;
+  });
+
+  const entry = MODULE_ENTRY.exec(html)?.[1];
+  const modules: string[] = [];
+  if (entry) {
+    const queue = [entry];
+    while (queue.length > 0) {
+      const next = queue.shift()!;
+      if (modules.includes(next)) continue;
+      modules.push(next);
+      queue.push(...(graph.get(next) ?? []));
+    }
+  }
+  const hints = [
+    // The map's first tiles are the slowest thing on a cold visit (DNS + TCP + TLS to another server): open that connection early.
+    ...(tileOrigin && html.includes('id="map"') ? [`<link rel="preconnect" href="${tileOrigin}">`] : []),
+    ...modules.map((route) => `<link rel="modulepreload" href="${route}?v=${buildId}">`),
+    // every page starts by reading it; asking for it while the HTML is still being parsed saves a round trip
+    `<link rel="preload" href="/web-config.json" as="fetch" crossorigin>`,
+  ].join("\n");
+  return versioned.replace("</head>", `${hints}\n</head>`);
 }
 
 export function loadAssets(sources: AssetSources): AssetTable {
-  const pages = new Map<string, Asset>();
-  const files = new Map<string, Asset>();
-
   const PAGE_ROUTES: Record<string, string> = { "index.html": "/", "connect.html": "/connect", "about.html": "/about" };
+  const pageSources = new Map<string, { body: Buffer; ext: string }>();
   const pagesDir = join(sources.publicDir, "pages");
   for (const rel of listFiles(pagesDir)) {
     const route = PAGE_ROUTES[rel];
     if (!route) throw new Error(`web UI: pages/${rel} has no route (known pages: ${Object.keys(PAGE_ROUTES).join(", ")})`);
-    pages.set(route, makeAsset(readFileSync(join(pagesDir, rel)), extname(rel), PAGE_CACHE));
+    pageSources.set(route, { body: readFileSync(join(pagesDir, rel)), ext: extname(rel) });
   }
   for (const [file, route] of Object.entries(PAGE_ROUTES)) {
-    if (!pages.has(route)) throw new Error(`web UI: missing page pages/${file}`);
+    if (!pageSources.has(route)) throw new Error(`web UI: missing page pages/${file}`);
   }
 
+  const fileSources = new Map<string, { body: Buffer; ext: string; cache: string }>();
   const assetsDir = join(sources.publicDir, "assets");
   for (const rel of listFiles(assetsDir)) {
-    files.set(`/web/${rel}`, makeAsset(readFileSync(join(assetsDir, rel)), extname(rel), APP_CACHE));
+    fileSources.set(`/web/${rel}`, { body: readFileSync(join(assetsDir, rel)), ext: extname(rel), cache: APP_CACHE });
   }
-
   for (const rel of ["leaflet.js", "leaflet.css", "images/layers.png", "images/layers-2x.png", "images/marker-icon.png", "images/marker-icon-2x.png", "images/marker-shadow.png"]) {
-    files.set(`/web/vendor/leaflet/${rel}`, makeAsset(readFileSync(join(sources.leafletDir, rel)), extname(rel), VENDOR_CACHE));
+    fileSources.set(`/web/vendor/leaflet/${rel}`, { body: readFileSync(join(sources.leafletDir, rel)), ext: extname(rel), cache: VENDOR_CACHE });
   }
-  files.set(`/web/vendor/h3/${basename(sources.h3File)}`, makeAsset(readFileSync(sources.h3File), ".js", VENDOR_CACHE));
+  fileSources.set(`/web/vendor/h3/${basename(sources.h3File)}`, { body: readFileSync(sources.h3File), ext: ".js", cache: VENDOR_CACHE });
 
-  return { pages, files };
+  // The fingerprint covers the files as they are on disk, before any rewriting.
+  const fingerprint = createHash("sha1");
+  const everything = [...pageSources, ...fileSources].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+  for (const [route, source] of everything) {
+    fingerprint.update(`${route}\0${createHash("sha1").update(source.body).digest("hex")}\0`);
+  }
+  const buildId = fingerprint.digest("hex").slice(0, 12);
+
+  const known = new Set(fileSources.keys());
+  const graph = new Map<string, string[]>();
+  const files = new Map<string, Asset>();
+  for (const [route, source] of fileSources) {
+    let body = source.body;
+    if (source.ext === ".js" && isAppModule(route)) {
+      const { text, imports } = versionModuleImports(route, body.toString("utf8"), known, buildId);
+      graph.set(route, imports);
+      body = Buffer.from(text, "utf8");
+    }
+    files.set(route, makeAsset(body, source.ext, source.cache));
+  }
+
+  const pages = new Map<string, Asset>();
+  for (const [route, source] of pageSources) {
+    const html = preparePage(source.body.toString("utf8"), known, graph, buildId, sources.tileOrigin ?? null);
+    pages.set(route, makeAsset(Buffer.from(html, "utf8"), source.ext, PAGE_CACHE));
+  }
+
+  return { pages, files, buildId };
 }
 
 /** Picks the best pre-compressed variant the client accepts. */

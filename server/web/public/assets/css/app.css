@@ -136,8 +136,10 @@ dl.facts dd { margin: 0; overflow-wrap: anywhere; }
 
 /* ---------- map page ---------- */
 .map-layout { flex: 1 1 auto; display: flex; flex-direction: column; min-height: 0; }
-#map-panel { position: relative; flex: 1 1 60vh; min-height: 320px; }
-#map { position: absolute; inset: 0; background: var(--bg); }
+/* The map takes whatever the side panel leaves. The panel has a fixed height (below), so nothing that changes its content
+   (the report list, hints) can resize the map — a resize while the visitor pans or zooms makes the map jump. */
+#map-panel { position: relative; flex: 1 1 0; min-height: 260px; }
+#map { position: absolute; inset: 0; background: var(--bg); contain: layout paint; }
 #map:focus-visible { outline-offset: -3px; }
 .map-overlay {
   position: absolute; z-index: 800; pointer-events: none; left: 8px; right: 56px; top: 8px;
@@ -154,7 +156,7 @@ dl.facts dd { margin: 0; overflow-wrap: anywhere; }
   position: absolute; z-index: 900; right: 12px; bottom: 28px; min-height: 52px; padding: 0 22px; border-radius: 99px;
   background: var(--accent); color: var(--accent-ink); border: none; font-weight: 700; box-shadow: var(--shadow);
 }
-.side-panel { background: var(--surface); border-top: 1px solid var(--line); padding: 10px 14px; max-height: 42vh; overflow: auto; }
+.side-panel { background: var(--surface); border-top: 1px solid var(--line); padding: 10px 14px; flex: 0 0 auto; height: clamp(170px, 36vh, 360px); overflow: auto; overscroll-behavior: contain; }
 .side-panel h2 { font-size: 1rem; margin: 10px 0 6px; }
 .side-panel h2:first-child { margin-top: 0; }
 .filters { display: flex; flex-wrap: wrap; gap: 6px 14px; margin: 0; padding: 0; border: 0; }
@@ -171,7 +173,7 @@ ul.report-list .meta { color: var(--muted); font-size: 0.85rem; }
 
 @media (min-width: 900px) {
   .map-layout { flex-direction: row; }
-  .side-panel { width: 340px; flex: 0 0 340px; max-height: none; border-top: 0; border-left: 1px solid var(--line); }
+  .side-panel { width: 340px; flex: 0 0 340px; height: auto; border-top: 0; border-left: 1px solid var(--line); }
   #map-panel { flex: 1 1 auto; }
 }
 
@@ -197,6 +199,7 @@ ul.report-list .meta { color: var(--muted); font-size: 0.85rem; }
 .leaflet-popup-content .status { margin-top: 6px; font-size: 0.9rem; }
 .legend { background: var(--surface); color: var(--ink); padding: 6px 10px; border-radius: var(--radius); box-shadow: var(--shadow); font-size: 0.8rem; line-height: 1.5; }
 .legend i { display: inline-block; width: 22px; height: 6px; margin-right: 6px; vertical-align: middle; border-radius: 3px; }
+.legend i.none { height: 0; border-top: 2px dashed var(--muted); border-radius: 0; }
 
 /* ---------- report dialog ---------- */
 dialog {

@@ -96,6 +96,25 @@ describe("web UI (server/web)", () => {
       expect(revalidated.statusCode).toBe(304);
     });
 
+    it("lets browsers keep a release's own files for good, and only revalidates URLs that do not carry the build id", async () => {
+      const page = await app.inject({ method: "GET", url: "/" });
+      expect(page.body).toContain('<link rel="preconnect" href="https://tile.openstreetmap.org">');
+      const versioned =[...page.body.matchAll(/(?:href|src)="(\/web\/[^"]+\?v=[0-9a-f]{12})"/g)].map((m) => m[1]!);
+      expect(versioned.length).toBeGreaterThan(3);
+      for (const url of versioned) {
+        const res = await app.inject({ method: "GET", url });
+        expect(res.statusCode, url).toBe(200);
+        expect(res.headers["cache-control"], url).toBe("public, max-age=31536000, immutable");
+      }
+      // the same file requested without (or with another) build id is not promised to stay the same
+      expect((await app.inject({ method: "GET", url: "/web/js/map-page.js" })).headers["cache-control"]).toBe("no-cache");
+      expect((await app.inject({ method: "GET", url: "/web/js/map-page.js?v=old" })).headers["cache-control"]).toBe("no-cache");
+      // the module graph the page hints at is real: every preloaded module exists
+      for (const [, url] of page.body.matchAll(/rel="modulepreload" href="([^"]+)"/g)) {
+        expect((await app.inject({ method: "GET", url: url! })).statusCode, url).toBe(200);
+      }
+    });
+
     it("answers 404 for anything outside the fixed file table, including traversal attempts", async () => {
       for (const url of ["/web/nope.js", "/web/../package.json", "/web/%2e%2e/package.json", "/web/js/../../.env", "/web/"]) {
         const res = await app.inject({ method: "GET", url });
@@ -108,6 +127,7 @@ describe("web UI (server/web)", () => {
       const page = await noTiles.inject({ method: "GET", url: "/" });
       expect(String(page.headers["content-security-policy"])).toContain("img-src 'self' data:;");
       expect(String(page.headers["content-security-policy"])).not.toContain("openstreetmap");
+      expect(page.body).not.toContain("preconnect");
       expect((await noTiles.inject({ method: "GET", url: "/web-config.json" })).json().tiles).toBeNull();
     });
 

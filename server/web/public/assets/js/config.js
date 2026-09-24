@@ -1,6 +1,7 @@
 /** Runtime configuration of this node's web UI (version, repo link, tile source, limits) — one small JSON file. */
 export async function loadWebConfig(fetchImpl = globalThis.fetch.bind(globalThis)) {
-  const response = await fetchImpl("/web-config.json", { headers: { accept: "application/json" } });
+  // A plain request on purpose: the pages preload exactly this one (<link rel="preload" as="fetch">) and a browser only reuses it for a matching request.
+  const response = await fetchImpl("/web-config.json");
   if (!response.ok) throw new Error(`web-config.json: HTTP ${response.status}`);
   return response.json();
 }
