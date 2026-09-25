@@ -35,8 +35,17 @@ async function* runSections(ctx: WorkerContext): AsyncGenerator<WorkerSection> {
   // built from it) is where the edition is recorded. The replication header is also what a later
   // "apply only the changes" run starts from (docs/europe-feasibility.md §11).
   await fs.mkdir(stateDir, { recursive: true });
+  const metaPath = path.join(stateDir, "extract-meta.json");
+  // A resumed run that skips osmium has no new peak-RSS numbers — keep the ones the run that really executed osmium recorded.
+  let previousPeakRss: Record<string, number> | undefined;
+  try {
+    previousPeakRss = (JSON.parse(await fs.readFile(metaPath, "utf8")) as { osmiumPeakRssKb?: Record<string, number> }).osmiumPeakRssKb;
+  } catch {
+    previousPeakRss = undefined;
+  }
+  const peakRssKb = Object.keys(result.peakRssKb).length > 0 ? result.peakRssKb : (previousPeakRss ?? {});
   await fs.writeFile(
-    path.join(stateDir, "extract-meta.json"),
+    metaPath,
     JSON.stringify(
       {
         regionId,
@@ -47,7 +56,7 @@ async function* runSections(ctx: WorkerContext): AsyncGenerator<WorkerSection> {
         lastModified: download.lastModified,
         replication: result.header,
         osmiumVersion: result.osmiumVersion,
-        osmiumPeakRssKb: result.peakRssKb,
+        osmiumPeakRssKb: peakRssKb,
         tagFilter: OSM_TAG_FILTER,
         tileDegrees,
         sectionCount: result.manifest.sections.length,

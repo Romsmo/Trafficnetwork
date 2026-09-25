@@ -27,6 +27,9 @@ param(
   [string]$Image = "trafficnetwork-ingest:europe",
   [string]$Region = "europe",
   [string]$Memory = "5g",
+  # Rows that may end up quarantined before the tool aborts. Bayern had 5 in 548 k rows; a continent has a few hundred typos
+  # (limits of 300 km/h, fractions, ...), so the regional default of 500 would abort a healthy Europe run.
+  [int]$MaxQuarantined = 5000,
   [int]$MaxNoProgress = 3,
   [int]$RetryDelaySeconds = 45
 )
@@ -85,7 +88,7 @@ while ($true) {
   Say "attempt ${attempt}: starting the import container"
   docker rm -f "$Project-import" *> $null
   # Through cmd so the container's UTF-8 output lands in the log byte-for-byte (PowerShell 5.1 would re-encode it as UTF-16).
-  $dockerCommand = "docker run --rm --name $Project-import --memory=$Memory --network ${Project}_default -v `"${DataDir}:/data`" -v `"${IdxDir}:/idx`" --env-file `"$ClientEnv`" -e SERVER_URL=http://server:3000 -e OSMIUM_INDEX_DIR=/idx $Image --region $Region"
+  $dockerCommand = "docker run --rm --name $Project-import --memory=$Memory --network ${Project}_default -v `"${DataDir}:/data`" -v `"${IdxDir}:/idx`" --env-file `"$ClientEnv`" -e SERVER_URL=http://server:3000 -e OSMIUM_INDEX_DIR=/idx -e MAX_QUARANTINED=$MaxQuarantined $Image --region $Region"
   cmd.exe /c "$dockerCommand >> `"$log`" 2>&1"
   $code = $LASTEXITCODE
   Say "attempt ${attempt}: container exited with code $code"
