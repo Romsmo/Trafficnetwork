@@ -135,6 +135,18 @@ _Zuletzt aktualisiert: 2026-09-17 von der F-C-Session._
 - [ ] E-D Web: Startansicht Europa, nur sichtbaren Ausschnitt laden, Cluster bei kleiner Zoomstufe
 - [ ] Nach den Messungen entscheiden, ob „alles auf jedem Gerät" so bleibt
 
+## Zusatz Q — Quellenkatalog (Blitzer, Baustellen, Verkehrsschilder)
+- [x] Recherche des Betreibers liegt vor (Rechtslage, OSM, DATEX II/NAPCORE, nordische Behördenquellen)
+- [x] Zusatz-Prompt erstellt (`docs/prompt-addon-source-catalogue.md`) — für den Ingestion-Chat
+- [ ] Q0 Quellenkatalog mit belegten Lizenzen + Ampel je Quelle (`ingestion/docs/sources.md`)
+- [ ] Q1 Blitzer aus OSM (Namensraum bleibt deaktiviert)
+- [ ] Q2 Verkehrsschilder aus OSM, Codes länderoffen
+- [ ] Q3 Baustellen: DATEX-II-Leser + Autobahn GmbH, periodisch lauffähig
+- [ ] Q4 Eine amtliche Schildquelle (Digiroad oder NVDB) inkl. Koordinatenumrechnung
+- [ ] Entscheiden: läuft der Baustellen-Anbinder dauerhaft, und welche Länder zuerst?
+- [ ] Entscheiden: Mapillary/KartaView einbinden? (erst nach belegter Lizenzprüfung, standardmäßig aus)
+- [ ] Attribution aus `ingestion/docs/attribution.md` in die Weboberfläche übernehmen
+
 ## Launch P — Öffentlicher Betrieb (gemieteter Server + Domain)
 - [x] Claude-Code-Prompt erstellt (`docs/prompt-launch-public-server.md`)
 - [ ] Server und Domain besorgen
