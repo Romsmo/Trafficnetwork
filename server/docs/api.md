@@ -753,7 +753,8 @@ touch are marked for a package rebuild in the same transaction (which also bumps
 **Bulk-imported rows do not append event-log entries** (deliberate — a
 single call inserting thousands of rows would otherwise dominate the log's
 size and drown out everything else during that retention window). Clients
-only see bulk-imported static data via their **next snapshot**, not via
+only see bulk-imported static data via their **next snapshot** (small servers) or
+the **package manifest** (`/v1/static-data/manifest`, the way at Europe scale), not via
 delta. This is fine for static data, and consistent with bulk-import being
 an infrequent, largely one-time operation rather than a steady stream.
 

@@ -88,6 +88,72 @@ design. You can always keep running with `FEDERATION_ENABLED=false` (or
 simply without a `NETWORK_CONFIG_PATH`) as a fully functional, isolated
 single server in the meantime.
 
+## Running a node with Europe-sized data (E-B)
+
+Design, decisions and the reasoning behind the numbers: [`europe-scale.md`](europe-scale.md).
+Numbers below are **measured** unless marked otherwise; how they were obtained (a
+scratch database with the real Bayern import replicated across Europe, plus the real Bayern
+import itself) and what is still to be re-measured on the real Europe import is stated there.
+
+**What a row costs** (real Bayern geometry, PostGIS 16, indexes included):
+
+| | per row | |
+|---|---|---|
+| speed-limit segment | **≈ 440 B** in the database (table 267 B + `geometry_key` index 75 B + GiST 41 B + primary key 40 B), unchanged from 0.44 M to 2.6 M to 10 M rows | 10.1 M segments + 2.5 M signs = **4.9 GB** database |
+| sign | ≈ 180 B | |
+| package JSON (uncompressed) | ≈ 390 B | 12.6 M rows ≈ 4.9 GB of JSON |
+| package, gzip 9 / brotli 9 | ≈ 93 B / ≈ 90 B (4.2× / 4.4×) | the same 12.6 M rows ≈ 1.15 GB each |
+
+**Sizing** (the operator's own estimate for the real import is ≈ 15 M rows, range 12–18 M — take
+the per-row costs above and multiply): for 15 M rows about **6–7 GB of database**, **≈ 3 GB in
+`STATIC_PACKAGES_DIR`** (gzip + brotli copies of ≈ 5.9 GB of JSON, plus room for files a rebuild
+replaces), and **≈ 1.4 GB per device** for a complete bootstrap over gzip. Disk: allow ≥ 3× the database
+size for WAL, autovacuum and the initial import. RAM: `shared_buffers` 1–2 GB and 4 GB for the
+whole node is enough to serve; more helps the index-heavy queries and the package builds. 2 vCPUs.
+The API process no longer holds the dataset in memory — by construction: a build streams one tile at a time
+(the 75 tiles built so far ran under a 512 MB heap cap), and a snapshot over the limit is refused. Its peak memory during a full
+build on the real Europe import is one of the numbers still to be recorded (see `europe-scale.md`).
+
+**Building the packages.** `STATIC_PACKAGES_DIR` (in Docker a volume). After an import the worker
+notices the marked tiles and rebuilds them (debounced, see below); to do it explicitly, and to see progress:
+
+```bash
+npm run static-packages -- status                  # ready? tiles, dirty, disk, lease
+npm run static-packages -- build                   # dirty tiles (all of them for a first build)
+npm run static-packages -- build --full            # rebuild everything (after hand-edited SQL, or to be sure)
+npm run static-packages -- verify [--deep]         # files exist (and re-hash them)
+```
+
+Run it with the same `DATABASE_URL`/`.env` and directory as the server; it takes the builder lease, so a
+running server's worker and the CLI never build at once (a crashed builder blocks for at most two minutes).
+Interrupt it any time — finished tiles are recorded, the next run continues. Until the first complete
+build the manifest answers `503 PACKAGES_BUILDING` (datasets up to 200 k rows are built by the first
+request instead). **Do not edit static tables by hand and expect packages to follow** — SQL marks
+nothing; run `build --full` afterwards.
+
+**Resolution.** Measured on the scratch dataset, resolution 2 (today's default) makes tiles of
+hundreds of MB. **Set `STATIC_DATA_PARTITION_H3_RESOLUTION=4`** (a few MB per tile) *before* the
+first build; changing it later makes every package stale and rebuilds all of them. Clients read the
+value from `GET /v1/config`.
+
+**Import.** `POST /v1/bulk-import/*` is one batched statement per call now; the tool's batch size can go up to
+`BULK_IMPORT_MAX_ROWS` (default 5000, at most 50,000). No event-log rows are written however much is imported;
+the version rises once per call and the touched tiles are marked in the same transaction. Package builds wait for
+a quiet period (`STATIC_PACKAGES_DEBOUNCE_SECONDS`), so an import of hours triggers no rebuild until it ends.
+
+**Serving.** Put a reverse proxy in front and let it cache `/v1/static-data/packages/<tile>/<hash>` (immutable);
+for a CDN set `STATIC_PACKAGES_PUBLIC=true` so that one route needs no credential. `GET /v1/snapshot` (with static
+data) is refused above `SNAPSHOT_STATIC_MAX_ROWS` rows — clients use the manifest.
+
+**Maintenance** (untuned defaults suit a small node, a Europe-sized table wants a look):
+* `VACUUM (ANALYZE)` after the import — the row estimate `GET /v1/snapshot`'s guard reads comes from it, and so do
+  the planner's choices (autovacuum will do it, later).
+* A bulk import is insert-only: no bloat to reclaim. `REINDEX` is only needed after a crash or an index-corruption
+  warning; the three segment indexes together are ≈ 37 % of the segment table's size.
+* `CLUSTER speed_limit_segments USING speed_limit_segments_geometry_gist` would store rows in spatial order, making a
+  package build read sequentially. Not measured here (it needs room for a second copy of the table, and an exclusive lock).
+* Back up the database, **not** `STATIC_PACKAGES_DIR` (derived data): after a restore run `static-packages build --full`.
+
 ## Community speed-limit corrections (K-A)
 
 Users can propose a corrected speed limit; once `COMMUNITY_CORRECTIONS_CONFIRMATIONS_REQUIRED`
