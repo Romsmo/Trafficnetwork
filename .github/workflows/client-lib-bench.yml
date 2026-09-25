@@ -1,0 +1,79 @@
+name: client-lib-bench
+
+# Not one of the normal checks. Builds the bootstrap measurement tool
+# (client-lib/core/examples/measure_bootstrap.rs) and runs it at increasing
+# sizes against an in-process synthetic server shaped like real Bayern data;
+# also builds a Windows executable for measuring against a real server.
+#
+# Runs only when client-lib/bench/trigger.txt (or this file) changes on a
+# rework/client-lib-* branch, so ordinary pushes never start it.
+
+on:
+  push:
+    branches: ["rework/client-lib-*"]
+    paths:
+      - "client-lib/bench/trigger.txt"
+      - ".github/workflows/client-lib-bench.yml"
+
+defaults:
+  run:
+    working-directory: client-lib
+
+jobs:
+  synthetic-scale:
+    name: synthetic bootstrap at scale (linux)
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: client-lib
+          key: bench
+
+      - name: Runner
+        run: |
+          nproc
+          free -m
+          df -h /
+
+      - name: Build (release)
+        run: cargo build --release -p trafficnetwork-core --example measure_bootstrap
+
+      - name: 1 M segments (with the gzip estimate)
+        run: ./target/release/examples/measure_bootstrap --synthetic-segments 1000000 --label "synthetic 1M"
+
+      - name: 5 M segments
+        run: ./target/release/examples/measure_bootstrap --synthetic-segments 5000000 --no-gzip-estimate --label "synthetic 5M"
+
+      - name: 10 M segments
+        run: ./target/release/examples/measure_bootstrap --synthetic-segments 10000000 --no-gzip-estimate --label "synthetic 10M"
+
+      - name: 20 M segments (may not fit the runner's disk; the smaller runs above are what counts)
+        continue-on-error: true
+        run: ./target/release/examples/measure_bootstrap --synthetic-segments 20000000 --no-gzip-estimate --label "synthetic 20M"
+
+  windows-tool:
+    name: measurement tool (windows executable)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: client-lib
+          key: bench-windows
+
+      - name: Build (release)
+        run: cargo build --release -p trafficnetwork-core --example measure_bootstrap
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: measure_bootstrap-windows
+          path: client-lib/target/release/examples/measure_bootstrap.exe
+          retention-days: 14
