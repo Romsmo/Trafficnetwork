@@ -17,6 +17,10 @@ How the one-time Europe import is run, resumed, checked and (later) updated. The
 ## Steps
 
 1. **Free the machine.** Pause other Docker-using work (RAM ≥ 8 GB free, `C:` ≥ 2 GB free). Keep the PC awake for the duration.
+1b. **Keep the Docker VM from hoarding host memory** (Windows/WSL2 only): start `deploy/europe-node/keep-vm-memory-low.ps1` (detached, hidden; it stops when its stop file
+   appears). Measured 2026-09-25: the VM's page cache, filled by the big file IO, grew `vmmemWSL` to 5.4 GB while the containers used ~1 GB; dropping the cache returned 1.8 GB to
+   Windows at once. With Windows' commit memory nearly exhausted this hoarding is the likely reason the VM was killed several times (every container died). It changes no setting,
+   it only drops the guest's page cache.
 2. **Build the runner image** (ingestion CLI + osmium; a TLS-inspecting antivirus root CA can be supplied as `extra-ca.crt`):
    ```bash
    docker build --build-context certs=<dir with extra-ca.crt> -t trafficnetwork-ingest:europe ingestion
@@ -26,7 +30,11 @@ How the one-time Europe import is run, resumed, checked and (later) updated. The
    docker compose -p tn-europe --env-file <secrets>/europe-node.env -f ingestion/deploy/europe-node/docker-compose.yml up -d
    ```
 4. **Mint a `bulk-import` client** on that node with the server's own `create-client` script and store id/secret in a file outside the repo.
-5. **Run** (resumable — the same command continues after any abort):
+5. **Run.** On Windows use the wrapper, which repeats the resumable run after every interruption until it completes (and stops after three attempts without progress):
+   ```powershell
+   powershell -ExecutionPolicy Bypass -File ingestion\deploy\europe-node\run-europe.ps1 -DataDir <data-dir> -IdxDir <ssd-dir> -NodeEnv <secrets>\europe-node.env -ClientEnv <secrets>\europe-client.env
+   ```
+   The underlying command (resumable — the same command continues after any abort):
    ```bash
    docker run --rm --memory=5g --network tn-europe_default \
      -v <data-dir>:/data -v <ssd-dir>:/idx --env-file <secrets>/europe-client.env \

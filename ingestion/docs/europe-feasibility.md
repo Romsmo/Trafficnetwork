@@ -1,6 +1,7 @@
 # Europe base data — feasibility report (add-on A)
 
-Status: 2026-09-25, **before the run**. Nothing of the Europe import has been started. Every number is labelled
+Status: written 2026-09-25 **before the run** (sections 1–12); section 13 records the Bayern rehearsal and the amendments made before the real run started
+(2026-09-25 16:16). The run's outcome is reported separately (`europe-run-report.md`). Every number is labelled
 **measured** (real run on this PC), **cited** (public source) or **estimated** (extrapolation, with the method).
 
 ## 1. Verdict
@@ -52,7 +53,7 @@ Extract: Bayern 852,581,936 B, 80,459,441 nodes, 11,897,271 ways, header timesta
 * `--index-type=sparse_file_array` (node index on disk instead of RAM) gives a byte-identical export at 0.19 GB RSS.
 * Peak RSS of `tags-filter` is the same (≈2.1 GB) for a 18.6 M-node and a 3.3 M-node result. That fits osmium's ID sets
   being bitmap chunks sized by the **highest OSM ID**, not by the amount of data (≈13.5 B node IDs / 8 ≈ 1.7 GB + way IDs ≈ 0.2 GB).
-  **Inference, not measured on Europe:** RSS stays ≈2.1–2.4 GB for the full file. The run caps the container at 4 GB and
+  **Inference, not measured on Europe:** RSS stays ≈2.1–2.4 GB for the full file. The run caps the runner container at 5 GB and
   logs `/usr/bin/time -v` for every osmium step, so a wrong inference kills only that container.
 * Launch L (measured 2026-09-23): 548 k rows imported in 242 s including osmium (≈2,300 rows/s all-in), database
   169 MB (≈308 B/row), server RSS 250 MB → 1.04 GB after import, Postgres 138–370 MB.
@@ -195,3 +196,34 @@ server task (part B / K), not part of this run.
 The report will list rows per entity, duration per phase, DB size (before/after, and dump size), skip counts by reason, quarantined rows,
 retries/backoff events, and spot-checks of known places in at least eight countries (a speed-limit way, a sign and, where present, a
 camera per country) by direct database query, plus the section table with per-tile counts.
+
+## 13. Rehearsal on Bayern (2026-09-25) and amendments to the plan
+
+Before the Europe run the whole new pipeline was run once end to end on the Bayern extract (edition Last-Modified 2026-09-25 04:04 GMT, replication sequence 4914),
+in the runner container (osmium 1.15.0), against a throwaway server, with 1° sections (21 sections):
+
+| | Result |
+|---|---|
+| Download (real Geofabrik, Range-capable client) | 12.6 MB/s |
+| `tags-filter` / `export` | 23.6 s, peak RSS 2,048 MB / 6.8 s, 187 MB (osmium's own `time -v`, recorded in `extract-meta.json`) |
+| Sections | 21 files, 803,066 features |
+| Import | 438,719 segments + 109,840 signs + 142 cameras = 548,701 rows in 235 s ≈ 2,335 rows/s; **5 rows quarantined** |
+| DB | **exactly the tool's confirmed counts**; 169 MB (≈308 B/row, as at Launch L) |
+| Progress log | 18.9 MB for 548 k rows (≈35 B/row → ≈0.5 GB for Europe) |
+
+* The 5 quarantined rows are real Bayern data: five neighbouring ways (way/1496199848–52) tagged `maxspeed=300`. The plausibility ceiling (200 km/h, 125 mph)
+  stops them; the old tool would have imported "300 km/h" limits. They stay in `quarantine.ndjson` with the full row.
+* Compared with Launch L (438,595 / 109,646 / 142 on the 2026-09-22 edition) the counts differ by the newer edition, the wider implicit-limit table and these 5 rows — not by the filter change.
+* **Interruption test.** One `docker kill` mid-import, then two involuntary Docker-VM restarts during the resumed runs, then a final resume: the database ended with the expected signs and cameras and **exactly 2,000 segments too many**
+  — one re-posted batch, i.e. the documented worst case for *one* of the three interruptions (a hard stop between "server committed" and "progress line written"). It is detected by comparing table counts with the confirmed
+  totals and by `scripts/europe-duplicate-check.sql` (2,000 repeated segment rows found). The tool cannot close this window from the outside, because the server offers no way to ask "is this batch already in?".
+* Resume behaved as designed: finished sections skipped without reading them, `alreadyDone` keys restored from the streamed log, download/osmium skipped, no unresolved state.
+* The 5 integration tests (real server, real osmium, fixtures) pass, including the new ones: empty-target guard refuses a populated server, sectioned region imports the same rows, re-run skips finished sections.
+
+Amendments made because of the rehearsal and of the environment:
+
+1. **Auto-resume wrapper** (`deploy/europe-node/run-europe.ps1`): Docker Desktop's VM restarted several times on 2026-09-24/25 (every few minutes at worst, also without my involvement; host commit memory was down to 1.7–2.9 GB free of 20 GB, `C:` at 0.1–3 GB),
+  killing every container. The wrapper re-runs the resumable import until it completes and stops when three attempts in a row change nothing.
+2. **Row validation** also rejects fractional limits (the server column is `integer`, its schema is not — a 500 that no retry fixes) and NUL characters in text.
+3. **Duplicate check** SQL for after the run (segments only; identical signs at identical positions are normal in OSM: 2,684 in Bayern).
+4. `traffic_sign` on areas (closed ways exported as polygons) is logged at debug level; it happened tens of thousands of times in the rehearsal.

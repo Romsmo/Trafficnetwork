@@ -84,10 +84,9 @@ while ($true) {
 
   Say "attempt ${attempt}: starting the import container"
   docker rm -f "$Project-import" *> $null
-  docker run --rm --name "$Project-import" --memory=$Memory --network "${Project}_default" `
-    -v "${DataDir}:/data" -v "${IdxDir}:/idx" --env-file $ClientEnv `
-    -e SERVER_URL=http://server:3000 -e OSMIUM_INDEX_DIR=/idx `
-    $Image --region $Region *>> $log
+  # Through cmd so the container's UTF-8 output lands in the log byte-for-byte (PowerShell 5.1 would re-encode it as UTF-16).
+  $dockerCommand = "docker run --rm --name $Project-import --memory=$Memory --network ${Project}_default -v `"${DataDir}:/data`" -v `"${IdxDir}:/idx`" --env-file `"$ClientEnv`" -e SERVER_URL=http://server:3000 -e OSMIUM_INDEX_DIR=/idx $Image --region $Region"
+  cmd.exe /c "$dockerCommand >> `"$log`" 2>&1"
   $code = $LASTEXITCODE
   Say "attempt ${attempt}: container exited with code $code"
   if ($code -eq 0) { Say "import finished"; exit 0 }
