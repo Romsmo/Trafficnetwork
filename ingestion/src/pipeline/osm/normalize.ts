@@ -129,7 +129,9 @@ export function normalizeFeature(feature: OsmFeature, logger: Logger): Normalize
     }
 
     if (!position) {
-      logger.warn({ osmType, osmId }, "traffic_sign tag present but no usable position — skipping sign(s)");
+      // Typically a closed way or relation that osmium exports as a Polygon/MultiPolygon (an area): no single
+      // sign position exists. Frequent at continent scale (tens of thousands), so debug level, not a warning.
+      logger.debug({ osmType, osmId }, "traffic_sign tag present but no usable position — skipping sign(s)");
     } else {
       const signTypes = tags.traffic_sign
         .split(",")

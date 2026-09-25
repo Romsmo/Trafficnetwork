@@ -54,7 +54,9 @@ services:
       PORT: 3000
       HOST: 0.0.0.0
       LOG_LEVEL: warn
-      SPEED_CAMERA_NAMESPACE_ENABLED: "false"
+      # Cameras are imported and stored, but the read namespace stays disabled (legal review still open). Only a
+      # throwaway test node sets this to "true", so the integration tests can read cameras back.
+      SPEED_CAMERA_NAMESPACE_ENABLED: ${SPEED_CAMERA_NAMESPACE_ENABLED:-false}
     ports:
       - "127.0.0.1:${EUROPE_NODE_PORT:-3200}:3000"
 
