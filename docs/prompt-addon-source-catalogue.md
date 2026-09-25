@@ -41,10 +41,36 @@ Für den **europaweiten Massenimport** nicht die Overpass API verwenden: Sie ist
 
 ## 3. Arbeitspakete
 
-### 3.1 Blitzer aus OSM
-- Aus dem bestehenden PBF-Durchlauf zusätzlich `highway=speed_camera` als `FixedSpeedCamera` übernehmen (Position, OSM-ID als stabile Quell-ID, Provenienz ODbL).
-- Verwandte Angaben mitnehmen, soweit vorhanden (z. B. `maxspeed`-Bezug, Richtung), sonst weglassen statt raten.
+### 3.1 Blitzer aus OSM — alle Bauarten, nicht nur Geschwindigkeit
+
+OSM erfasst Überwachungsanlagen auf **zwei** Wegen. Wer nur `highway=speed_camera` liest, übersieht Rotlichtblitzer und Abschnittskontrollen vollständig:
+
+1. **Einzelner Knoten** `highway=speed_camera` — klassischer, fest installierter Geschwindigkeitsblitzer.
+2. **Relation** `type=enforcement` mit `enforcement=*` — der allgemeine Fall, mit Mitgliedern in den Rollen `device` (die Anlage), `from`/`to` (Beginn/Ende der Überwachung) und teils `force`/`section`. Werte des Schlüssels u. a.: `maxspeed`, `traffic_signals` (**Rotlichtblitzer**), `average_speed` (Abschnittskontrolle), `mindistance` (Abstandskontrolle), dazu `check`, `access`, `maxweight`, `maxheight`, `mobile_phone`, `seatbelt`, `toll`. Bei `enforcement=traffic_signals` trägt der `device`-Knoten typischerweise `highway=traffic_signals` — **kein** `highway=speed_camera`.
+
+**Abzubilden auf unsere Kategorien:**
+
+| OSM | Unsere Kategorie |
+|---|---|
+| `highway=speed_camera` (Knoten) bzw. `enforcement=maxspeed` | `fixedSpeedCamera` |
+| `enforcement=traffic_signals` | `redLightCamera` |
+| `enforcement=mindistance` | `distanceControl` |
+| `enforcement=average_speed` (Abschnittskontrolle) | **offen — siehe unten** |
+| alle übrigen Werte (`check`, `toll`, `seatbelt` …) | nicht importieren |
+
+**Zwei Punkte, die du klären musst, bevor du importierst — beide gehen an mich:**
+
+- **Abschnittskontrolle** hat in unserem festen Kategorien-Enum keine Entsprechung. Entweder auf `fixedSpeedCamera` abbilden (mit Vermerk in den Quelldaten) oder das Enum **anhängen** (Reihenfolge der bestehenden Werte nicht ändern) — das wäre eine Server-Änderung. Vorschlag mit Begründung vorlegen.
+- **Dauerhaft vs. verfallend:** `fixedSpeedCamera` ist eine statische Entität mit eigener Tabelle; `redLightCamera`, `distanceControl` und die mobilen Kategorien sind bisher **zeitlich verfallende Meldungen** (Minuten). Eine fest installierte Rotlichtanlage als 15-Minuten-Meldung zu importieren wäre falsch — sie verschwände sofort wieder. Kläre mit mir, ob der Server dafür eine statische Darstellung bekommt (additive Erweiterung, analog zu den festen Blitzern) oder ob wir Rotlicht- und Abstandsanlagen vorerst **nicht** importieren. Bis das entschieden ist: nicht importieren, statt etwas einzuspielen, das nach 15 Minuten verfällt.
+
+Weiteres:
+
+- Stabile Quell-ID ist die OSM-ID (Knoten oder Relation), Provenienz ODbL.
+- Vorhandene Zusatzangaben (z. B. `maxspeed` der überwachten Stelle, Richtung) übernehmen, fehlende **nicht raten**.
+- Bei Relationen die Position der `device`-Mitglieder verwenden; fehlt `device`, die Relation überspringen und im Qualitätsbericht zählen.
 - **Der Blitzer-Namensraum bleibt serverseitig deaktiviert.** Import ja, Auslieferung nein — das Flag rührst du nicht an.
+
+Belege für die Tagging-Schemata: OSM-Wiki `Relation:enforcement` und `Tag:highway=speed_camera` (Stand prüfen und mit Abrufdatum dokumentieren).
 
 ### 3.2 Baustellen (DATEX II + Autobahn GmbH)
 - Baustellen sind **zeitlich begrenzte Meldungen** (`construction`) mit Start- und Enddatum, kein statischer Bestand. Import über die Bulk-Import-API als `source: "seed"`, mit Enddatum aus der Quelle, wo vorhanden.
