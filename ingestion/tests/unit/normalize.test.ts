@@ -67,9 +67,44 @@ describe("normalizeFeature — implicit maxspeed:type", () => {
     expect(rows.filter((r) => r.kind === "speed-limit-segment")).toHaveLength(0);
   });
 
-  it("skips an unrecognized maxspeed:type value (e.g. a non-German AT:urban) instead of guessing", () => {
-    const rows = normalizeFeature(wayFeature({ highway: "residential", "maxspeed:type": "AT:urban" }), silentLogger);
+  it("skips an unrecognized maxspeed:type value instead of guessing", () => {
+    const rows = normalizeFeature(wayFeature({ highway: "residential", "maxspeed:type": "sign" }), silentLogger);
     expect(rows.filter((r) => r.kind === "speed-limit-segment")).toHaveLength(0);
+  });
+
+  describe("Europe-wide policy (docs/europe-feasibility.md §6)", () => {
+    const speedOf = (type: string) => {
+      const rows = normalizeFeature(wayFeature({ highway: "residential", "maxspeed:type": type }), silentLogger);
+      const segment = rows.find((r) => r.kind === "speed-limit-segment");
+      return segment && segment.kind === "speed-limit-segment" ? { value: segment.row.speedLimit, unit: segment.row.speedLimitUnit } : undefined;
+    };
+
+    it.each([
+      ["AT:urban", 50, "kmh"],
+      ["AT:rural", 100, "kmh"],
+      ["CH:rural", 80, "kmh"],
+      ["SE:rural", 70, "kmh"],
+      ["IT:urban", 50, "kmh"],
+      ["IM:urban", 30, "mph"],
+    ] as const)("resolves the evidenced, unambiguous %s to %i %s", (type, value, unit) => {
+      expect(speedOf(type)).toEqual({ value, unit });
+    });
+
+    it.each(["FR:rural", "ES:urban", "CZ:rural", "NL:rural", "PL:rural", "IT:rural", "GB:nsl_single", "GB:nsl_dual", "GB:motorway", "AT:motorway", "FR:motorway"])(
+      "deliberately does not resolve %s (ambiguous sub-types, no blanket limit, or not evidenced)",
+      (type) => {
+        expect(speedOf(type)).toBeUndefined();
+      },
+    );
+
+    it("resolves zoneNN from the number in the tag, in km/h only", () => {
+      expect(speedOf("AT:zone30")).toEqual({ value: 30, unit: "kmh" });
+      expect(speedOf("FR:zone20")).toEqual({ value: 20, unit: "kmh" });
+      expect(speedOf("GB:zone20")).toBeUndefined(); // mph country: never read a zone number as km/h
+      expect(speedOf("DE:zone33")).toBeUndefined(); // not a plausible zone value
+      expect(speedOf("DE:zone0")).toBeUndefined();
+      expect(speedOf("DE:zone300")).toBeUndefined();
+    });
   });
 
   it("emits nothing when there is no maxspeed and no highway tag at all", () => {

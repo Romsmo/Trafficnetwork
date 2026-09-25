@@ -20,6 +20,13 @@ const regionSchema = z.object({
   // Optional, populated by an operator after manually confirming a real
   // known-limit coordinate post-import — never invented ahead of time.
   verificationPoints: z.array(verificationPointSchema).optional(),
+  // Optional: cut the filtered export into geographic tiles of this many degrees and import them
+  // one by one, each with its own progress/completion marker (pipeline/osm/sections.ts). Without
+  // it the whole region is a single section.
+  sections: z.object({ tileDegrees: z.number().positive().max(90) }).optional(),
+  // The post-run manifest cross-check downloads every H3 partition covering the bbox — the whole
+  // static dataset. Fine for Bayern (195 MB), unusable for a continent (≈5 GB, minutes per call).
+  skipManifestCrossCheck: z.boolean().optional(),
 });
 
 const regionsFileSchema = z.object({

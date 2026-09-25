@@ -20,11 +20,18 @@ import { BULK_IMPORT_KINDS, type BulkImportKind } from "./api/types.js";
  *               any rows already imported into the server (it has no dedup of its own);
  *               only use this to deliberately start a region completely over.
  * --batch-size  overrides BATCH_SIZE from .env for this run
+ * --allow-non-empty
+ *               a fresh start refuses to run against a server that already holds static data (the
+ *               server has no dedup, so importing a region twice doubles it); this overrides that guard
+ * --section     comma-separated section ids: import only those (regions with "sections" in
+ *               config/regions.json); the run is then not marked complete
  */
-function parseArgs(argv: string[]): { region: string; dryRun: boolean; fresh: boolean; batchSizeOverride?: number } {
+function parseArgs(argv: string[]): { region: string; dryRun: boolean; fresh: boolean; allowNonEmpty: boolean; onlySections?: string[]; batchSizeOverride?: number } {
   let region: string | undefined;
   let dryRun = false;
   let fresh = false;
+  let allowNonEmpty = false;
+  let onlySections: string[] | undefined;
   let batchSizeOverride: number | undefined;
 
   for (let i = 0; i < argv.length; i++) {
@@ -34,6 +41,11 @@ function parseArgs(argv: string[]): { region: string; dryRun: boolean; fresh: bo
       dryRun = true;
     } else if (argv[i] === "--fresh") {
       fresh = true;
+    } else if (argv[i] === "--allow-non-empty") {
+      allowNonEmpty = true;
+    } else if (argv[i] === "--section") {
+      onlySections = (argv[++i] ?? "").split(",").map((s) => s.trim()).filter((s) => s.length > 0);
+      if (onlySections.length === 0) throw new Error("--section needs at least one section id");
     } else if (argv[i] === "--batch-size") {
       const value = argv[++i];
       const parsed = value ? Number(value) : NaN;
@@ -43,11 +55,11 @@ function parseArgs(argv: string[]): { region: string; dryRun: boolean; fresh: bo
   }
 
   if (!region) throw new Error("--region is required (see ingestion/config/regions.json for valid ids)");
-  return { region, dryRun, fresh, batchSizeOverride };
+  return { region, dryRun, fresh, allowNonEmpty, onlySections, batchSizeOverride };
 }
 
 async function main() {
-  const { region: regionId, dryRun, fresh, batchSizeOverride } = parseArgs(process.argv.slice(2));
+  const { region: regionId, dryRun, fresh, allowNonEmpty, onlySections, batchSizeOverride } = parseArgs(process.argv.slice(2));
 
   const env = loadEnv();
   const logger = createLogger(env);
@@ -90,7 +102,23 @@ async function main() {
     }
     // Test-only, undocumented, not part of the Zod-validated Env schema on purpose — see run-worker.ts's doc comment.
     const testOnlyBatchDelayMs = process.env.INGESTION_TEST_BATCH_DELAY_MS ? Number(process.env.INGESTION_TEST_BATCH_DELAY_MS) : undefined;
-    const result = await runWorker({ worker, regionId, region, apiClient, stateStore, logger, batchSize, dryRun: false, downloadDir: env.DOWNLOAD_DIR, testOnlyBatchDelayMs });
+    const result = await runWorker({
+      worker,
+      regionId,
+      region,
+      apiClient,
+      stateStore,
+      logger,
+      batchSize,
+      dryRun: false,
+      downloadDir: env.DOWNLOAD_DIR,
+      allowNonEmpty,
+      onlySections,
+      batchPacingMs: env.BATCH_PACING_MS,
+      maxQuarantined: env.MAX_QUARANTINED,
+      indexDir: env.OSMIUM_INDEX_DIR,
+      testOnlyBatchDelayMs,
+    });
     for (const kind of BULK_IMPORT_KINDS) totalInsertedByKind[kind] += result.insertedByKind[kind];
   }
 

@@ -1,10 +1,13 @@
 import { randomUUID } from "node:crypto";
+import { ApiError } from "../api/client.js";
 import { BULK_IMPORT_KINDS, type BulkImportKind, type BulkImportPoster, type BulkImportRow } from "../api/types.js";
 import { Batcher } from "../batching/batcher.js";
 import type { Region } from "../config/regions.js";
 import type { Logger } from "../logging.js";
+import type { KeySet } from "../state/keyset.js";
 import type { StateStore } from "../state/store.js";
-import type { NormalizedRow, SourceWorker } from "./worker.js";
+import { validateRow } from "./validate.js";
+import type { NormalizedRow, SourceWorker, WorkerContext, WorkerSection } from "./worker.js";
 
 export interface RunWorkerOptions {
   worker: SourceWorker;
@@ -16,6 +19,23 @@ export interface RunWorkerOptions {
   batchSize: number;
   dryRun: boolean;
   downloadDir: string;
+  /**
+   * The server has no dedup. On a fresh start (no local progress) the run refuses to start
+   * against a server that already holds static data, because importing a region into a server
+   * that already contains it silently doubles it. Set this only to import on purpose into a
+   * non-empty server (e.g. a different region).
+   */
+  allowNonEmpty?: boolean;
+  /** Minimum pause after each committed batch — a pacing floor that keeps the server's CPU/IO bounded. Default 0. */
+  batchPacingMs?: number;
+  /** Abort when more rows than this were quarantined in total: that indicates a systematic problem, not stray bad data. Default 500. */
+  maxQuarantined?: number;
+  /** Process only these section ids (never marks the run complete). */
+  onlySections?: string[];
+  /** Passed to the worker as WorkerContext.indexDir. */
+  indexDir?: string;
+  /** How often the progress line is logged. Default 60 s. */
+  progressIntervalMs?: number;
   /**
    * Test-only: an artificial pause after each durably-recorded batch. On a
    * real server over a real network a batch takes long enough for a "kill
@@ -30,12 +50,21 @@ export interface RunWorkerOptions {
 export interface RunWorkerResult {
   insertedByKind: Record<BulkImportKind, number>;
   skippedAlreadyDone: number;
+  quarantined: number;
+  sectionsProcessed: number;
+  sectionsSkipped: number;
   shortCircuited: boolean;
 }
 
 function emptyCounts(): Record<BulkImportKind, number> {
   return { "speed-limit-segment": 0, "static-sign": 0, "fixed-speed-camera": 0 };
 }
+
+async function* singleSection(rows: AsyncGenerator<NormalizedRow>): AsyncGenerator<WorkerSection> {
+  yield { id: "all", index: 1, total: 1, rows };
+}
+
+const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
 /**
  * Source-agnostic driver: owns state/resume, batching, dedupe-filtering,
@@ -44,19 +73,38 @@ function emptyCounts(): Record<BulkImportKind, number> {
  * write-ordering right — see state/store.ts and the plan's decision 4:
  * a row is only ever marked done *after* a response whose `inserted` count
  * matches what was sent, and only once that mark is durably fsync'd.
+ *
+ * Europe-scale additions (docs/europe-feasibility.md §7): sections with their
+ * own completion markers, client-side validation, bisect-and-quarantine of
+ * batches the server rejects, the empty-target guard, pacing and a periodic
+ * progress line.
  */
 export async function runWorker(options: RunWorkerOptions): Promise<RunWorkerResult> {
   const { worker, regionId, region, apiClient, stateStore, logger, batchSize, dryRun, downloadDir, testOnlyBatchDelayMs } = options;
+  const batchPacingMs = options.batchPacingMs ?? 0;
+  const maxQuarantined = options.maxQuarantined ?? 500;
+  const progressIntervalMs = options.progressIntervalMs ?? 60_000;
 
   await stateStore.init();
 
   if (stateStore.isComplete()) {
     logger.info({ region: region.name, source: worker.id }, "already imported (complete.marker present) — nothing to do; use --fresh to force a full re-run");
-    return { insertedByKind: emptyCounts(), skippedAlreadyDone: 0, shortCircuited: true };
+    return { insertedByKind: emptyCounts(), skippedAlreadyDone: 0, quarantined: 0, sectionsProcessed: 0, sectionsSkipped: 0, shortCircuited: true };
   }
 
-  const doneKeys = await stateStore.loadDoneKeys();
-  logger.info({ region: region.name, source: worker.id, alreadyDone: doneKeys.size }, "starting (resuming from local progress state if any)");
+  if (!dryRun && !options.allowNonEmpty && apiClient.isStaticDataEmpty && !(await stateStore.hasProgress())) {
+    if (!(await apiClient.isStaticDataEmpty())) {
+      throw new Error(
+        `Refusing to start: the target server already contains static data and this run has no local progress for region "${regionId}". ` +
+          "The server has no dedup, so importing a region it may already hold would silently duplicate it. " +
+          "If this is deliberate (e.g. importing a different region into a populated server), re-run with --allow-non-empty.",
+      );
+    }
+  }
+
+  const doneKeys: KeySet = await stateStore.loadDoneKeys();
+  const previouslyQuarantined = await stateStore.countQuarantined();
+  logger.info({ region: region.name, source: worker.id, alreadyDone: doneKeys.size, previouslyQuarantined }, "starting (resuming from local progress state if any)");
 
   const existingSummary = await stateStore.readRunSummary();
   if (!dryRun) {
@@ -67,23 +115,56 @@ export async function runWorker(options: RunWorkerOptions): Promise<RunWorkerRes
     });
   }
 
-  const batchers: Record<BulkImportKind, Batcher<NormalizedRow>> = {
-    "speed-limit-segment": new Batcher(batchSize),
-    "static-sign": new Batcher(batchSize),
-    "fixed-speed-camera": new Batcher(batchSize),
-  };
-
   const insertedByKind = emptyCounts();
   let skippedAlreadyDone = 0;
+  let quarantinedThisRun = 0;
+  let sectionsProcessed = 0;
+  let sectionsSkipped = 0;
+  const runStartedAt = Date.now();
+  let lastProgressLogAt = runStartedAt;
+  let currentSection = { id: "-", index: 0, total: 0 };
+  let sectionInserted = emptyCounts();
 
-  const flushBatch = async (kind: BulkImportKind, batch: NormalizedRow[]): Promise<void> => {
-    if (dryRun) {
-      logger.info({ kind, count: batch.length }, "[dry-run] would POST batch (not sent)");
-      return;
+  const totalInserted = (): number => BULK_IMPORT_KINDS.reduce((sum, kind) => sum + insertedByKind[kind], 0);
+
+  const logProgress = (force = false): void => {
+    const now = Date.now();
+    if (!force && now - lastProgressLogAt < progressIntervalMs) return;
+    lastProgressLogAt = now;
+    const elapsedS = Math.max(1, (now - runStartedAt) / 1000);
+    logger.info(
+      {
+        section: currentSection.id,
+        sectionIndex: currentSection.index,
+        sectionTotal: currentSection.total,
+        inserted: totalInserted(),
+        insertedByKind,
+        skippedAlreadyDone,
+        quarantined: quarantinedThisRun,
+        rowsPerSecond: Math.round(totalInserted() / elapsedS),
+        elapsedMinutes: Math.round(elapsedS / 6) / 10,
+      },
+      "progress",
+    );
+  };
+
+  const quarantine = async (normalized: NormalizedRow, reason: "client-validation" | "server-rejected", detail: unknown): Promise<void> => {
+    await stateStore.appendQuarantine({ key: normalized.key, kind: normalized.kind, reason, detail, row: normalized.row, at: new Date().toISOString() });
+    doneKeys.add(normalized.key);
+    quarantinedThisRun++;
+    logger.warn({ key: normalized.key, reason, detail }, "row quarantined (not imported) — see quarantine.ndjson");
+    if (previouslyQuarantined + quarantinedThisRun > maxQuarantined) {
+      throw new Error(
+        `Aborting: more than ${maxQuarantined} rows were quarantined in total (${previouslyQuarantined + quarantinedThisRun}). ` +
+          "That points to a systematic mismatch between the data and the server's schema, not stray bad rows — inspect quarantine.ndjson before resuming.",
+      );
     }
-    // Safe by construction: `batch` was accumulated in `batchers[kind]`, so
-    // every element's `.row` is that kind's row shape — postBatch's generic
-    // parameter just can't see that grouping-by-runtime-key already proved it.
+  };
+
+  /** One POST + durable mark. Throws ApiError on a non-2xx (bisect logic upstream decides what to do with a 400). */
+  const commit = async (kind: BulkImportKind, batch: NormalizedRow[]): Promise<void> => {
+    // Safe by construction: `batch` was accumulated per kind, so every element's `.row` is that
+    // kind's row shape — postBatch's generic parameter just can't see that grouping-by-runtime-key already proved it.
     const rows = batch.map((r) => r.row) as BulkImportRow<typeof kind>[];
     const keys = batch.map((r) => r.key);
     const response = await apiClient.postBatch(kind, rows);
@@ -93,31 +174,115 @@ export async function runWorker(options: RunWorkerOptions): Promise<RunWorkerRes
       );
     }
     await stateStore.appendBatch({ batchId: randomUUID(), kind, postedAt: new Date().toISOString(), insertedCount: response.inserted, keys });
+    for (const key of keys) doneKeys.add(key);
     insertedByKind[kind] += response.inserted;
-    logger.info({ kind, count: response.inserted }, "batch imported");
-    if (testOnlyBatchDelayMs) await new Promise((resolve) => setTimeout(resolve, testOnlyBatchDelayMs));
+    sectionInserted[kind] += response.inserted;
+    logger.debug({ kind, count: response.inserted }, "batch imported");
+    if (batchPacingMs > 0) await sleep(batchPacingMs);
+    if (testOnlyBatchDelayMs) await sleep(testOnlyBatchDelayMs);
+    logProgress();
   };
 
-  for await (const normalized of worker.run({ regionId, region, logger, downloadDir })) {
-    if (doneKeys.has(normalized.key)) {
-      skippedAlreadyDone++;
+  /**
+   * A 400 means the server validated the body and rejected it *before inserting anything* (routes.ts
+   * parses the whole body first), so re-posting halves cannot duplicate rows. Bisect down to the
+   * offending row(s) and quarantine only those.
+   */
+  const postWithBisect = async (kind: BulkImportKind, batch: NormalizedRow[]): Promise<void> => {
+    try {
+      await commit(kind, batch);
+    } catch (err) {
+      if (!(err instanceof ApiError) || err.status !== 400) throw err;
+      if (batch.length === 1) {
+        await quarantine(batch[0]!, "server-rejected", err.body?.error?.details ?? err.message);
+        return;
+      }
+      logger.warn({ kind, size: batch.length }, "server rejected the batch (400) — bisecting to isolate the offending row(s)");
+      const middle = batch.length >> 1;
+      await postWithBisect(kind, batch.slice(0, middle));
+      await postWithBisect(kind, batch.slice(middle));
+    }
+  };
+
+  const flushBatch = async (kind: BulkImportKind, batch: NormalizedRow[]): Promise<void> => {
+    if (dryRun) {
+      logger.info({ kind, count: batch.length }, "[dry-run] would POST batch (not sent)");
+      return;
+    }
+    const valid: NormalizedRow[] = [];
+    for (const normalized of batch) {
+      const problem = validateRow(normalized);
+      if (problem) await quarantine(normalized, "client-validation", problem);
+      else valid.push(normalized);
+    }
+    if (valid.length > 0) await postWithBisect(kind, valid);
+  };
+
+  const ctx: WorkerContext = { regionId, region, logger, downloadDir, stateDir: stateStore.directory, indexDir: options.indexDir };
+  const sections = worker.runSections ? worker.runSections(ctx) : singleSection(worker.run(ctx));
+
+  for await (const section of sections) {
+    if (options.onlySections && !options.onlySections.includes(section.id)) {
+      await section.rows.return(undefined);
       continue;
     }
-    const full = batchers[normalized.kind].add(normalized);
-    if (full) await flushBatch(normalized.kind, full);
+    if (await stateStore.isSectionDone(section.id)) {
+      logger.info({ section: section.id, index: section.index, total: section.total }, "section already complete — skipping");
+      await section.rows.return(undefined);
+      sectionsSkipped++;
+      continue;
+    }
+
+    currentSection = { id: section.id, index: section.index, total: section.total };
+    const sectionStartedAt = new Date().toISOString();
+    const skippedBefore = skippedAlreadyDone;
+    const quarantinedBefore = quarantinedThisRun;
+    sectionInserted = emptyCounts();
+    logger.info({ section: section.id, index: section.index, total: section.total }, "section started");
+
+    const batchers: Record<BulkImportKind, Batcher<NormalizedRow>> = {
+      "speed-limit-segment": new Batcher(batchSize),
+      "static-sign": new Batcher(batchSize),
+      "fixed-speed-camera": new Batcher(batchSize),
+    };
+
+    for await (const normalized of section.rows) {
+      if (doneKeys.has(normalized.key)) {
+        skippedAlreadyDone++;
+        continue;
+      }
+      const full = batchers[normalized.kind].add(normalized);
+      if (full) await flushBatch(normalized.kind, full);
+    }
+    for (const kind of BULK_IMPORT_KINDS) {
+      const remainder = batchers[kind].flush();
+      if (remainder) await flushBatch(kind, remainder);
+    }
+
+    sectionsProcessed++;
+    if (!dryRun) {
+      await stateStore.markSectionDone({
+        id: section.id,
+        startedAt: sectionStartedAt,
+        finishedAt: new Date().toISOString(),
+        insertedByKind: { ...sectionInserted },
+        skippedAlreadyDone: skippedAlreadyDone - skippedBefore,
+        quarantined: quarantinedThisRun - quarantinedBefore,
+      });
+    }
+    logger.info(
+      { section: section.id, index: section.index, total: section.total, inserted: { ...sectionInserted }, skippedAlreadyDone: skippedAlreadyDone - skippedBefore, quarantined: quarantinedThisRun - quarantinedBefore },
+      "section finished",
+    );
+    logProgress(true);
   }
 
-  for (const kind of BULK_IMPORT_KINDS) {
-    const remainder = batchers[kind].flush();
-    if (remainder) await flushBatch(kind, remainder);
-  }
-
-  if (!dryRun) {
+  if (!dryRun && !options.onlySections) {
     const summary = await stateStore.readRunSummary();
     await stateStore.writeRunSummary({ startedAt: summary?.startedAt ?? new Date().toISOString(), status: "complete" });
     await stateStore.markComplete();
   }
 
-  logger.info({ insertedByKind, skippedAlreadyDone }, "run finished");
-  return { insertedByKind, skippedAlreadyDone, shortCircuited: false };
+  logger.info({ insertedByKind, skippedAlreadyDone, quarantined: quarantinedThisRun, sectionsProcessed, sectionsSkipped }, "run finished");
+  return { insertedByKind, skippedAlreadyDone, quarantined: quarantinedThisRun, sectionsProcessed, sectionsSkipped, shortCircuited: false };
 }

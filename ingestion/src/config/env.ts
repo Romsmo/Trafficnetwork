@@ -27,6 +27,18 @@ const envSchema = z
     // state/store.ts) stays small, at the cost of more HTTP round trips.
     BATCH_SIZE: z.coerce.number().int().positive().max(5000).default(2000),
 
+    // Pause after every committed batch (ms) — a pacing floor that keeps a server's CPU/IO bounded
+    // during a multi-hour import. 0 = as fast as the server answers.
+    BATCH_PACING_MS: z.coerce.number().int().nonnegative().default(0),
+
+    // Abort the run when more rows than this end up quarantined (client-side invalid or rejected by
+    // the server): stray bad rows are expected, hundreds are a systematic problem.
+    MAX_QUARANTINED: z.coerce.number().int().positive().default(500),
+
+    // Where osmium keeps its node-location index (≈16 B per node, randomly accessed). Put it on an
+    // SSD. Default: next to the other osmium work files under DOWNLOAD_DIR.
+    OSMIUM_INDEX_DIR: z.string().optional(),
+
     HTTP_MAX_RETRIES: z.coerce.number().int().nonnegative().default(5),
     HTTP_BACKOFF_BASE_MS: z.coerce.number().int().positive().default(500),
     HTTP_BACKOFF_MAX_MS: z.coerce.number().int().positive().default(30_000),

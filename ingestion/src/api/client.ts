@@ -1,6 +1,6 @@
 import type { Env } from "../config/env.js";
 import type { Logger } from "../logging.js";
-import { withRetry, isRetryableStatus } from "../batching/backoff.js";
+import { withRetry, isRetryableStatus, parseRetryAfterMs } from "../batching/backoff.js";
 import {
   BULK_IMPORT_ENDPOINT,
   type ApiErrorBody,
@@ -84,6 +84,7 @@ export class ApiClient {
       (res) => isRetryableStatus(res.status),
       this.backoffOptions(),
       (attempt, delayMs) => this.logger.warn({ pathname, attempt, delayMs }, "retrying request after transient failure"),
+      (res) => parseRetryAfterMs(res.headers.get("retry-after")),
     );
   }
 
@@ -106,6 +107,16 @@ export class ApiClient {
     const res = await this.authedFetch(url);
     if (!res.ok) throw new ApiError(`nearby lookup failed: ${res.status}`, res.status);
     return (await res.json()) as NearbySpeedLimitSegment[];
+  }
+
+  /**
+   * True if the server holds no static data at all (no partition in the manifest). Used by the
+   * import's "target must be empty" guard: the server has no dedup, so importing a region into a
+   * server that already contains it would silently double it.
+   */
+  async isStaticDataEmpty(): Promise<boolean> {
+    const manifest = await this.getStaticDataManifest();
+    return manifest.partitions.length === 0;
   }
 
   async getStaticDataManifest(): Promise<StaticDataManifest> {

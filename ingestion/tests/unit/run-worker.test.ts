@@ -140,7 +140,7 @@ describe("runWorker", () => {
       /anomaly/i,
     );
 
-    expect(await stateStore.loadDoneKeys()).toEqual(new Set());
+    expect((await stateStore.loadDoneKeys()).size).toBe(0);
     expect(stateStore.isComplete()).toBe(false);
   });
 

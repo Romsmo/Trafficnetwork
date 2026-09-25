@@ -44,10 +44,12 @@ describe("downloadExtract", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
 
-    const filePath = await downloadExtract("test-region", region(), downloadDir, silentLogger);
+    const { filePath, md5: downloadedMd5, sizeBytes } = await downloadExtract("test-region", region(), downloadDir, silentLogger);
 
     expect(existsSync(filePath)).toBe(true);
     expect(readFileSync(filePath, "utf8")).toBe(content);
+    expect(downloadedMd5).toBe(checksum);
+    expect(sizeBytes).toBe(content.length);
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
@@ -79,7 +81,7 @@ describe("downloadExtract", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
 
-    const filePath = await downloadExtract("test-region", region(), downloadDir, silentLogger);
+    const { filePath } = await downloadExtract("test-region", region(), downloadDir, silentLogger);
 
     expect(filePath).toBe(finalPath);
     expect(readFileSync(filePath, "utf8")).toBe(content);
@@ -100,7 +102,7 @@ describe("downloadExtract", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
 
-    const filePath = await downloadExtract("test-region", region(), downloadDir, silentLogger);
+    const { filePath } = await downloadExtract("test-region", region(), downloadDir, silentLogger);
 
     expect(readFileSync(filePath, "utf8")).toBe(freshContent);
     expect(fetchMock).toHaveBeenCalledTimes(2);

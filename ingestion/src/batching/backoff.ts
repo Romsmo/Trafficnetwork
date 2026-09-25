@@ -24,15 +24,30 @@ function sleep(ms: number): Promise<void> {
 }
 
 /**
+ * Parses a `Retry-After` header value (delta-seconds or an HTTP date) into a
+ * delay in ms; undefined if absent or unparseable. Capped by the caller.
+ */
+export function parseRetryAfterMs(value: string | null | undefined, now: number = Date.now()): number | undefined {
+  if (!value) return undefined;
+  const trimmed = value.trim();
+  if (/^\d+$/.test(trimmed)) return Number(trimmed) * 1000;
+  const date = Date.parse(trimmed);
+  return Number.isNaN(date) ? undefined : Math.max(0, date - now);
+}
+
+/**
  * Runs `fn` with retry+backoff on retryable failures. `fn` should return a
  * result with a `status` the caller can check via `isRetryableFailure`, or
- * throw for a network-level failure (also retried).
+ * throw for a network-level failure (also retried). `serverDelayHintMs`, if
+ * given, lets the server's own `Retry-After` raise (never lower) the wait
+ * before the next attempt, still capped at `options.maxMs`.
  */
 export async function withRetry<T>(
   fn: (attempt: number) => Promise<T>,
   isRetryableFailure: (result: T) => boolean,
   options: BackoffOptions,
   onRetry?: (attempt: number, delayMs: number) => void,
+  serverDelayHintMs?: (result: T) => number | undefined,
 ): Promise<T> {
   let attempt = 0;
   for (;;) {
@@ -48,7 +63,8 @@ export async function withRetry<T>(
       continue;
     }
     if (!isRetryableFailure(result) || !shouldRetry(attempt, options)) return result;
-    const delayMs = backoffDelayMs(attempt, options);
+    const hint = serverDelayHintMs?.(result);
+    const delayMs = hint === undefined ? backoffDelayMs(attempt, options) : Math.min(options.maxMs, Math.max(hint, backoffDelayMs(attempt, options)));
     onRetry?.(attempt, delayMs);
     await sleep(delayMs);
     attempt++;

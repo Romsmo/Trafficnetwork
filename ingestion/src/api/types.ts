@@ -59,6 +59,8 @@ export interface BulkImportResponse {
 /** The narrow slice of ApiClient that pipeline/run-worker.ts depends on — kept separate from the concrete class so tests can pass a lightweight fake instead of a real HTTP-backed instance. */
 export interface BulkImportPoster {
   postBatch<K extends BulkImportKind>(kind: K, rows: BulkImportRow<K>[]): Promise<BulkImportResponse>;
+  /** Optional: enables the "target must be empty on a fresh start" guard (pipeline/run-worker.ts). Fakes that don't implement it skip the guard. */
+  isStaticDataEmpty?(): Promise<boolean>;
 }
 
 export interface TokenResponse {

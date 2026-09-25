@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { backoffDelayMs, isRetryableStatus, shouldRetry, withRetry } from "../../src/batching/backoff.js";
+import { backoffDelayMs, isRetryableStatus, parseRetryAfterMs, shouldRetry, withRetry } from "../../src/batching/backoff.js";
 
 describe("isRetryableStatus", () => {
   it("treats 429 and 5xx as retryable", () => {
@@ -73,5 +73,35 @@ describe("withRetry", () => {
     const fn = vi.fn().mockRejectedValue(new Error("ECONNRESET"));
     await expect(withRetry(fn, () => false, fastOptions)).rejects.toThrow("ECONNRESET");
     expect(fn).toHaveBeenCalledTimes(fastOptions.maxRetries + 1);
+  });
+
+  it("waits at least the server's Retry-After hint (capped at maxMs) before retrying", async () => {
+    const fn = vi.fn().mockResolvedValueOnce({ status: 429 }).mockResolvedValueOnce({ status: 200 });
+    const onRetry = vi.fn();
+    await withRetry(fn, (r: { status: number }) => isRetryableStatus(r.status), { baseMs: 1, maxMs: 40, maxRetries: 3 }, onRetry, () => 25);
+    expect(onRetry).toHaveBeenCalledTimes(1);
+    expect(onRetry.mock.calls[0]![1]).toBe(25); // hint 25 ms beats the ≤1 ms jittered backoff
+
+    const capped = vi.fn();
+    await withRetry(
+      vi.fn().mockResolvedValueOnce({ status: 429 }).mockResolvedValueOnce({ status: 200 }),
+      (r: { status: number }) => isRetryableStatus(r.status),
+      { baseMs: 1, maxMs: 30, maxRetries: 3 },
+      capped,
+      () => 60_000,
+    );
+    expect(capped.mock.calls[0]![1]).toBe(30); // a huge Retry-After is capped at maxMs
+  });
+});
+
+describe("parseRetryAfterMs", () => {
+  it("parses delta-seconds and HTTP dates, ignores garbage", () => {
+    expect(parseRetryAfterMs("7")).toBe(7000);
+    expect(parseRetryAfterMs("  0 ")).toBe(0);
+    expect(parseRetryAfterMs("Wed, 21 Oct 2026 07:28:10 GMT", Date.parse("Wed, 21 Oct 2026 07:28:00 GMT"))).toBe(10_000);
+    expect(parseRetryAfterMs("Wed, 21 Oct 2026 07:28:10 GMT", Date.parse("Thu, 22 Oct 2026 07:28:00 GMT"))).toBe(0);
+    expect(parseRetryAfterMs("soon")).toBeUndefined();
+    expect(parseRetryAfterMs(null)).toBeUndefined();
+    expect(parseRetryAfterMs(undefined)).toBeUndefined();
   });
 });

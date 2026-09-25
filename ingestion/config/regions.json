@@ -13,10 +13,12 @@
       "bbox": [5.864417, 47.26543, 15.05078, 55.14777]
     },
     "europe": {
-      "name": "Europe (whole continent)",
-      "geofabrikExtractUrl": "https://download.geofabrik.de/europe-latest.osm.pbf",
-      "geofabrikChecksumUrl": "https://download.geofabrik.de/europe-latest.osm.pbf.md5",
-      "bbox": [-32.683233, 29.635548, 46.75348, 81.47299]
+      "name": "Europe (whole continent), edition 2026-09-24",
+      "geofabrikExtractUrl": "https://download.geofabrik.de/europe-260924.osm.pbf",
+      "geofabrikChecksumUrl": "https://download.geofabrik.de/europe-260924.osm.pbf.md5",
+      "bbox": [-32.683233, 29.635548, 46.75348, 81.47299],
+      "sections": { "tileDegrees": 10 },
+      "skipManifestCrossCheck": true
     }
   }
 }

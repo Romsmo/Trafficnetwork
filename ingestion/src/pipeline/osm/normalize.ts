@@ -1,5 +1,6 @@
 import type { Logger } from "../../logging.js";
 import type { NormalizedRow } from "../worker.js";
+import { IMPLICIT_MAXSPEED, MPH_COUNTRIES } from "./implicit-speeds.generated.js";
 
 export interface OsmFeature {
   type: "Feature";
@@ -10,25 +11,33 @@ export interface OsmFeature {
 const SOURCE = "osm";
 const SOURCE_LICENSE = "ODbL";
 
-/**
- * Documented OSM implicit-speed-limit defaults for `maxspeed:type` (fallback:
- * `source:maxspeed`) — see ingestion/docs/sources.md for the wiki citations.
- * `DE:motorway` (no blanket numeric limit) and `DE:living_street` (wiki
- * documents only the non-numeric "walk") are deliberately absent: skipped,
- * never given an invented number. Any value not in this table (including
- * non-German ones, e.g. a border-adjacent "AT:urban") is likewise skipped —
- * only what's actually evidenced gets resolved.
- */
-const IMPLICIT_MAXSPEED_KMH: Record<string, number> = {
-  "DE:urban": 50,
-  "DE:rural": 100,
-  "DE:zone30": 30,
-  "DE:zone20": 20,
-};
-
 interface ResolvedSpeed {
   value: number;
   unit: "kmh" | "mph";
+}
+
+/**
+ * Implicit speed limits (`maxspeed:type`, fallback `source:maxspeed`), e.g. `DE:urban`.
+ * Policy (docs/europe-feasibility.md §6): resolve only what is evidenced and unambiguous, skip and
+ * count everything else — never invent a number.
+ *  - `CC:urban` / `CC:rural`: the generated table (implicit-speeds.generated.ts, from the OSM wiki's
+ *    "Default speed limits"), which already omits countries where a sub-type would make one number wrong
+ *    (FR:rural, ES:urban, …).
+ *  - `CC:zoneNN`: the number is part of the tag itself (a signed "NN zone"); read as km/h, never in mph
+ *    countries, and only for plausible zone values.
+ *  - `motorway`, `living_street`, `nsl_*` and anything else: unresolved.
+ */
+const ZONE_PATTERN = /^([A-Z]{2}(?:-[A-Z0-9]{1,3})?):zone(\d{1,3})$/;
+
+function resolveImplicit(implicitType: string): ResolvedSpeed | undefined {
+  const tabled = IMPLICIT_MAXSPEED[implicitType];
+  if (tabled) return tabled;
+  const zone = ZONE_PATTERN.exec(implicitType);
+  if (zone && !MPH_COUNTRIES.has(zone[1]!)) {
+    const value = Number(zone[2]);
+    if (value >= 5 && value <= 60 && value % 5 === 0) return { value, unit: "kmh" };
+  }
+  return undefined;
 }
 
 /** Returns the resolved speed, or a skip reason (never invents a number). */
@@ -52,9 +61,9 @@ function resolveMaxspeed(tags: Record<string, unknown>): ResolvedSpeed | { skip:
   const implicitType = typeof tags["maxspeed:type"] === "string" ? tags["maxspeed:type"] : typeof tags["source:maxspeed"] === "string" ? tags["source:maxspeed"] : undefined;
   if (implicitType === undefined) return { skip: "no maxspeed or maxspeed:type/source:maxspeed tag" };
 
-  const implicitKmh = IMPLICIT_MAXSPEED_KMH[implicitType];
-  if (implicitKmh === undefined) return { skip: `unresolved implicit maxspeed:type "${implicitType}" (not in the evidenced DE:* table — see docs/sources.md)` };
-  return { value: implicitKmh, unit: "kmh" };
+  const implicit = resolveImplicit(implicitType);
+  if (implicit === undefined) return { skip: `unresolved implicit maxspeed:type "${implicitType}" (no unambiguous evidenced value — see docs/europe-feasibility.md §6)` };
+  return implicit;
 }
 
 function pointToLatLng(coordinates: unknown): { lat: number; lng: number } | undefined {

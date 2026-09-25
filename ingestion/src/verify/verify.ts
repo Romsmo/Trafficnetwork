@@ -53,6 +53,15 @@ export async function verifyRun(
     if (!match) logger.warn({ point }, "verification spot-check did not find the expected speed limit nearby");
   }
 
+  const manifestCounts = { speedLimitSegments: 0, staticSigns: 0, fixedSpeedCameras: 0 };
+  if (region.skipManifestCrossCheck) {
+    logger.info(
+      { insertedByKind, spotChecks },
+      "verification complete — manifest cross-check skipped for this region (it would download the whole static dataset); count the rows in the database instead",
+    );
+    return { insertedByKind, spotChecks, manifestCounts };
+  }
+
   const [minLng, minLat, maxLng, maxLat] = region.bbox;
   const polygon = [
     [minLng, minLat],
@@ -64,7 +73,6 @@ export async function verifyRun(
   const relevantTiles = new Set(polygonToCells(polygon, H3_MANIFEST_RESOLUTION, true));
 
   const manifest = await apiClient.getStaticDataManifest();
-  const manifestCounts = { speedLimitSegments: 0, staticSigns: 0, fixedSpeedCameras: 0 };
   for (const partitionMeta of manifest.partitions) {
     if (!relevantTiles.has(partitionMeta.tile)) continue;
     const partition = await apiClient.getStaticDataPartition(partitionMeta.tile);
