@@ -48,6 +48,8 @@ export function validateRow(normalized: NormalizedRow): string | undefined {
       if (!isLat(row.lat) || !isLng(row.lng)) return "position outside [lat ±90, lng ±180]";
       if (typeof row.signType !== "string" || row.signType.length === 0) return "empty signType";
       if (row.signType.includes("\u0000")) return "signType contains a NUL character (Postgres text cannot store it)";
+      // Raw OSM sign values are kept verbatim, including free text and bracket values; only absurd lengths are mapping garbage.
+      if (row.signType.length > 500) return `signType is ${row.signType.length} characters long (limit 500)`;
       if (!row.source) return "empty source";
       return undefined;
     }

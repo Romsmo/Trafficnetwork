@@ -1,6 +1,6 @@
 import pino from "pino";
 import { describe, expect, it } from "vitest";
-import { normalizeFeature, type OsmFeature } from "../../src/pipeline/osm/normalize.js";
+import { normalizeFeature, splitSignUnits, type OsmFeature } from "../../src/pipeline/osm/normalize.js";
 
 const silentLogger = pino({ level: "silent" });
 
@@ -127,11 +127,22 @@ describe("normalizeFeature — static-sign (traffic_sign)", () => {
     expect(rows[0]?.row).toMatchObject({ signType: "DE:274-30" });
   });
 
-  it("splits a comma-joined value into multiple sign rows sharing the same position, suffixed keys", () => {
-    const rows = normalizeFeature(nodeFeature({ traffic_sign: "DE:260,DE:274-30" }, [13.377, 52.516]), silentLogger);
+  it("keeps a comma-joined value (sign + supplementary plates) together as ONE row, verbatim", () => {
+    const rows = normalizeFeature(nodeFeature({ traffic_sign: "DE:239,1022-10" }, [13.377, 52.516]), silentLogger);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ key: "static-sign:node/456", row: { signType: "DE:239,1022-10", lat: 52.516, lng: 13.377 } });
+  });
+
+  it("splits ';'-separated (unrelated) signs into rows sharing the same position, with suffixed keys", () => {
+    const rows = normalizeFeature(nodeFeature({ traffic_sign: "DE:260;DE:274-30" }, [13.377, 52.516]), silentLogger);
     expect(rows).toHaveLength(2);
     expect(rows[0]).toMatchObject({ key: "static-sign:node/456#0", row: { signType: "DE:260", lat: 52.516, lng: 13.377 } });
     expect(rows[1]).toMatchObject({ key: "static-sign:node/456#1", row: { signType: "DE:274-30", lat: 52.516, lng: 13.377 } });
+  });
+
+  it("emits nothing for the explicit no-sign values", () => {
+    expect(normalizeFeature(nodeFeature({ traffic_sign: "none" }), silentLogger)).toEqual([]);
+    expect(normalizeFeature(nodeFeature({ traffic_sign: "no" }), silentLogger)).toEqual([]);
   });
 
   it("uses the way's first vertex as the sign position for a way-level traffic_sign tag", () => {
@@ -169,5 +180,43 @@ describe("normalizeFeature — missing/unexpected @type or @id", () => {
   it("skips a feature entirely when @type/@id are missing (osmium -a misconfiguration guard)", () => {
     const feature: OsmFeature = { type: "Feature", properties: { highway: "primary", maxspeed: "50" }, geometry: { type: "LineString", coordinates: [[0, 0], [1, 1]] } };
     expect(normalizeFeature(feature, silentLogger)).toEqual([]);
+  });
+});
+
+describe("splitSignUnits — Key:traffic_sign syntax, checked against real Bayern values", () => {
+  it.each([
+    ["DE:274[50]", ["DE:274[50]"]],
+    ["DE:274.1[30]", ["DE:274.1[30]"]],
+    ["DE:239,1022-10", ["DE:239,1022-10"]],
+    ["DE:138-10;DE:274-30", ["DE:138-10", "DE:274-30"]],
+    ["DE:260,1026-38;DE:262[7,5]", ["DE:260,1026-38", "DE:262[7,5]"]],
+    ["DE:260,1020-30;265[3.8]", ["DE:260,1020-30", "DE:265[3.8]"]], // the wiki's own example: prefix inherited by the second unit
+    ["DE:222;626-20", ["DE:222", "DE:626-20"]],
+    ["DE:260;DE:1026-36;1026-31", ["DE:260", "DE:1026-36", "DE:1026-31"]],
+    ["DE:262[30];308", ["DE:262[30]", "DE:308"]],
+    ["city_limit", ["city_limit"]],
+    ["maxspeed", ["maxspeed"]],
+    ["de:260", ["de:260"]], // mapper errors are kept, not "fixed"
+    ["Frei für Gewässerunterhaltung", ["Frei für Gewässerunterhaltung"]],
+  ])("%s", (input, expected) => {
+    expect(splitSignUnits(input)).toEqual(expected);
+  });
+
+  it("splits only at bracket depth 0: separators inside a [value] belong to the value", () => {
+    expect(splitSignUnits("DE:290.1;DE:1040-32;DE:1042-33[Mo-Fr 08:00-16:00;Sa 08:00-12:00]")).toEqual([
+      "DE:290.1",
+      "DE:1040-32",
+      "DE:1042-33[Mo-Fr 08:00-16:00;Sa 08:00-12:00]",
+    ]);
+    expect(splitSignUnits("DE:242,1022-10,1026-35[Mo-Fr 06:00-10:00, 17:00-20:00;Sa 06:00-10:00]")).toEqual([
+      "DE:242,1022-10,1026-35[Mo-Fr 06:00-10:00, 17:00-20:00;Sa 06:00-10:00]",
+    ]);
+  });
+
+  it("drops empty units and the explicit no-sign values, keeps everything else", () => {
+    expect(splitSignUnits("DE:274[50];;")).toEqual(["DE:274[50]"]);
+    expect(splitSignUnits("none")).toEqual([]);
+    expect(splitSignUnits("DE:205;none")).toEqual(["DE:205"]);
+    expect(splitSignUnits("yes")).toEqual(["yes"]);
   });
 });

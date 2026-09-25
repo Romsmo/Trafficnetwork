@@ -66,6 +66,52 @@ function resolveMaxspeed(tags: Record<string, unknown>): ResolvedSpeed | { skip:
   return implicit;
 }
 
+/**
+ * Splits an OSM `traffic_sign` value into sign units, one row each.
+ *
+ * Syntax per https://wiki.openstreetmap.org/wiki/Key:traffic_sign (checked 2026-09-25 against the raw wikitext and
+ * against 92,131 real values of the Bayern extract): `;` separates signs that are UNRELATED to each other, `,` joins
+ * RELATED signs (a sign plus its supplementary plates, e.g. `DE:239,1022-10`), `[value]` supplies a value
+ * (`DE:274[50]`), `-` is part of the code. The value inside brackets is free text and may itself contain `;` and `,`
+ * (`DE:242,1022-10[Mo-Fr 06:00-10:00, 17:00-20:00;Sa 06:00-10:00]`), so splitting only happens at bracket depth 0.
+ *
+ * Each unit is kept verbatim (the raw text, including its supplements and bracket values) — nothing is interpreted or
+ * rewritten, so a later, richer schema can still derive code/value/supplements from it. Exactly two things are done:
+ *  - a unit without a country prefix that starts with a digit inherits the prefix of the previous unit
+ *    (`DE:222;626-20` → `DE:222`, `DE:626-20`; the wiki: a prefix is only repeated when it changes);
+ *  - the explicit "no sign" values `none` and `no` are dropped (they say that there is NO sign).
+ * Free text, lower-case prefixes (`de:260`) and other mapper errors stay as they are.
+ */
+export function splitSignUnits(value: string): string[] {
+  const units: string[] = [];
+  let depth = 0;
+  let current = "";
+  for (const char of value) {
+    if (char === "[") depth++;
+    else if (char === "]" && depth > 0) depth--;
+    if (char === ";" && depth === 0) {
+      units.push(current);
+      current = "";
+    } else {
+      current += char;
+    }
+  }
+  units.push(current);
+
+  const result: string[] = [];
+  let inheritedPrefix: string | undefined;
+  for (const raw of units) {
+    let unit = raw.trim();
+    if (unit.length === 0) continue;
+    const prefix = /^([A-Z]{2}(?:-[A-Z0-9]{1,3})?):/.exec(unit)?.[1];
+    if (prefix) inheritedPrefix = prefix;
+    else if (inheritedPrefix && /^\d/.test(unit)) unit = `${inheritedPrefix}:${unit}`;
+    if (/^(none|no)$/i.test(unit)) continue;
+    result.push(unit);
+  }
+  return result;
+}
+
 function pointToLatLng(coordinates: unknown): { lat: number; lng: number } | undefined {
   if (!Array.isArray(coordinates) || coordinates.length < 2) return undefined;
   const [lng, lat] = coordinates as [number, number];
@@ -119,8 +165,8 @@ export function normalizeFeature(feature: OsmFeature, logger: Logger): Normalize
   if (typeof tags.traffic_sign === "string") {
     // A way-level traffic_sign (mapper didn't place a separate sign node) has no
     // single point — use the way's first vertex as a representative position.
-    // A node's own Point is used directly. Comma joins *separate* signs on the
-    // same post (Key:traffic_sign wiki) — never split further within one segment.
+    // A node's own Point is used directly. Separators follow Key:traffic_sign
+    // (see splitSignUnits): ";" separates unrelated signs, "," joins related ones.
     let position: { lat: number; lng: number } | undefined;
     if (osmType === "node" && feature.geometry.type === "Point") {
       position = pointToLatLng(feature.geometry.coordinates);
@@ -133,10 +179,7 @@ export function normalizeFeature(feature: OsmFeature, logger: Logger): Normalize
       // sign position exists. Frequent at continent scale (tens of thousands), so debug level, not a warning.
       logger.debug({ osmType, osmId }, "traffic_sign tag present but no usable position — skipping sign(s)");
     } else {
-      const signTypes = tags.traffic_sign
-        .split(",")
-        .map((s) => s.trim())
-        .filter((s) => s.length > 0);
+      const signTypes = splitSignUnits(tags.traffic_sign);
       signTypes.forEach((signType, index) => {
         rows.push({
           kind: "static-sign",

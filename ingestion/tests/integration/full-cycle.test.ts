@@ -144,11 +144,12 @@ describe("ingestion full cycle (real server, real osmium-tool, real fixtures)", 
 
     const after = await fetchSnapshotCounts(testServer.serverUrl, token);
     // mini-region.osm.pbf: 2 speed-limit-segments (way/101 explicit 50kmh, way/102 implicit DE:rural 100kmh),
-    // 3 static-signs (node/7 DE:274-30, node/8 split into DE:260 + DE:274-50), 1 fixed-speed-camera (node/9).
+    // 2 static-signs (node/7 DE:274-30, node/8 "DE:260,DE:274-50" — comma = RELATED signs, kept together as one row
+    // per Key:traffic_sign), 1 fixed-speed-camera (node/9).
     // way/103 (DE:motorway) correctly contributes nothing. Counts confirmed by running the real osmium+normalize
     // pipeline against this exact fixture during fixture construction.
     expect(after.segments - before.segments).toBe(2);
-    expect(after.signs - before.signs).toBe(3);
+    expect(after.signs - before.signs).toBe(2);
     expect(after.cameras - before.cameras).toBe(1);
   }, 60_000);
 
@@ -235,7 +236,7 @@ describe("ingestion full cycle (real server, real osmium-tool, real fixtures)", 
     expect(first.code, `sectioned run failed: ${first.stderr}\n${first.stdout}`).toBe(0);
     const after = await fetchSnapshotCounts(testServer.serverUrl, token);
     expect(after.segments - before.segments).toBe(2);
-    expect(after.signs - before.signs).toBe(3);
+    expect(after.signs - before.signs).toBe(2);
     expect(after.cameras - before.cameras).toBe(1);
 
     const sectionStatsDir = path.join(stateDir, "mini-region-tiles", "osm", "sections");
