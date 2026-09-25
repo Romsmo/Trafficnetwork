@@ -220,7 +220,9 @@ fn encode_geometry(coordinates: &[[f64; 2]]) -> Vec<u8> {
 }
 
 fn decode_geometry(blob: &[u8]) -> Vec<[f64; 2]> {
-    blob.chunks_exact(8)
+    let (pairs, _) = blob.as_chunks::<8>();
+    pairs
+        .iter()
         .map(|c| {
             let lng = i32::from_le_bytes([c[0], c[1], c[2], c[3]]);
             let lat = i32::from_le_bytes([c[4], c[5], c[6], c[7]]);
