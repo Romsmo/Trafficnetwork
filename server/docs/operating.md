@@ -274,9 +274,12 @@ columns (no rewrite since PostgreSQL 11), `CREATE INDEX CONCURRENTLY`, a backfil
 1. **A stored generated column has no online form** on PostgreSQL 16 (the supported image; PostgreSQL 18 adds
    *virtual* generated columns, which need no rewrite but are not what the images ship).
 2. **Plain column + trigger + batched backfill + concurrent index** is online, but: the backfill updates every
-   row once, which doubles the table and rewrites each row into all three indexes until vacuum (after a bulk
-   import the pages are full, so hardly any update is HOT) — many GB of WAL and a longer total run than the
-   rewrite; `CREATE INDEX CONCURRENTLY` cannot run inside the migrator's transaction, so the migrate step would
+   row once, which is expected to double the table and to write each row into the indexes again until vacuum
+   (after a bulk import the pages are full, so hardly any update is HOT) — a lot of WAL and a longer total run
+   than the rewrite. *That expectation is an argument, not yet a measurement*: `npm run measure-scale -- --phase
+   keycolumn` runs both variants on scratch tables of a copy of the database and reports time, WAL and table
+   growth; the numbers go here once the copy of the real Europe data has been measured.
+   `CREATE INDEX CONCURRENTLY` cannot run inside the migrator's transaction, so the migrate step would
    need a second, non-transactional phase; until the backfill has finished the overlay would not match some
    segments, so a "keys ready" state like the package `ready` flag would be needed to avoid serving wrong
    answers; and a trigger would sit on the import path forever instead of a column the database maintains.

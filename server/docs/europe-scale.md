@@ -173,7 +173,8 @@ node with users. Checked against the online recipe (constant defaults, `CREATE I
 backfill, `CHECK … NOT VALID` + `VALIDATE`): a *stored generated column* has no online form on PostgreSQL 16, and
 the substitutes (trigger + batched backfill, expression index, side table) cost more than they save — bloat and
 WAL from updating every row, a second non-transactional migration phase because the migrator runs everything
-in one transaction, a readiness state for the half-backfilled window, or a permanent per-read cost. What
+in one transaction, a readiness state for the half-backfilled window, or a permanent per-read cost (the backfill's
+cost is an argument until `measure-scale --phase keycolumn` has run on a copy, see "Recording the numbers"). What
 protects users is *when* the migration runs (the Europe node, before it has any), not making it online.
 Instead of a fix, the branch adds a **migration lock policy**: `tests/unit/migration-locks.test.ts` requires every
 lock-heavy statement (from 0007 on) to carry a `-- lock-ok(<table>): …` / `-- lock-trivial: …` comment, and the
@@ -272,8 +273,10 @@ the table locked**. Operator's decision (2026-09-25): measure on a copy (`pg_dum
 first, then run the migration on the node itself — 5 minutes are harmless while it has no users. On the copy, also
 measure the two things `operating.md` ("Migrations that take a heavy lock") only argues so far:
 the migration itself (`npm run db:migrate`, wall time, the row estimate the warning printed), and, for the
-rejected online variant, a batched `UPDATE … SET geometry_key = speed_limit_geometry_key(geometry)` into a plain
-column in 100 k-row batches (wall time, table and index growth, WAL bytes) — the claim there is "slower and heavier than the rewrite".
+rejected online variant, `npm run measure-scale -- --phase keycolumn --probe-rows 1000000` (rewrite vs. plain column +
+batched backfill by ctid range + `CREATE INDEX CONCURRENTLY` on scratch tables built from a sample; time, WAL, table and
+index growth, and a check that both produce the same keys) — the claim in `operating.md` is "slower and heavier than the rewrite",
+still an argument until this has run. The phase never writes to the real tables, but generates WAL and I/O: a copy only.
 
 ## Not done, on purpose
 

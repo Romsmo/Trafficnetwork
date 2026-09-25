@@ -23,7 +23,9 @@ import { bulkInsertSpeedLimitSegments, type SpeedLimitSegmentImportRow } from ".
  * separate invocations when memory matters: peak RSS is per process, and a
  * package build that exhausts the heap kills the process — which is itself the
  * finding, recorded by whoever invoked it. `import` writes rows with
- * source='bench' and deletes them again at the end.
+ * source='bench' and deletes them again at the end. `keycolumn` (on a COPY of the
+ * database, not a serving node) compares migration 0007's table rewrite with the online
+ * alternative on two scratch tables of `--probe-rows` rows, see measureKeyColumn().
  */
 
 const { values } = parseArgs({
@@ -35,6 +37,8 @@ const { values } = parseArgs({
     "import-rows": { type: "string", default: "100000" },
     "import-batch": { type: "string", default: "5000" },
     "import-impl": { type: "string", default: "batched" },
+    "probe-rows": { type: "string", default: "1000000" },
+    "probe-batch": { type: "string", default: "100000" },
   },
 });
 const phases = new Set((values.phase ?? "sizes,reads").split(","));
@@ -73,6 +77,98 @@ function stats(samples: number[]) {
 
 function peakRssMb(): number {
   return mb(process.resourceUsage().maxRSS * 1024);
+}
+
+/**
+ * Backs the argument in docs/operating.md ("Migrations that take a heavy lock") with numbers: how does
+ * migration 0007's one-off rewrite (stored generated column + index) compare with the online alternative
+ * (plain column, batched backfill, CREATE INDEX CONCURRENTLY)? Works on two scratch tables built from a
+ * sample of speed_limit_segments — pre-0007 shape, primary key + GiST — and drops them afterwards; it never
+ * writes to the real tables, but still belongs on a copy of the database, not on a node that serves users
+ * (the probes generate a lot of WAL and I/O). The online variant backfills by ctid range, which is what a
+ * real backfill would do: the primary key is a random uuid, so keyset batches would jump all over the heap.
+ */
+async function measureKeyColumn(rows: number, batchRows: number): Promise<Record<string, unknown>> {
+  const rewrite = "scale_probe_rewrite";
+  const online = "scale_probe_online";
+  const leftovers = await db.execute(sql`select 1 from pg_class where relname in (${rewrite}, ${online})`);
+  if (leftovers.length > 0) throw new Error(`${rewrite}/${online} exist from an earlier run: drop them first`);
+  const ident = sql.identifier;
+  const num = async (query: ReturnType<typeof sql>) => Number((await db.execute<{ v: string }>(query))[0]?.v ?? 0);
+  const walSince = (lsn: string) => num(sql`select pg_wal_lsn_diff(pg_current_wal_lsn(), ${lsn}::pg_lsn)::bigint::text as v`);
+  const lsnNow = async () => (await db.execute<{ v: string }>(sql`select pg_current_wal_lsn()::text as v`))[0]!.v;
+  const sizes = async (name: string) => ({
+    heapMb: mb(await num(sql`select pg_relation_size(${name}::regclass)::text as v`)),
+    indexesMb: mb(await num(sql`select pg_indexes_size(${name}::regclass)::text as v`)),
+  });
+  const seconds = (since: number) => round((performance.now() - since) / 1000);
+
+  const makeProbe = async (name: string) => {
+    await db.execute(sql`create table ${ident(name)} as select id, geometry from speed_limit_segments limit ${rows}`);
+    await db.execute(sql`alter table ${ident(name)} add primary key (id)`);
+    await db.execute(sql`create index ${ident(`${name}_gist`)} on ${ident(name)} using gist (geometry)`);
+    await db.execute(sql`vacuum (analyze) ${ident(name)}`);
+  };
+
+  try {
+    await makeProbe(rewrite);
+    const rewriteBefore = await sizes(rewrite);
+    let lsn = await lsnNow();
+    let started = performance.now();
+    await db.execute(sql`alter table ${ident(rewrite)} add column geometry_key text generated always as (speed_limit_geometry_key(geometry)) stored`);
+    await db.execute(sql`create index ${ident(`${rewrite}_key`)} on ${ident(rewrite)} (geometry_key)`);
+    const rewriteSeconds = seconds(started);
+    const rewriteWalMb = mb(await walSince(lsn));
+    const rewriteAfter = await sizes(rewrite);
+
+    await makeProbe(online);
+    const onlineBefore = await sizes(online);
+    const blocks = Math.ceil((onlineBefore.heapMb * MB) / 8192);
+    const blocksPerBatch = Math.max(1, Math.floor((batchRows * blocks) / Math.max(1, rows)));
+    lsn = await lsnNow();
+    started = performance.now();
+    await db.execute(sql`alter table ${ident(online)} add column geometry_key text`);
+    let batches = 0;
+    for (let block = 0; block < blocks; block += blocksPerBatch) {
+      await db.execute(sql`
+        update ${ident(online)} set geometry_key = speed_limit_geometry_key(geometry)
+        where ctid >= ${`(${block},0)`}::tid and ctid < ${`(${block + blocksPerBatch},0)`}::tid and geometry_key is null`);
+      batches += 1;
+    }
+    const backfillSeconds = seconds(started);
+    const afterBackfill = await sizes(online);
+    const indexStarted = performance.now();
+    await db.execute(sql`create index concurrently ${ident(`${online}_key`)} on ${ident(online)} (geometry_key)`);
+    const indexSeconds = seconds(indexStarted);
+    const onlineWalMb = mb(await walSince(lsn));
+    await db.execute(sql`vacuum ${ident(online)}`);
+    const afterVacuum = await sizes(online);
+    const unfilled = await num(sql`select count(*)::text as v from ${ident(online)} where geometry_key is null`);
+    const mismatches = await num(sql`
+      select count(*)::text as v from ${ident(rewrite)} a join ${ident(online)} b using (id) where a.geometry_key is distinct from b.geometry_key`);
+
+    const perMillion = (s: number) => round((s / rows) * 1e6);
+    return {
+      rows,
+      batchRows,
+      batches,
+      rewrite: { seconds: rewriteSeconds, secondsPerMillionRows: perMillion(rewriteSeconds), walMb: rewriteWalMb, before: rewriteBefore, after: rewriteAfter },
+      onlineBackfill: {
+        backfillSeconds,
+        indexSeconds,
+        totalSeconds: round(backfillSeconds + indexSeconds),
+        secondsPerMillionRows: perMillion(backfillSeconds + indexSeconds),
+        walMb: onlineWalMb,
+        before: onlineBefore,
+        afterBackfill,
+        afterVacuum,
+      },
+      unfilledRowsAfterBackfill: unfilled,
+      keysDifferingFromRewrite: mismatches,
+    };
+  } finally {
+    await db.execute(sql`drop table if exists ${ident(rewrite)}, ${ident(online)}`);
+  }
 }
 
 async function main() {
@@ -228,6 +324,10 @@ async function main() {
     const seconds = (performance.now() - started) / 1000;
     report["import"] = { implementation: values["import-impl"], rows: total, batchSize, seconds: round(seconds), rowsPerSecond: Math.round(total / seconds) };
     await db.execute(sql`delete from speed_limit_segments where source = 'bench'`);
+  }
+
+  if (phases.has("keycolumn")) {
+    report["keycolumn"] = await measureKeyColumn(Number(values["probe-rows"]), Number(values["probe-batch"]));
   }
 
   await app.close();
