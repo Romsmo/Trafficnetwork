@@ -135,7 +135,9 @@ impl CountingTransport {
 
 fn gzip_len(body: &[u8]) -> u64 {
     let mut encoder = GzEncoder::new(CountingSink(0), Compression::new(6));
-    encoder.write_all(body).expect("gzip into a counter cannot fail");
+    encoder
+        .write_all(body)
+        .expect("gzip into a counter cannot fail");
     encoder.finish().expect("gzip into a counter cannot fail").0
 }
 
@@ -164,7 +166,8 @@ impl HttpTransport for CountingTransport {
             self.bytes.fetch_add(len, Ordering::Relaxed);
             if is_partition {
                 self.partition_bytes.fetch_add(len, Ordering::Relaxed);
-                self.largest_partition_bytes.fetch_max(len, Ordering::Relaxed);
+                self.largest_partition_bytes
+                    .fetch_max(len, Ordering::Relaxed);
                 if self.estimate_gzip {
                     let gz_started = Instant::now();
                     let gz = gzip_len(&r.body);
@@ -315,10 +318,18 @@ impl HttpTransport for SyntheticTransport {
         } else if let Some(tile) = path.strip_prefix("/v1/static-data/partitions/synth-") {
             match tile.parse::<u64>() {
                 Ok(index) if index < self.partitions() => self.partition(index),
-                _ => return Ok(HttpResponse { status: 404, body: Vec::new() }),
+                _ => {
+                    return Ok(HttpResponse {
+                        status: 404,
+                        body: Vec::new(),
+                    })
+                }
             }
         } else {
-            return Ok(HttpResponse { status: 404, body: Vec::new() });
+            return Ok(HttpResponse {
+                status: 404,
+                body: Vec::new(),
+            });
         };
         Ok(HttpResponse { status: 200, body })
     }
@@ -326,7 +337,11 @@ impl HttpTransport for SyntheticTransport {
 
 // ------------------------------------------------------------------ measuring
 
-fn start_memory_sampler() -> (Arc<AtomicUsize>, Arc<AtomicBool>, std::thread::JoinHandle<()>) {
+fn start_memory_sampler() -> (
+    Arc<AtomicUsize>,
+    Arc<AtomicBool>,
+    std::thread::JoinHandle<()>,
+) {
     let peak = Arc::new(AtomicUsize::new(0));
     let stop = Arc::new(AtomicBool::new(false));
     let handle = {
@@ -385,10 +400,9 @@ fn mb(bytes: f64) -> f64 {
 #[tokio::main]
 async fn main() {
     let args = parse_args();
-    let db_path = args
-        .db
-        .clone()
-        .unwrap_or_else(|| std::env::temp_dir().join(format!("tn-measure-{}.db", std::process::id())));
+    let db_path = args.db.clone().unwrap_or_else(|| {
+        std::env::temp_dir().join(format!("tn-measure-{}.db", std::process::id()))
+    });
     if !args.keep_db {
         remove_db_files(&db_path);
     }
@@ -413,10 +427,12 @@ async fn main() {
     ));
     discovery.seed_fixed_nodes(&[("measure".to_string(), base)]);
     let token = match (&args.client_id, &args.client_secret) {
-        (Some(id), Some(secret)) if !synthetic => exchange_client_secret(&discovery, id, secret)
-            .await
-            .expect("could not get a token from the server")
-            .access_token,
+        (Some(id), Some(secret)) if !synthetic => {
+            exchange_client_secret(&discovery, id, secret)
+                .await
+                .expect("could not get a token from the server")
+                .access_token
+        }
         _ => "synthetic".to_string(),
     };
 
@@ -500,39 +516,88 @@ async fn main() {
     println!("=== bootstrap measurement {} ===", args.label);
     println!(
         "source            : {}",
-        if synthetic { "SYNTHETIC (shaped like real Bayern data; no network involved)" } else { "real server" }
+        if synthetic {
+            "SYNTHETIC (shaped like real Bayern data; no network involved)"
+        } else {
+            "real server"
+        }
     );
-    println!("machine           : {} / {}, {} cores, {}", std::env::consts::OS, std::env::consts::ARCH,
-        std::thread::available_parallelism().map(|n| n.get()).unwrap_or(0),
-        if cfg!(debug_assertions) { "DEBUG build (numbers are not representative)" } else { "release build" });
+    println!(
+        "machine           : {} / {}, {} cores, {}",
+        std::env::consts::OS,
+        std::env::consts::ARCH,
+        std::thread::available_parallelism()
+            .map(|n| n.get())
+            .unwrap_or(0),
+        if cfg!(debug_assertions) {
+            "DEBUG build (numbers are not representative)"
+        } else {
+            "release build"
+        }
+    );
     println!("entities          : {segments} segments, {signs} signs, {cameras} cameras ({entities} total)");
-    println!("partitions        : {} (largest {:.1} MB)", plan.partitions_pending, mb(largest as f64));
+    println!(
+        "partitions        : {} (largest {:.1} MB)",
+        plan.partitions_pending,
+        mb(largest as f64)
+    );
     println!("--- transfer ---");
-    println!("bytes on the wire : {:.1} MB in {} requests (server does not compress today)", mb(wire_bytes as f64), counting.requests.load(Ordering::Relaxed));
+    println!(
+        "bytes on the wire : {:.1} MB in {} requests (server does not compress today)",
+        mb(wire_bytes as f64),
+        counting.requests.load(Ordering::Relaxed)
+    );
     if args.estimate_gzip {
-        println!("with gzip         : {:.1} MB ({:.1}% of raw)", mb(gzip_bytes as f64), gzip_bytes as f64 * 100.0 / partition_bytes.max(1) as f64);
+        println!(
+            "with gzip         : {:.1} MB ({:.1}% of raw)",
+            mb(gzip_bytes as f64),
+            gzip_bytes as f64 * 100.0 / partition_bytes.max(1) as f64
+        );
     }
     println!("--- time (this machine) ---");
     println!("manifest          : {manifest_secs:.2} s");
     println!("bootstrap total   : {total_secs:.1} s   (transport {transport_secs:.1} s{}, processing {processing_secs:.1} s = parse + store)",
         if synthetic { " = generating the synthetic body, not a network" } else { "" });
-    println!("processing / entity: {:.1} µs", processing_secs * 1e6 / entities as f64);
+    println!(
+        "processing / entity: {:.1} µs",
+        processing_secs * 1e6 / entities as f64
+    );
     println!("--- storage & memory ---");
-    println!("database file     : {:.1} MB (+ {:.1} MB WAL before checkpoint)  = {:.0} B/entity", mb(db_bytes as f64), mb(wal_bytes as f64), db_bytes as f64 / entities as f64);
-    println!("process memory    : peak {:.0} MB working set ({:.0} MB above the {:.0} MB baseline)", mb(peak_memory as f64), mb(mem_over_baseline as f64), mb(baseline_memory as f64));
+    println!(
+        "database file     : {:.1} MB (+ {:.1} MB WAL before checkpoint)  = {:.0} B/entity",
+        mb(db_bytes as f64),
+        mb(wal_bytes as f64),
+        db_bytes as f64 / entities as f64
+    );
+    println!(
+        "process memory    : peak {:.0} MB working set ({:.0} MB above the {:.0} MB baseline)",
+        mb(peak_memory as f64),
+        mb(mem_over_baseline as f64),
+        mb(baseline_memory as f64)
+    );
     println!("--- after a restart ---");
     println!("open database     : {:.1} ms", reopen_secs * 1000.0);
-    println!("first lookup      : {:.2} ms (found: {})", first_query_secs * 1000.0, first_result.is_some());
+    println!(
+        "first lookup      : {:.2} ms (found: {})",
+        first_query_secs * 1000.0,
+        first_result.is_some()
+    );
     println!("lookups           : {} at random stored positions, {} found; p50 {:.3} ms, p95 {:.3} ms, p99 {:.3} ms, max {:.3} ms",
         latencies_ms.len(), found, percentile(&latencies_ms, 0.5), percentile(&latencies_ms, 0.95), percentile(&latencies_ms, 0.99), latencies_ms.last().copied().unwrap_or(0.0));
 
-    println!("--- transfer time at other speeds (arithmetic from the bytes above, not measured) ---");
+    println!(
+        "--- transfer time at other speeds (arithmetic from the bytes above, not measured) ---"
+    );
     for mbit in [1.0, 5.0, 20.0, 100.0] {
         let secs = |bytes: u64| bytes as f64 * 8.0 / (mbit * 1e6);
         let raw = secs(wire_bytes);
         let gz = secs(gzip_bytes);
         if args.estimate_gzip {
-            println!("{mbit:>5} Mbit/s     : {:.1} min raw, {:.1} min gzipped", raw / 60.0, gz / 60.0);
+            println!(
+                "{mbit:>5} Mbit/s     : {:.1} min raw, {:.1} min gzipped",
+                raw / 60.0,
+                gz / 60.0
+            );
         } else {
             println!("{mbit:>5} Mbit/s     : {:.1} min raw", raw / 60.0);
         }

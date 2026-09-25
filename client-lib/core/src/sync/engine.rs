@@ -95,8 +95,7 @@ fn parse_ok<T: DeserializeOwned>(response: &HttpResponse) -> Result<T, SyncError
     // Straight from the bytes into the typed value: going through a
     // `serde_json::Value` first would keep a second, several times larger
     // copy of a partition (tens of MB of JSON) in memory at the same time.
-    serde_json::from_slice(&response.body)
-        .map_err(|e| SyncError::InvalidResponse(e.to_string()))
+    serde_json::from_slice(&response.body).map_err(|e| SyncError::InvalidResponse(e.to_string()))
 }
 
 /// `0.0..=1.0`. Falls back to `1.0` (never sample) rather than `0.0` (always
@@ -191,7 +190,10 @@ impl SyncEngine {
     /// the real count — so it is dropped. One for a value nobody confirmed
     /// stays: it is still this device's standing vote.
     fn prune_redundant_proposals(&self) -> Result<(), SyncError> {
-        let proposals = self.store.local_proposals().map_err(SyncError::from_store)?;
+        let proposals = self
+            .store
+            .local_proposals()
+            .map_err(SyncError::from_store)?;
         if proposals.is_empty() {
             return Ok(());
         }
@@ -1044,7 +1046,9 @@ mod tests {
             .map(|p| (p.partitions_done, p.bytes_done))
             .collect();
         assert_eq!(steps, vec![(0, 0), (1, 100), (2, 200), (3, 300)]);
-        assert!(seen.iter().all(|p| p.partitions_total == 3 && p.bytes_total == 300));
+        assert!(seen
+            .iter()
+            .all(|p| p.partitions_total == 3 && p.bytes_total == 300));
     }
 
     #[tokio::test]

@@ -125,16 +125,15 @@ impl SqliteStore {
     /// Folds the write-ahead log back into the main file, so the file's size
     /// is the whole database (for reports; SQLite does it on its own too).
     pub fn checkpoint(&self) -> Result<(), StoreError> {
-        self.with_conn(|conn| {
-            conn.query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |_| Ok(()))
-        })
+        self.with_conn(|conn| conn.query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |_| Ok(())))
     }
 
     /// `(segments, signs, cameras)` currently stored — without loading them.
     pub fn entity_counts(&self) -> Result<(u64, u64, u64), StoreError> {
         self.with_conn(|conn| {
             let count = |table: &str| -> rusqlite::Result<u64> {
-                let n: i64 = conn.query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |r| r.get(0))?;
+                let n: i64 =
+                    conn.query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |r| r.get(0))?;
                 Ok(n as u64)
             };
             Ok((
@@ -158,8 +157,9 @@ impl SqliteStore {
             if max_rid == 0 {
                 return Ok(positions);
             }
-            let mut stmt = conn
-                .prepare_cached("SELECT geometry FROM speed_limit_segments WHERE rid >= ?1 LIMIT 1")?;
+            let mut stmt = conn.prepare_cached(
+                "SELECT geometry FROM speed_limit_segments WHERE rid >= ?1 LIMIT 1",
+            )?;
             for _ in 0..n {
                 let target = 1 + (random_u64() % max_rid as u64) as i64;
                 let blob: Option<Vec<u8>> = stmt
@@ -244,7 +244,9 @@ fn segment_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<SpeedLimitSegme
     let blob: Vec<u8> = row.get(8)?;
     let cell: Option<String> = row.get(9)?;
     let cell = match cell {
-        Some(text) => serde_json::from_str::<CorrectionCell>(&text).map_err(|e| from_sql_error(9, e))?,
+        Some(text) => {
+            serde_json::from_str::<CorrectionCell>(&text).map_err(|e| from_sql_error(9, e))?
+        }
         None => CorrectionCell::default(),
     };
     Ok(SpeedLimitSegment {
@@ -645,7 +647,9 @@ mod tests {
             let store = SqliteStore::open(&path).unwrap();
             store.set_cursor("node1", 42).unwrap();
             let data = contract::sample_static_data();
-            store.upsert_static_partition("tileA", "hash-1", &data).unwrap();
+            store
+                .upsert_static_partition("tileA", "hash-1", &data)
+                .unwrap();
         }
         let reopened = SqliteStore::open(&path).unwrap();
         assert_eq!(reopened.get_cursor("node1").unwrap(), Some(42));

@@ -170,16 +170,22 @@ fn static_data_is_replaced_by_id_never_duplicated(store: &dyn Store) {
 
 fn static_entities_can_be_removed_individually(store: &dyn Store) {
     store.upsert_static_data(&sample_static_data()).unwrap();
-    store.remove_static_entity("speedLimitSegment", "s1").unwrap();
+    store
+        .remove_static_entity("speedLimitSegment", "s1")
+        .unwrap();
     store.remove_static_entity("staticSign", "sg1").unwrap();
-    store.remove_static_entity("fixedSpeedCamera", "none").unwrap();
+    store
+        .remove_static_entity("fixedSpeedCamera", "none")
+        .unwrap();
     store.remove_static_entity("somethingElse", "x").unwrap();
 
     let all = store.all_entities().unwrap();
     assert_eq!(ids(&all.speed_limit_segments), vec!["s2".to_string()]);
     assert!(all.static_signs.is_empty());
     // A removed segment is gone from the spatial index too.
-    let near = store.speed_limit_segments_near(52.0, 13.005, 100.0).unwrap();
+    let near = store
+        .speed_limit_segments_near(52.0, 13.005, 100.0)
+        .unwrap();
     assert!(near.is_empty());
 }
 
@@ -273,7 +279,9 @@ fn a_position_lookup_finds_the_nearby_segments_only(store: &dyn Store) {
         })
         .unwrap();
 
-    let munich = store.speed_limit_segments_near(48.1, 11.505, 100.0).unwrap();
+    let munich = store
+        .speed_limit_segments_near(48.1, 11.505, 100.0)
+        .unwrap();
     assert!(ids(&munich).contains(&"s2".to_string()));
     assert!(!ids(&munich).contains(&"s1".to_string()));
     assert!(!ids(&munich).contains(&"s3".to_string()));

@@ -79,7 +79,12 @@ pub(crate) fn query_box(lat: f64, lng: f64, radius_meters: f64) -> (f64, f64, f6
     let lat_margin = radius_meters / METERS_PER_DEGREE;
     let cos_lat = lat.to_radians().cos().abs().max(0.01);
     let lng_margin = radius_meters / (METERS_PER_DEGREE * cos_lat);
-    (lng - lng_margin, lng + lng_margin, lat - lat_margin, lat + lat_margin)
+    (
+        lng - lng_margin,
+        lng + lng_margin,
+        lat - lat_margin,
+        lat + lat_margin,
+    )
 }
 
 pub(crate) fn boxes_intersect(a: (f64, f64, f64, f64), b: (f64, f64, f64, f64)) -> bool {

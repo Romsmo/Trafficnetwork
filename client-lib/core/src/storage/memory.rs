@@ -8,8 +8,8 @@ use std::collections::HashMap;
 use std::sync::Mutex;
 
 use super::{
-    boxes_intersect, query_box, segment_bbox, LocalCorrectionProposal, PendingWrite, StorageFullError,
-    Store, StoreError, StoredEntities,
+    boxes_intersect, query_box, segment_bbox, LocalCorrectionProposal, PendingWrite,
+    StorageFullError, Store, StoreError, StoredEntities,
 };
 use crate::sync::types::{HazardReport, SpeedLimitSegment};
 
@@ -379,7 +379,11 @@ mod tests {
         let refused = store.upsert_static_data(&data).unwrap_err();
 
         assert!(crate::storage::is_storage_full(&refused));
-        assert!(store.all_entities().unwrap().speed_limit_segments.is_empty());
+        assert!(store
+            .all_entities()
+            .unwrap()
+            .speed_limit_segments
+            .is_empty());
 
         store.set_static_entity_limit(None);
         store.upsert_static_data(&data).unwrap();
