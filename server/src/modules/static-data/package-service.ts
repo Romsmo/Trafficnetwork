@@ -36,6 +36,12 @@ export interface ManifestPartition {
 
 export interface ManifestBody {
   staticDataVersion: number;
+  /**
+   * The H3 resolution the tile ids are at. Every node of a network must use the
+   * same one; a client that holds packages at another resolution must not mix them
+   * with these (the tile ids would not correspond) — it re-bootstraps instead.
+   */
+  partitionResolution: number;
   generatedAt: string;
   partitions: ManifestPartition[];
   /** Only with `?since=`: tiles that had a package and no longer have one. */
@@ -148,6 +154,7 @@ export class StaticPackageService {
     const rows = await listPackageRows(this.db, since);
     const body: ManifestBody = {
       staticDataVersion: state.builtVersion,
+      partitionResolution: this.env.STATIC_DATA_PARTITION_H3_RESOLUTION,
       generatedAt: new Date(state.updatedAt).toISOString(),
       partitions: rows.filter((r) => r.hash !== null).map(toPartition),
     };

@@ -131,10 +131,15 @@ build the manifest answers `503 PACKAGES_BUILDING` (datasets up to 200 k rows ar
 request instead). **Do not edit static tables by hand and expect packages to follow** — SQL marks
 nothing; run `build --full` afterwards.
 
-**Resolution.** Measured on the scratch dataset, resolution 2 (today's default) makes tiles of
-hundreds of MB. **Set `STATIC_DATA_PARTITION_H3_RESOLUTION=4`** (a few MB per tile) *before* the
-first build; changing it later makes every package stale and rebuilds all of them. Clients read the
-value from `GET /v1/config`.
+**Resolution — the default is 4, and all nodes must agree.** `STATIC_DATA_PARTITION_H3_RESOLUTION`
+defaults to **4** (≈ 1,770 km², packages of a few MB at Europe density; the former default 2 made
+tiles of hundreds of MB — measured). Every node of one network **must** use the same value: tile ids
+and packages of different resolutions are incompatible, and a client would download everything
+twice. Do not change it on a node that has users — every device would have to re-download all static
+data; a change makes the next start rebuild every package (the log says so in a warning). Clients see
+the value in every manifest (`partitionResolution`) and in `GET /v1/config`, and discard packages
+they hold at another resolution rather than mix them. The operator fixed it at 4 on 2026-09-25,
+while there are no real users, precisely because later it would be a forced full bootstrap.
 
 **Import.** `POST /v1/bulk-import/*` is one batched statement per call now; the tool's batch size can go up to
 `BULK_IMPORT_MAX_ROWS` (default 5000, at most 50,000). No event-log rows are written however much is imported;
@@ -225,22 +230,76 @@ limit. Keep the range/step/threshold the same as the servers you federate with �
 votes are checked against *your* limits on arrival, so different limits make servers
 disagree about which votes count.
 
+## Migrations that take a heavy lock
+
+**Migration 0007 (community corrections) needs a maintenance window on a node that already holds
+a lot of data.** It is the only such migration so far; 0008 (static packages) only creates new,
+empty tables and is instant. Everything else in this section is why, what to expect and how to
+avoid it.
+
+**What happens.** 0007 adds a *stored generated column* (`speed_limit_segments.geometry_key`) and an
+index over it. Adding a stored generated column rewrites the whole table, and drizzle's migrator applies
+all pending migrations in **one transaction**, so the table is held under `ACCESS EXCLUSIVE` — neither
+readable nor writable — until that transaction commits. Roughly **20 s per million segments**
+(measured on the K-A branch: 0.44 M rows ≈ 9 s, see `schema.md`; extrapolated, not yet measured, to
+**≈ 5 min at 15 M rows** — to be re-measured on a copy of the real Europe database). The static-data
+version is bumped once, so clients re-download their packages (every segment now carries `segmentKey`).
+
+**What you see.** The migrate step prints a `WARNING: pending migrations take a heavy lock` block with the
+table and its row estimate *before* it starts. In Docker the migration runs when the container starts,
+before the server listens: after `docker compose up -d --build` the server is simply not up for that long,
+and on a very large table the container may show as `unhealthy`; nothing restarts it. **Do not interrupt it**:
+an aborted migration rolls back completely and the next start begins again from zero. `pg_stat_activity`
+shows the `ALTER TABLE` while it runs.
+
+**When you need a window, and when you do not.**
+
+| Situation | Impact |
+|---|---|
+| New database (fresh install, tests, the integration suite) | none — the tables are empty |
+| Node without users, or before the big import | none that matters; 5 min of nobody waiting |
+| Node upgrading from a release *before* K-A **with** users and Europe-sized data | a maintenance window of ≈ 20 s per million segments — announce it, take a `pg_dump` first, run `npm run db:migrate` (or the container's migrate step) *before* starting the new server |
+
+The way to avoid the window altogether is to take it early: **migrate a big node while it has no users** (the
+Europe node `tn-europe` is upgraded before the network opens), and every later database either starts
+fresh or is already migrated. A `pg_dump` restore works without extra steps (the key function pins its own
+`search_path`).
+
+**Could it be online? Checked — not with reasonable effort.** The obvious online recipe is: constant-default
+columns (no rewrite since PostgreSQL 11), `CREATE INDEX CONCURRENTLY`, a backfill in batches, and
+`NOT NULL` through a `CHECK … NOT VALID` + `VALIDATE CONSTRAINT` (since PostgreSQL 12 a validated CHECK lets
+`SET NOT NULL` skip the scan). The parts that do apply are used and enforced (policy below); for
+`geometry_key` itself:
+
+1. **A stored generated column has no online form** on PostgreSQL 16 (the supported image; PostgreSQL 18 adds
+   *virtual* generated columns, which need no rewrite but are not what the images ship).
+2. **Plain column + trigger + batched backfill + concurrent index** is online, but: the backfill updates every
+   row once, which doubles the table and rewrites each row into all three indexes until vacuum (after a bulk
+   import the pages are full, so hardly any update is HOT) — many GB of WAL and a longer total run than the
+   rewrite; `CREATE INDEX CONCURRENTLY` cannot run inside the migrator's transaction, so the migrate step would
+   need a second, non-transactional phase; until the backfill has finished the overlay would not match some
+   segments, so a "keys ready" state like the package `ready` flag would be needed to avoid serving wrong
+   answers; and a trigger would sit on the import path forever instead of a column the database maintains.
+3. **An expression index instead of a column** needs no rewrite but recomputes the key (≈ 20 µs) for every
+   overlay join and package build, permanently.
+4. **A side table of keys** filled in batches is online, but every overlay read and package build then joins it.
+
+So the one-off rewrite stays and is documented; if a node ever has to upgrade without a window, variant 2
+is the design to build (batch size, readiness flag and the second phase are the work).
+
+**Policy for new migrations** (enforced by `tests/unit/migration-locks.test.ts`, the migration files from 0007
+on): on a table that already exists, add columns nullable or with a constant default; add `CHECK`/foreign-key
+constraints `NOT VALID` and validate them in a later statement; avoid `ALTER COLUMN … TYPE`, `SET NOT NULL`
+without a validated CHECK, volatile defaults and unbounded `UPDATE`/`DELETE`; build indexes on the big static
+tables `CONCURRENTLY` as a separate operator step, not inside the migrator. Where no online form exists the
+statement carries a comment — `-- lock-ok(<table>): <why, how long>` (the migrate step then prints it as a
+warning with the table's row estimate) or `-- lock-trivial: <why it is cheap>` — and this section names the
+window. Migrations 0001–0006 predate the policy; they ran on small or empty tables.
+
 ## Restarting, upgrading, backing up
 
-**Upgrading to the release with community corrections (migration 0007)** adds a
-stored generated column (`speed_limit_segments.geometry_key`) and therefore
-**rewrites the segment table once, under an exclusive lock**: roughly 20 seconds
-per million segments (measured, see `schema.md`). Run `npm run db:migrate` (or the
-container's migrate step) *before* starting the new server and expect the
-segment table to be unavailable for that time on a large database. (In the Docker
-setup the migration runs when the container starts, before the server begins
-listening — the server is simply not up for that long after `docker compose up -d --build`,
-and on a very large table the container can show as `unhealthy` until the migration
-finishes; that is expected, nothing restarts it.)
-The migration also bumps the static-data version once, so clients re-download their packages
-(every segment now carries `segmentKey`). Take a database backup first, as for any migration.
-A restore from `pg_dump` works without extra steps (the key function pins its own
-`search_path`).
+An upgrade that includes a migration with a heavy lock (0007, above) needs a maintenance window on a big node;
+take a database backup first, as for any migration.
 
 Your **node identity** (the Ed25519 keypair other servers know you by) lives
 in your database (`node_identity` table), not on disk or in an env var — it

@@ -617,6 +617,7 @@ Design, measurements and sizing: [`europe-scale.md`](europe-scale.md).
 ```json
 {
   "staticDataVersion": 7,
+  "partitionResolution": 4,
   "generatedAt": "2026-01-01T00:00:00.000Z",
   "partitions": [
     { "tile": "<h3 id>", "hash": "<sha256 hex of the uncompressed JSON>", "sizeBytes": 1234,
@@ -629,10 +630,17 @@ Design, measurements and sizing: [`europe-scale.md`](europe-scale.md).
 `gzipBytes`, `brotliBytes` (what a compressed download costs) and `path` (the
 immutable location of exactly this content) are additive.
 
-Partitions are keyed by an H3 cell (`STATIC_DATA_PARTITION_H3_RESOLUTION`; the
-default is 2, **4 is recommended at Europe scale** — see `europe-scale.md`; the
-resolution is in `GET /v1/config`), computed from each entity's geometry, not
-stored. Only partitions that actually contain data are listed; a `LineString`
+Partitions are keyed by an H3 cell at `partitionResolution` — **4 by default**
+(`STATIC_DATA_PARTITION_H3_RESOLUTION`; ≈ 1,770 km² per tile, packages of a few MB at
+Europe density; it was 2 before the Europe add-on, whose tiles were hundreds of MB), computed
+from each entity's geometry, not stored. **Every node of a network must use the same
+resolution** — tile ids and packages of different resolutions are incompatible and a client would
+download everything twice. The value is in every manifest (`partitionResolution`) and in
+`GET /v1/config` (`staticDataPartitionH3Resolution`): **a client compares it with the resolution of
+the packages it holds and, if it differs, discards them and downloads again instead of merging** (a
+tile id at resolution 2 never equals one at resolution 4). Changing the resolution of a running node
+therefore forces a full re-bootstrap on every device — decide it once. It was fixed at 4 on
+2026-09-25, while there are no real users. Only partitions that actually contain data are listed; a `LineString`
 segment that straddles a partition boundary is listed (and returned) under every
 partition one of its vertices falls into. The `hash` is stable: rebuilding
 unchanged data yields the same hash (rows are ordered by id), so comparing hashes

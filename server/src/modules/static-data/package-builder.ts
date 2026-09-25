@@ -223,6 +223,12 @@ export async function runBuild(deps: BuilderDeps, opts: BuildOptions = {}): Prom
     let state = await getPackageState(db);
     if (state.fingerprint !== fingerprint) {
       // A setting that shapes package content changed: every existing package is stale.
+      if (state.fingerprint !== null) {
+        deps.log?.warn(
+          { from: state.fingerprint, to: fingerprint },
+          "static packages: a setting that shapes the packages changed (partition resolution, camera namespace or corrections overlay) — every package is rebuilt, and clients holding the old ones must download everything again. All nodes of a network must use the same partition resolution.",
+        );
+      }
       await markAllKnownTilesDirty(db);
       await setPackageState(db, { fingerprint, ready: false });
       state = { ...state, fingerprint, ready: false };

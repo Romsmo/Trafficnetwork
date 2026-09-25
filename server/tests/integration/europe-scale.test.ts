@@ -180,6 +180,9 @@ describe("europe-scale static packages", () => {
     const [{ version }] = (await testDb.db.execute(sql`select version from static_data_state where id = 1`)) as unknown as [{ version: number }];
     expect(body.staticDataVersion).toBe(version);
     expect(new Date(body.generatedAt).toString()).not.toBe("Invalid Date");
+    // The resolution is in the manifest, so a client can tell a deviation from data.
+    expect(body.partitionResolution).toBe(RES);
+    expect(body.partitionResolution).toBe(env.STATIC_DATA_PARTITION_H3_RESOLUTION);
     const first = body.partitions[0] as Json;
     expect(Object.keys(first).sort()).toEqual(["brotliBytes", "gzipBytes", "hash", "path", "sizeBytes", "tile"]);
     expect(first.path).toBe(`/v1/static-data/packages/${first.tile}/${first.hash}`);
@@ -442,11 +445,15 @@ describe("europe-scale static packages", () => {
     await truncateStatic();
     const { app, env } = await startApp();
     await importSigns(app, env, [BERLIN]);
-    const at4 = ((await manifest(app, env)).json() as Json).partitions as Json[];
+    const at4Manifest = (await manifest(app, env)).json() as Json;
+    const at4 = at4Manifest.partitions as Json[];
     expect(at4[0]!.tile).toBe(latLngToCell(BERLIN.lat, BERLIN.lng, 4));
 
     const coarse = await startApp({ STATIC_DATA_PARTITION_H3_RESOLUTION: "3", STATIC_PACKAGES_DIR: env.STATIC_PACKAGES_DIR });
-    const at3 = ((await manifest(coarse.app, coarse.env)).json() as Json).partitions as Json[];
+    const coarseManifest = (await manifest(coarse.app, coarse.env)).json() as Json;
+    expect(coarseManifest.partitionResolution).toBe(3);
+    expect(at4Manifest.partitionResolution).toBe(4);
+    const at3 = coarseManifest.partitions as Json[];
     expect(at3).toHaveLength(1);
     expect(at3[0]!.tile).toBe(latLngToCell(BERLIN.lat, BERLIN.lng, 3));
     // The old resolution's row is a tombstone now, not a stale package.

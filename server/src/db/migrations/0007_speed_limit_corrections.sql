@@ -79,6 +79,8 @@ CREATE TABLE "speed_limit_corrections" (
 	CONSTRAINT "speed_limit_corrections_candidate_uq" UNIQUE("segment_key","unit","value")
 );
 --> statement-breakpoint
+-- lock-ok(speed_limit_segments): a STORED generated column rewrites the whole table once under ACCESS EXCLUSIVE, about 20 s per million rows (5 min at 15 M);
+-- there is no online variant of a stored generated column, and the trigger + batched-backfill alternative costs more (see docs/operating.md, "Migrations that take a heavy lock")
 ALTER TABLE "speed_limit_segments" ADD COLUMN "geometry_key" text GENERATED ALWAYS AS (speed_limit_geometry_key(geometry)) STORED;--> statement-breakpoint
 ALTER TABLE "static_data_state" ADD COLUMN "corrections_overlay_enabled" boolean DEFAULT true NOT NULL;--> statement-breakpoint
 ALTER TABLE "network_peers" ADD COLUMN "last_pulled_votes_sequence" integer;--> statement-breakpoint
@@ -87,6 +89,8 @@ CREATE INDEX "speed_limit_correction_votes_reporter_idx" ON "speed_limit_correct
 CREATE INDEX "speed_limit_correction_votes_submitted_by_idx" ON "speed_limit_correction_votes" USING btree ("submitted_by","received_at");--> statement-breakpoint
 CREATE INDEX "speed_limit_corrections_segment_idx" ON "speed_limit_corrections" USING btree ("segment_key");--> statement-breakpoint
 CREATE INDEX "speed_limit_corrections_status_idx" ON "speed_limit_corrections" USING btree ("status");--> statement-breakpoint
+-- lock-ok(speed_limit_segments): the index over the new column is built in the same transaction (blocks writes; part of the time estimated above)
 CREATE INDEX "speed_limit_segments_geometry_key_idx" ON "speed_limit_segments" USING btree ("geometry_key");--> statement-breakpoint
 -- Every segment now carries `segmentKey`, so the static packages change: bump the version once so clients refresh.
+-- lock-trivial: static_data_state has exactly one row
 UPDATE "static_data_state" SET "version" = "version" + 1 WHERE "id" = 1;

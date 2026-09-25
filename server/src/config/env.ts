@@ -42,11 +42,19 @@ const envSchema = z.object({
 
   REGION_TILE_H3_RESOLUTION: z.coerce.number().int().min(0).max(15).default(7),
 
-  // Coarse H3 resolution used to partition the static-data package/manifest
-  // endpoints (client-lib P2.0) — deliberately much coarser than
-  // REGION_TILE_H3_RESOLUTION, since these packages carry the full static
-  // dataset per partition, not per-request filtering.
-  STATIC_DATA_PARTITION_H3_RESOLUTION: z.coerce.number().int().min(0).max(15).default(2),
+  // H3 resolution that partitions the static-data packages/manifest
+  // (client-lib P2.0) — much coarser than REGION_TILE_H3_RESOLUTION, since a
+  // package carries the full static dataset of its tile, not per-request filtering.
+  //
+  // 4 (≈ 1,770 km² per tile, a few MB per package at Europe density) since the
+  // Europe add-on (docs/europe-scale.md): the former 2 gave tiles of hundreds of MB.
+  // Decided by the operator 2026-09-25 while there are no real users — changing it
+  // later means every device re-downloads everything (the tile ids change), and
+  // **every node of a network must use the same value**, or their packages are
+  // incompatible and clients download twice. The value is in GET /v1/config
+  // (`staticDataPartitionH3Resolution`) and in every manifest (`partitionResolution`)
+  // so a client can notice a deviation instead of silently syncing garbage.
+  STATIC_DATA_PARTITION_H3_RESOLUTION: z.coerce.number().int().min(0).max(15).default(4),
 
   // Disk-backed, pre-built static-data packages (add-on E-B, docs/europe-scale.md).
   // Where the content-addressed package files live. In Docker this is a volume

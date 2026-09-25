@@ -135,12 +135,16 @@ additive; the endpoint without a parameter is unchanged in meaning.
 
 ### D8. Partition resolution
 
-The existing default (H3 resolution 2, ≈ 86,000 km² per tile) was chosen for a small dataset. Measured (below),
-at Europe density the average tile is tens to hundreds of MB and the densest several hundred MB — too coarse to
-download, cache or resume sensibly. **Recommendation: resolution 4** (≈ 1,770 km², a few MB per tile). It is
-already configurable (`STATIC_DATA_PARTITION_H3_RESOLUTION`, and clients read it from `GET /v1/config`), so changing
-it needs no protocol change — but it **is** a change of tile ids, so it is a decision for the operator and the
-default in code is deliberately left at 2 until then; `.env.example` and `docker-compose.yml` say so.
+The former default (H3 resolution 2, ≈ 86,000 km² per tile) was chosen for a small dataset; at Europe density its
+tiles are hundreds of MB — too coarse to download, cache or resume sensibly. **Decided by the operator on 2026-09-25:
+resolution 4** (≈ 1,770 km², a few MB per tile) **as the default in code**, not just as a recommendation:
+every node of a network has to use the same value or their packages are incompatible and clients download twice, so it
+must not depend on each operator remembering an environment variable. It changes the tile ids, which is harmless now
+(no real users, the data set is rebuilt anyway) and would be a forced full bootstrap for every device later.
+The resolution is written into every manifest (`partitionResolution`) as well as `GET /v1/config`, so a client
+can tell a mismatch apart from data and re-bootstrap instead of silently syncing garbage; a node whose setting changes
+logs a warning and rebuilds all packages. *Not built (a possible follow-up):* carrying the value in the root-signed network
+configuration so that a node with a deviating value refuses to join.
 
 ### D9. `/v1/snapshot` refuses what it cannot carry
 
@@ -161,6 +165,20 @@ touched tiles are marked in the same transaction (so package versions are reliab
 always agrees with `nearby`/`lookup`); a correction's effective change marks its tile. K-A's rule "only a change of the
 *effective* value bumps the version" matters more now: at Europe scale a version bump is a package rebuild for the tiles
 concerned.
+
+### D12. Migration 0007's table rewrite stays, documented as a maintenance window
+
+The operator asked whether the lock is necessary at all, because the same migration will one day run on a
+node with users. Checked against the online recipe (constant defaults, `CREATE INDEX CONCURRENTLY`, batched
+backfill, `CHECK … NOT VALID` + `VALIDATE`): a *stored generated column* has no online form on PostgreSQL 16, and
+the substitutes (trigger + batched backfill, expression index, side table) cost more than they save — bloat and
+WAL from updating every row, a second non-transactional migration phase because the migrator runs everything
+in one transaction, a readiness state for the half-backfilled window, or a permanent per-read cost. What
+protects users is *when* the migration runs (the Europe node, before it has any), not making it online.
+Instead of a fix, the branch adds a **migration lock policy**: `tests/unit/migration-locks.test.ts` requires every
+lock-heavy statement (from 0007 on) to carry a `-- lock-ok(<table>): …` / `-- lock-trivial: …` comment, and the
+migrate step prints the annotated ones as a warning with the table's row estimate. Full reasoning and the
+window table: `operating.md`, "Migrations that take a heavy lock".
 
 ## Measured
 
@@ -222,7 +240,9 @@ other Docker work; the scratch database also proved to be one more thing competi
   batch (`BULK_IMPORT_MAX_ROWS`, up to 50,000) is now cheaper per row. An import into a server that has
   the new code marks package tiles as it goes and builds them afterwards; into a server that has not,
   build with `npm run static-packages -- build` after upgrading (see the upgrade notes below).
-  Migration 0007 (K-A) rewrites the segment table once — do it while the node is empty or before the import.
+  Migration 0007 (K-A) rewrites the segment table once under an exclusive lock (≈ 21 s per million rows) — do it while the
+  node is empty or has no users; it is why a node with users and big data needs a maintenance window
+  (`operating.md`, "Migrations that take a heavy lock", which also says why there is no online variant).
 * **C (client-lib):** the manifest and partitions keep their shape; new, additive: `gzipBytes`/`brotliBytes`/`path`
   per tile, `?since=<version>` (with `removed`), `Range` + `If-Range` on packages (resume without starting over),
   the immutable `…/packages/<tile>/<hash>` URL, `503 PACKAGES_BUILDING` + `Retry-After` while the first build is
@@ -248,7 +268,12 @@ npm run measure-scale -- --phase import --import-rows 50000 --import-impl legacy
 
 A node that predates this branch (the Europe node was set up from `main`) needs migrations 0007 and 0008 first —
 0007 is the ≈ 21 s-per-million-rows rewrite of the segment table (K-A), so on 13 M segments about **5 minutes with
-the table locked**. Do that on a copy (`pg_dump`/restore into a scratch container) unless the operator wants the node itself upgraded.
+the table locked**. Operator's decision (2026-09-25): measure on a copy (`pg_dump`/restore into a scratch container)
+first, then run the migration on the node itself — 5 minutes are harmless while it has no users. On the copy, also
+measure the two things `operating.md` ("Migrations that take a heavy lock") only argues so far:
+the migration itself (`npm run db:migrate`, wall time, the row estimate the warning printed), and, for the
+rejected online variant, a batched `UPDATE … SET geometry_key = speed_limit_geometry_key(geometry)` into a plain
+column in 100 k-row batches (wall time, table and index growth, WAL bytes) — the claim there is "slower and heavier than the rewrite".
 
 ## Not done, on purpose
 
