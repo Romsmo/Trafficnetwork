@@ -53,8 +53,13 @@ function sectionedWorker(sections: Record<string, NormalizedRow[]>): SourceWorke
 
 type Poster = BulkImportPoster & { posted: unknown[][]; emptyChecks: number };
 
-/** Server fake: rejects (400) every batch that contains a row with source "bad", like the real Zod-validated route would reject a whole batch. */
-function fakeServer(options: { empty?: boolean; failOnPost?: number } = {}): Poster {
+/**
+ * Server fake: rejects (400) every batch that contains a row with source "bad", like the real
+ * Zod-validated route would reject a whole batch; with `maxBatchRows` set, also rejects (413) any
+ * batch bigger than that — like Fastify's real body-size limit (server/src/app.ts has no custom
+ * bodyLimit, so its 1 MiB default applies; a batch of long speed-limit-segment rows can exceed it).
+ */
+function fakeServer(options: { empty?: boolean; failOnPost?: number; maxBatchRows?: number } = {}): Poster {
   const posted: unknown[][] = [];
   let posts = 0;
   const poster: Poster = {
@@ -65,6 +70,9 @@ function fakeServer(options: { empty?: boolean; failOnPost?: number } = {}): Pos
       if (options.failOnPost !== undefined && posts === options.failOnPost) throw new Error("simulated network failure");
       if (rows.some((row) => (row as { source: string }).source === "bad")) {
         throw new ApiError("Bulk import failed: 400 Invalid request body", 400, { error: { code: "VALIDATION", message: "Invalid request body", details: [{ path: ["rows", 0, "source"] }] } });
+      }
+      if (options.maxBatchRows !== undefined && rows.length > options.maxBatchRows) {
+        throw new ApiError("Bulk import failed: 413 Request body is too large", 413);
       }
       posted.push(rows);
       return { inserted: rows.length };
@@ -178,6 +186,30 @@ describe("runWorker — Europe-scale behaviour", () => {
       expect(quarantined).toContain("server-rejected");
       expect(quarantined).toContain('"detail":[{"path":["rows",0,"source"]}]'); // the server's own error details are kept with the row
       expect(stateStore.isComplete()).toBe(true);
+    });
+
+    it("bisects a batch the server rejects with 413 (too large) down to a size it accepts, landing every row exactly once", async () => {
+      const rows = Array.from({ length: 16 }, (_, i) => segment(i + 1));
+      const server = fakeServer({ maxBatchRows: 3 }); // e.g. a batch of long lineStrings exceeding Fastify's body limit
+      const result = await run({ worker: sectionedWorker({ a: rows }), apiClient: server, batchSize: 16 });
+
+      expect(result.insertedByKind["speed-limit-segment"]).toBe(16);
+      expect(result.quarantined).toBe(0);
+      expect(server.posted.every((batch) => batch.length <= 3)).toBe(true);
+      expect(server.posted.flat()).toHaveLength(16); // no row lost or duplicated across the bisected posts
+      expect(stateStore.isComplete()).toBe(true);
+    });
+
+    it("quarantines a single row that is still rejected (413) on its own, instead of retrying forever", async () => {
+      const rows = [segment(1), segment(2)];
+      const server = fakeServer({ maxBatchRows: 0 }); // pathological: even one row is "too large"
+      const result = await run({ worker: sectionedWorker({ a: rows }), apiClient: server, batchSize: 16 });
+
+      expect(result.insertedByKind["speed-limit-segment"]).toBe(0);
+      expect(result.quarantined).toBe(2);
+      const quarantined = readFileSync(path.join(stateStore.directory, "quarantine.ndjson"), "utf8");
+      expect(quarantined).toContain("server-rejected");
+      expect(quarantined).toContain("413");
     });
 
     it("does not retry a quarantined row on resume", async () => {

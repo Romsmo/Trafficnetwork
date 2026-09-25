@@ -187,19 +187,30 @@ export async function runWorker(options: RunWorkerOptions): Promise<RunWorkerRes
 
   /**
    * A 400 means the server validated the body and rejected it *before inserting anything* (routes.ts
-   * parses the whole body first), so re-posting halves cannot duplicate rows. Bisect down to the
-   * offending row(s) and quarantine only those.
+   * parses the whole body first), so re-posting halves cannot duplicate rows.
+   *
+   * A 413 (body too large) is safe to bisect for the same reason: Fastify's body-size limit is enforced
+   * while the request body is read, before the route handler (and any DB write) ever runs — confirmed by
+   * reading server/src/app.ts (no custom bodyLimit, so Fastify's 1 MiB default applies uniformly). At
+   * Europe scale a batch of long speed-limit-segment LineStrings routinely exceeds it even at a modest
+   * BATCH_SIZE (hit for real on 2026-09-25: "413 Request body is too large" aborted the whole run instead
+   * of being handled); bisecting converges on a batch size the server accepts without needing a static
+   * BATCH_SIZE tuned per row kind. An OSM way's node count is capped at 2000 by the OSM API itself, so a
+   * single row can never itself be the cause — reaching batch.length===1 here would mean the server's
+   * limit is smaller than one row, an actual data problem, so that row is quarantined rather than retried
+   * forever.
    */
   const postWithBisect = async (kind: BulkImportKind, batch: NormalizedRow[]): Promise<void> => {
     try {
       await commit(kind, batch);
     } catch (err) {
-      if (!(err instanceof ApiError) || err.status !== 400) throw err;
+      if (!(err instanceof ApiError) || (err.status !== 400 && err.status !== 413)) throw err;
       if (batch.length === 1) {
         await quarantine(batch[0]!, "server-rejected", err.body?.error?.details ?? err.message);
         return;
       }
-      logger.warn({ kind, size: batch.length }, "server rejected the batch (400) — bisecting to isolate the offending row(s)");
+      const reason = err.status === 413 ? "server rejected the batch (413, too large) — bisecting to find a size it accepts" : "server rejected the batch (400) — bisecting to isolate the offending row(s)";
+      logger.warn({ kind, size: batch.length, status: err.status }, reason);
       const middle = batch.length >> 1;
       await postWithBisect(kind, batch.slice(0, middle));
       await postWithBisect(kind, batch.slice(middle));
