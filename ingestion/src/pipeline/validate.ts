@@ -35,6 +35,9 @@ export function validateRow(normalized: NormalizedRow): string | undefined {
         if (!Array.isArray(point) || point.length !== 2 || !isLng(point[0]) || !isLat(point[1])) return "lineString has a point outside [lng ±180, lat ±90]";
       }
       if (typeof row.speedLimit !== "number" || !Number.isFinite(row.speedLimit) || row.speedLimit <= 0) return `speedLimit ${String(row.speedLimit)} is not a positive number`;
+      // The server's column is `integer` (db/schema/static.ts) while its Zod schema accepts any positive number:
+      // a value like 42.5 passes validation and then fails in Postgres with a 500 that no retry can fix.
+      if (!Number.isInteger(row.speedLimit)) return `speedLimit ${row.speedLimit} is not a whole number (the server stores integers)`;
       if (row.speedLimitUnit !== "kmh" && row.speedLimitUnit !== "mph") return `speedLimitUnit ${String(row.speedLimitUnit)} is not kmh/mph`;
       if (row.speedLimit > (row.speedLimitUnit === "kmh" ? MAX_PLAUSIBLE_KMH : MAX_PLAUSIBLE_MPH)) return `implausible speed limit ${row.speedLimit} ${row.speedLimitUnit}`;
       if (!row.source) return "empty source";
@@ -44,6 +47,7 @@ export function validateRow(normalized: NormalizedRow): string | undefined {
       const row = normalized.row;
       if (!isLat(row.lat) || !isLng(row.lng)) return "position outside [lat ±90, lng ±180]";
       if (typeof row.signType !== "string" || row.signType.length === 0) return "empty signType";
+      if (row.signType.includes("\u0000")) return "signType contains a NUL character (Postgres text cannot store it)";
       if (!row.source) return "empty source";
       return undefined;
     }

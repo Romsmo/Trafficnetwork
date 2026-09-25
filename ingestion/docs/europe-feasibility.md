@@ -177,8 +177,9 @@ node, other Docker chats paused, keep-awake on, `pg_dump` at the end.** If the r
 Before start: (1) the user's go and the location decision; (2) other Docker chats paused (RAM ≥ 8 GB free); (3) `C:` ≥ 2 GB free;
 (4) a dedicated empty Europe node built from `main` (own compose project, own port, own volumes on `D:`); (5) work directory
 `E:\tn-europe-import\`.
-Abort/hold: RSS of an osmium step > 3.5 GB; `C:` < 0.5 GB; import rate < 400 rows/s for 15 min; any batch quarantined more than 50 rows
-in a row (indicates a systematic schema problem); Docker engine restart (resume is safe, but the cause must be understood first).
+Abort/hold: RSS of an osmium step > 3.5 GB; `C:` < 0.5 GB; import rate < 400 rows/s for 15 min; more than 500 rows quarantined in total
+(the tool aborts by itself — indicates a systematic schema problem, not stray bad rows); Docker engine restart (resume is safe, but the cause
+must be understood first).
 
 ## 11. Update path (documented, **not built**)
 

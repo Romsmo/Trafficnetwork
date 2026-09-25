@@ -7,6 +7,8 @@ Optional bulk-import client that seeds a Trafficnetwork server's database from O
 - The full CLI, run as a real OS process against a real built `server/` (Testcontainers Postgres/PostGIS) and real checked-in `.osm.pbf` fixtures (`tests/fixtures/`), passes all four required end-to-end scenarios (`tests/integration/full-cycle.test.ts`): empty DB → import → API confirms counts; a second run is a fast no-op; forcing a re-stream still dedupes to zero new inserts; a hard `SIGKILL` mid-run followed by an unmodified resume lands the exact expected count, no duplicates.
 - 68 unit tests cover the rest (normalization, dedup/state, batching, backoff, config validation, verification logic).
 
+**Europe (add-on A, branch `phase3/europe-basemap`)**: the same tool imports the whole continent from one pinned Geofabrik extract — resumable Range download, a narrow tag filter, geographic sections with their own progress markers, streaming state with a compact dedup set, client-side validation with bisect-and-quarantine of rejected rows, and a "target must be empty" guard. Feasibility, measurements and decisions: [`docs/europe-feasibility.md`](docs/europe-feasibility.md); procedure: [`docs/europe-runbook.md`](docs/europe-runbook.md); a ready-made runner image is the [`Dockerfile`](Dockerfile).
+
 See [`docs/concept.md`](../docs/concept.md) section 7 and [`docs/prompt-phase3-ingestion.md`](../docs/prompt-phase3-ingestion.md) for the full design brief, and [`docs/sources.md`](docs/sources.md) for the evidenced source catalog (licenses, pricing, what's implemented vs. catalog-only).
 
 ## Setup
@@ -32,9 +34,15 @@ npm run ingest -- --region bayern --dry-run   # validates config + server creden
 npm run ingest -- --region bayern             # real run — requires osmium-tool on PATH (apt: osmium-tool; see docs/sources.md)
 npm run ingest -- --region bayern --fresh     # wipes local progress state and starts over — see "Resuming" below before using this
 npm run ingest -- --region bayern --batch-size 500
+npm run ingest -- --region europe --section x10_y40   # only some sections (regions with "sections"); the run is then not marked complete
+npm run ingest -- --region bayern --allow-non-empty   # deliberately import into a server that already holds data (see below)
 ```
 
-Valid `--region` values are the keys in [`config/regions.json`](config/regions.json) — currently `bayern` (the project's chosen first region, ~812MB Geofabrik extract), `germany`, and `europe` (the whole-country/continent extracts work with the exact same code, per the project's requirement that going bigger never needs a code change — just more time and disk).
+Valid `--region` values are the keys in [`config/regions.json`](config/regions.json) — currently `bayern` (the project's chosen first region, ~812MB Geofabrik extract), `germany`, and `europe` (the whole continent; **pinned to one dated Geofabrik edition** so a resume never mixes two editions — bump it deliberately). The same code handles all of them, per the project's requirement that going bigger never needs a code change — just more time and disk.
+
+**Empty-target guard.** The server has no dedup. A *fresh* run (no local progress for the region) therefore refuses to start against a server that already holds any static data, because importing a region it already contains would silently double it. `--allow-non-empty` overrides this on purpose (e.g. a different region into a populated server). A resume is never affected.
+
+**Rows that are not imported are never dropped silently.** Rows the server's schema would reject (or that are implausible, e.g. `maxspeed=500`, or fractional where the server stores integers) go to `quarantine.ndjson` in the state directory with the reason and the full row; a batch the server rejects with 400 is bisected down to the offending row. More than `MAX_QUARANTINED` (default 500) aborts the run.
 
 ## Verification
 
@@ -57,6 +65,10 @@ npm run test:integration   # needs osmium-tool on PATH, Docker (Testcontainers),
 The server's bulk-import endpoints have **no deduplication of their own** — POSTing the same row twice always creates two rows. All idempotency is handled locally, in a per-`(region, source)` progress log under `STATE_DIR` (default `./.ingestion-state`, gitignored). **Never delete this directory** between runs unless you deliberately want to re-import a region from scratch (which will duplicate everything already there — that's what `--fresh` is for, and it warns loudly before doing it).
 
 A run that's killed mid-way can always be resumed by just running the same command again — it replays its own progress log and skips whatever it already confirmed the server accepted. One known, accepted limitation: a hard kill in the narrow window between a batch being accepted by the server and that fact being durably written to disk can duplicate at most one batch's worth of rows (bounded by `BATCH_SIZE`) on resume. This is a real constraint of the server's design (no natural key to reconcile against after the fact), not something this program can fully close from the outside — smaller `BATCH_SIZE` shrinks the window at the cost of more HTTP calls.
+
+## Attribution and provenance (ODbL)
+
+The imported data is derived from OpenStreetMap: **© OpenStreetMap contributors**, licensed under the [Open Database License 1.0](https://opendatacommons.org/licenses/odbl/) — <https://www.openstreetmap.org/copyright>. Every row is stored with `source=osm` and `sourceLicense=ODbL`, and the tool never alters those fields. Anything that displays or redistributes the data (the server's web UI, client apps, dumps) must show that credit. Speed limits resolved from `maxspeed:type` use the OSM wiki's *Default speed limits* table (CC BY-SA 2.0, via `westnordost/osm-legal-default-speeds`, BSD-3 code) — credited in the generated `src/pipeline/osm/implicit-speeds.generated.ts`. The exact edition of an import (file, size, md5, Last-Modified, replication sequence/timestamp, osmium version, tag filter) is written to `extract-meta.json` in the state directory.
 
 ## Cost/license warnings
 

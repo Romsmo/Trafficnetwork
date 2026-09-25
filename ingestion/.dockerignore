@@ -1,0 +1,9 @@
+node_modules
+dist
+tests
+docs
+scripts
+.env
+.env.*
+.ingestion-state
+.ingestion-downloads

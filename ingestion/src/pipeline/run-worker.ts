@@ -120,8 +120,10 @@ export async function runWorker(options: RunWorkerOptions): Promise<RunWorkerRes
   let quarantinedThisRun = 0;
   let sectionsProcessed = 0;
   let sectionsSkipped = 0;
-  const runStartedAt = Date.now();
-  let lastProgressLogAt = runStartedAt;
+  // The clock for rows/s starts when the first section begins importing — not at process start, which would
+  // include the (hours-long) download and osmium phases and make the rate look wrong.
+  let importStartedAt: number | undefined;
+  let lastProgressLogAt = Date.now();
   let currentSection = { id: "-", index: 0, total: 0 };
   let sectionInserted = emptyCounts();
 
@@ -131,7 +133,7 @@ export async function runWorker(options: RunWorkerOptions): Promise<RunWorkerRes
     const now = Date.now();
     if (!force && now - lastProgressLogAt < progressIntervalMs) return;
     lastProgressLogAt = now;
-    const elapsedS = Math.max(1, (now - runStartedAt) / 1000);
+    const elapsedS = Math.max(1, (now - (importStartedAt ?? now)) / 1000);
     logger.info(
       {
         section: currentSection.id,
@@ -233,6 +235,7 @@ export async function runWorker(options: RunWorkerOptions): Promise<RunWorkerRes
       continue;
     }
 
+    importStartedAt ??= Date.now();
     currentSection = { id: section.id, index: section.index, total: section.total };
     const sectionStartedAt = new Date().toISOString();
     const skippedBefore = skippedAlreadyDone;

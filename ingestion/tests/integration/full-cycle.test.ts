@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -32,6 +32,15 @@ function writeRegionsConfig(dir: string, fixtureBaseUrl: string): string {
           geofabrikExtractUrl: `${fixtureBaseUrl}/mini-region-2.osm.pbf`,
           geofabrikChecksumUrl: `${fixtureBaseUrl}/mini-region-2.osm.pbf.md5`,
           bbox: [12.4, 49.0, 13.1, 49.7],
+        },
+        // Same fixture file as "mini-region", but cut into 0.25° sections (Europe's mechanism at test scale).
+        "mini-region-tiles": {
+          name: "Mini Region, sectioned (fixture)",
+          geofabrikExtractUrl: `${fixtureBaseUrl}/mini-region.osm.pbf`,
+          geofabrikChecksumUrl: `${fixtureBaseUrl}/mini-region.osm.pbf.md5`,
+          bbox: [11.4, 48.0, 12.1, 48.7],
+          sections: { tileDegrees: 0.25 },
+          skipManifestCrossCheck: true,
         },
       },
     }),
@@ -148,7 +157,9 @@ describe("ingestion full cycle (real server, real osmium-tool, real fixtures)", 
     const downloadDir = path.join(tmpRoot, "downloads-2");
     const env = baseEnv(testServer, regionsPath, stateDir, downloadDir);
 
-    const first = await runCli(["--region", "mini-region"], env);
+    // The DB already holds test 1's rows, and this run has fresh local state — the empty-target guard would
+    // (rightly) refuse, so this test opts in on purpose.
+    const first = await runCli(["--region", "mini-region", "--allow-non-empty"], env);
     expect(first.code, `first run failed: ${first.stderr}`).toBe(0);
     const afterFirst = await fetchSnapshotCounts(testServer.serverUrl, token);
 
@@ -157,9 +168,10 @@ describe("ingestion full cycle (real server, real osmium-tool, real fixtures)", 
     const afterSecond = await fetchSnapshotCounts(testServer.serverUrl, token);
     expect(afterSecond).toEqual(afterFirst);
 
-    // Delete only complete.marker (keep progress.ndjson) — forces a full re-stream of the
+    // Delete only complete.marker and the section marker (keep progress.ndjson) — forces a full re-stream of the
     // fixture, but every row's dedup key is already recorded, so nothing new gets posted.
     rmSync(path.join(stateDir, "mini-region", "osm", "complete.marker"));
+    rmSync(path.join(stateDir, "mini-region", "osm", "sections"), { recursive: true, force: true });
     const third = await runCli(["--region", "mini-region"], env);
     expect(third.code, `third run failed: ${third.stderr}`).toBe(0);
     const afterThird = await fetchSnapshotCounts(testServer.serverUrl, token);
@@ -178,7 +190,7 @@ describe("ingestion full cycle (real server, real osmium-tool, real fixtures)", 
     const before = await fetchSnapshotCounts(testServer.serverUrl, token);
 
     // mini-region-2.osm.pbf has 6 speed-limit-segments; BATCH_SIZE=2 means 3 batches.
-    const child = spawn("node", ["--import", "tsx", "src/cli.ts", "--region", "mini-region-2"], { cwd: INGESTION_ROOT, env });
+    const child = spawn("node", ["--import", "tsx", "src/cli.ts", "--region", "mini-region-2", "--allow-non-empty"], { cwd: INGESTION_ROOT, env });
     let childOutput = "";
     child.stdout.on("data", (c: Buffer) => (childOutput += c.toString()));
     child.stderr.on("data", (c: Buffer) => (childOutput += c.toString()));
@@ -201,4 +213,44 @@ describe("ingestion full cycle (real server, real osmium-tool, real fixtures)", 
     const after = await fetchSnapshotCounts(testServer.serverUrl, token);
     expect(after.segments - before.segments).toBe(6);
   }, 60_000);
+
+  it("refuses a fresh start against a server that already holds data — the server has no dedup", async () => {
+    const env = baseEnv(testServer, regionsPath, path.join(tmpRoot, "state-4"), path.join(tmpRoot, "downloads-4"));
+    const before = await fetchSnapshotCounts(testServer.serverUrl, token);
+
+    const result = await runCli(["--region", "mini-region"], env);
+
+    expect(result.code).not.toBe(0);
+    expect(result.stderr).toMatch(/Refusing to start.*--allow-non-empty/s);
+    expect(await fetchSnapshotCounts(testServer.serverUrl, token)).toEqual(before);
+  }, 60_000);
+
+  it("a sectioned region (osmium streamed into tiles) imports the same rows, and a re-run skips every finished section", async () => {
+    const stateDir = path.join(tmpRoot, "state-5");
+    const downloadDir = path.join(tmpRoot, "downloads-5");
+    const env = baseEnv(testServer, regionsPath, stateDir, downloadDir);
+    const before = await fetchSnapshotCounts(testServer.serverUrl, token);
+
+    const first = await runCli(["--region", "mini-region-tiles", "--allow-non-empty"], env);
+    expect(first.code, `sectioned run failed: ${first.stderr}\n${first.stdout}`).toBe(0);
+    const after = await fetchSnapshotCounts(testServer.serverUrl, token);
+    expect(after.segments - before.segments).toBe(2);
+    expect(after.signs - before.signs).toBe(3);
+    expect(after.cameras - before.cameras).toBe(1);
+
+    const sectionStatsDir = path.join(stateDir, "mini-region-tiles", "osm", "sections");
+    const sectionFiles = readdirSync(sectionStatsDir).filter((f) => f.endsWith(".json"));
+    expect(sectionFiles.length).toBeGreaterThanOrEqual(2); // 0.25° tiles split the fixture's features
+    const extractMeta = JSON.parse(readFileSync(path.join(stateDir, "mini-region-tiles", "osm", "extract-meta.json"), "utf8")) as { md5: string; tagFilter: string[]; license: string };
+    expect(extractMeta.md5).toMatch(/^[0-9a-f]{32}$/);
+    expect(extractMeta.tagFilter).toContain("nw/traffic_sign");
+    expect(extractMeta.license).toMatch(/ODbL/);
+
+    // Remove only the run-level marker: every section is already done, so the re-run reads none of them.
+    rmSync(path.join(stateDir, "mini-region-tiles", "osm", "complete.marker"));
+    const again = await runCli(["--region", "mini-region-tiles"], env);
+    expect(again.code, `re-run failed: ${again.stderr}`).toBe(0);
+    expect(again.stdout).toMatch(/section already complete/);
+    expect(await fetchSnapshotCounts(testServer.serverUrl, token)).toEqual(after);
+  }, 90_000);
 });

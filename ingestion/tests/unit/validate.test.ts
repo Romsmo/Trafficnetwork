@@ -30,6 +30,12 @@ describe("validateRow", () => {
     expect(validateRow({ kind: "fixed-speed-camera", key: "fixed-speed-camera:node/1", row: { lat: 48, lng: 200, source: "osm" } })).toMatch(/outside/);
   });
 
+  it("quarantines what the server's Zod schema accepts but Postgres would reject with a 500 (fractional limit, NUL in text)", () => {
+    expect(validateRow(segment({ speedLimit: 42.5 }))).toMatch(/whole number/);
+    expect(validateRow(segment({ speedLimit: 30 }))).toBeUndefined();
+    expect(validateRow({ kind: "static-sign", key: "static-sign:node/1", row: { lat: 48, lng: 11, signType: "DE:2\u00004", source: "osm" } })).toMatch(/NUL/);
+  });
+
   it("quarantines implausible limits (a typo like maxspeed=500) that the server would happily store", () => {
     expect(validateRow(segment({ speedLimit: 500 }))).toMatch(/implausible/);
     expect(validateRow(segment({ speedLimit: 200 }))).toBeUndefined();

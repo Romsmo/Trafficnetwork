@@ -1,0 +1,62 @@
+# A dedicated, EMPTY single-node server for the Europe base-data import (docs/europe-runbook.md).
+#
+# Deliberately separate from any other node: the server has no dedup, so importing Europe into a server that
+# already holds e.g. Bayern would double Bayern. Federation is off (no NETWORK_CONFIG_PATH).
+#
+#   docker compose -p tn-europe --env-file <secrets>/europe-node.env -f deploy/europe-node/docker-compose.yml up -d
+#
+# Required in the env file (never commit it): POSTGRES_PASSWORD, JWT_SECRET (≥16 chars).
+# Optional: EUROPE_NODE_PORT (host port, default 3200), SERVER_IMAGE (pre-built server image).
+#
+# Postgres is tuned for one long bulk load, without giving up durability: fsync and synchronous_commit stay ON,
+# because the ingestion marks a batch "done" only after the server confirmed it — a lost commit would silently
+# leave a hole in the data. What changes is checkpoint pressure (max_wal_size / checkpoint_timeout) and memory.
+name: tn-europe
+
+services:
+  postgres:
+    image: postgis/postgis:16-3.4
+    restart: unless-stopped
+    shm_size: 1g
+    environment:
+      POSTGRES_USER: trafficnetwork
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}
+      POSTGRES_DB: trafficnetwork
+    command:
+      - postgres
+      - -c
+      - shared_buffers=1GB
+      - -c
+      - max_wal_size=4GB
+      - -c
+      - checkpoint_timeout=15min
+      - -c
+      - wal_compression=on
+      - -c
+      - maintenance_work_mem=512MB
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U trafficnetwork -d trafficnetwork"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  server:
+    image: ${SERVER_IMAGE:-trafficnetwork-server-server:latest}
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://trafficnetwork:${POSTGRES_PASSWORD}@postgres:5432/trafficnetwork
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be set}
+      PORT: 3000
+      HOST: 0.0.0.0
+      LOG_LEVEL: warn
+      SPEED_CAMERA_NAMESPACE_ENABLED: "false"
+    ports:
+      - "127.0.0.1:${EUROPE_NODE_PORT:-3200}:3000"
+
+volumes:
+  pgdata:
