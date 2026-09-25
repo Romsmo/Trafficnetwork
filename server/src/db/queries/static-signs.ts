@@ -1,6 +1,6 @@
-import { sql } from "drizzle-orm";
+import { sql, type SQL } from "drizzle-orm";
 import type { Queryable } from "../client.js";
-import { bboxPrefilter } from "../../lib/geo-bbox.js";
+import { bboxPrefilter, envelopeOverlap, type Envelope } from "../../lib/geo-bbox.js";
 
 export interface StaticSignApi {
   id: string;
@@ -57,4 +57,15 @@ export async function findStaticSignsNearby(
     )
   `);
   return rows.map(toApi);
+}
+
+/** Candidate rows of one partition tile (bounding-box match, ordered by id for stable package hashes) and how to shape them. */
+export function tileStaticSignsQuery(envelopes: readonly Envelope[]): { query: SQL; map: (row: Record<string, unknown>) => StaticSignApi } {
+  return {
+    query: sql`
+      select id, ST_AsGeoJSON(position)::json as position_geojson, sign_type, source, source_license, imported_at
+      from static_signs where ${envelopeOverlap(sql`position`, envelopes)} order by id
+    `,
+    map: (row) => toApi(row as Row),
+  };
 }

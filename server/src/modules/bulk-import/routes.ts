@@ -8,7 +8,6 @@ import {
 import { requireScope } from "../auth/hook.js";
 import { badRequest } from "../../lib/errors.js";
 
-const BULK_IMPORT_MAX_ROWS = 5000;
 
 const latLng = z.tuple([z.number().min(-180).max(180), z.number().min(-90).max(90)]);
 
@@ -38,9 +37,12 @@ const fixedSpeedCameraRowSchema = z.object({
   importedAt: z.string().datetime().optional(),
 });
 
-function rowsSchema<T extends z.ZodTypeAny>(row: T) {
-  return z.object({ rows: z.array(row).min(1).max(BULK_IMPORT_MAX_ROWS) });
+function rowsSchema<T extends z.ZodTypeAny>(row: T, maxRows: number) {
+  return z.object({ rows: z.array(row).min(1).max(maxRows) });
 }
+
+/** Room for BULK_IMPORT_MAX_ROWS rows of JSON (a long segment is a few KB); Fastify's default body limit is 1 MiB. */
+const BULK_BODY_LIMIT_BYTES = 64 * 1024 * 1024;
 
 /**
  * A normal, publicly documented API endpoint with an elevated permission level —
@@ -49,28 +51,28 @@ function rowsSchema<T extends z.ZodTypeAny>(row: T) {
  * authenticated client holding the bulk-import scope may call these.
  */
 export async function registerBulkImportRoutes(app: FastifyInstance) {
-  app.post(
-    "/v1/bulk-import/speed-limit-segments",
-    { preHandler: requireScope("bulk-import") },
-    async (req) => {
-      const parsed = rowsSchema(speedLimitSegmentRowSchema).safeParse(req.body);
-      if (!parsed.success) throw badRequest("Invalid request body", parsed.error.issues);
-      const inserted = await bulkInsertSpeedLimitSegments(app.deps.db, parsed.data.rows);
-      return { inserted };
-    },
-  );
+  const maxRows = app.deps.env.BULK_IMPORT_MAX_ROWS;
+  const importOptions = { partitionResolution: app.deps.env.STATIC_DATA_PARTITION_H3_RESOLUTION };
+  const route = { preHandler: requireScope("bulk-import"), bodyLimit: BULK_BODY_LIMIT_BYTES };
 
-  app.post("/v1/bulk-import/static-signs", { preHandler: requireScope("bulk-import") }, async (req) => {
-    const parsed = rowsSchema(staticSignRowSchema).safeParse(req.body);
+  app.post("/v1/bulk-import/speed-limit-segments", route, async (req) => {
+    const parsed = rowsSchema(speedLimitSegmentRowSchema, maxRows).safeParse(req.body);
     if (!parsed.success) throw badRequest("Invalid request body", parsed.error.issues);
-    const inserted = await bulkInsertStaticSigns(app.deps.db, parsed.data.rows);
+    const inserted = await bulkInsertSpeedLimitSegments(app.deps.db, parsed.data.rows, importOptions);
     return { inserted };
   });
 
-  app.post("/v1/bulk-import/speed-cameras", { preHandler: requireScope("bulk-import") }, async (req) => {
-    const parsed = rowsSchema(fixedSpeedCameraRowSchema).safeParse(req.body);
+  app.post("/v1/bulk-import/static-signs", route, async (req) => {
+    const parsed = rowsSchema(staticSignRowSchema, maxRows).safeParse(req.body);
     if (!parsed.success) throw badRequest("Invalid request body", parsed.error.issues);
-    const inserted = await bulkInsertFixedSpeedCameras(app.deps.db, parsed.data.rows);
+    const inserted = await bulkInsertStaticSigns(app.deps.db, parsed.data.rows, importOptions);
+    return { inserted };
+  });
+
+  app.post("/v1/bulk-import/speed-cameras", route, async (req) => {
+    const parsed = rowsSchema(fixedSpeedCameraRowSchema, maxRows).safeParse(req.body);
+    if (!parsed.success) throw badRequest("Invalid request body", parsed.error.issues);
+    const inserted = await bulkInsertFixedSpeedCameras(app.deps.db, parsed.data.rows, importOptions);
     return { inserted };
   });
 }

@@ -6,6 +6,7 @@ import { createDb } from "./db/client.js";
 import { startExpiryWorker } from "./modules/expiry/worker.js";
 import { startRetentionWorker } from "./modules/expiry/retention.js";
 import { startFederationWorkers, type FederationWorkersHandle } from "./modules/federation/workers.js";
+import { startStaticPackageWorker } from "./modules/static-data/package-worker.js";
 
 async function main() {
   const env = loadEnv();
@@ -16,12 +17,15 @@ async function main() {
   const federationWorkers: FederationWorkersHandle | null = env.FEDERATION_ENABLED
     ? startFederationWorkers({ db, env, nodeIdentity: app.nodeIdentity, realtime: app.realtime, log: app.log })
     : null;
+  // Pre-built static-data packages (add-on E-B): rebuilt in the background after static data changes.
+  const packageWorker = env.STATIC_PACKAGES_WORKER_ENABLED ? startStaticPackageWorker(db, env, app.log) : null;
 
   closeWithGrace(async ({ err }) => {
     if (err) app.log.error(err, "closing due to error");
     expiryWorker.stop();
     retentionWorker.stop();
     federationWorkers?.stop();
+    packageWorker?.stop();
     await app.close();
     await client.end();
   });

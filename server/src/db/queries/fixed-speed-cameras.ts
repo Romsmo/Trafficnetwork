@@ -1,5 +1,6 @@
-import { sql } from "drizzle-orm";
+import { sql, type SQL } from "drizzle-orm";
 import type { Queryable } from "../client.js";
+import { envelopeOverlap, type Envelope } from "../../lib/geo-bbox.js";
 
 export interface FixedSpeedCameraApi {
   id: string;
@@ -144,4 +145,15 @@ export async function markFixedSpeedCameraRemoved(db: Queryable, id: string): Pr
   const updated = await findFixedSpeedCameraByIdForUpdate(db, id);
   if (!updated) throw new Error("markFixedSpeedCameraRemoved: row disappeared");
   return updated;
+}
+
+/** Candidate active cameras of one partition tile, ordered by id — see tileStaticSignsQuery. */
+export function tileFixedSpeedCamerasQuery(envelopes: readonly Envelope[]): { query: SQL; map: (row: Record<string, unknown>) => FixedSpeedCameraApi } {
+  return {
+    query: sql`
+      select ${SELECT_COLUMNS} from fixed_speed_cameras c
+      where c.status = 'active' and ${envelopeOverlap(sql`c.position`, envelopes)} order by c.id
+    `,
+    map: (row) => toApi(row as Row),
+  };
 }

@@ -12,6 +12,8 @@ import {
 } from "../../db/queries/fixed-speed-cameras.js";
 import { checkRateLimit } from "../moderation/rate-limit.js";
 import { badRequest, notFound } from "../../lib/errors.js";
+import { markTilesDirty } from "../../db/queries/static-packages.js";
+import { pointTileOf } from "../static-data/tiles.js";
 
 export interface CreateCameraInput {
   lat: number;
@@ -50,6 +52,7 @@ export async function createOrMergeFixedCamera(db: Queryable, env: Env, input: C
         payload: updated,
         source: "community",
       });
+      await markTilesDirty(tx, [pointTileOf(updated.position, env.STATIC_DATA_PARTITION_H3_RESOLUTION)]);
       return { camera: updated, merged: true, event };
     }
 
@@ -61,6 +64,7 @@ export async function createOrMergeFixedCamera(db: Queryable, env: Env, input: C
       payload: created,
       source: "community",
     });
+    await markTilesDirty(tx, [pointTileOf(created.position, env.STATIC_DATA_PARTITION_H3_RESOLUTION)]);
     return { camera: created, merged: false, event };
   });
 }
@@ -112,6 +116,7 @@ export async function reportCameraRemoval(db: Queryable, env: Env, input: Report
       payload: removed,
       source: "community",
     });
+    await markTilesDirty(tx, [pointTileOf(removed.position, env.STATIC_DATA_PARTITION_H3_RESOLUTION)]);
     return { camera: removed, recorded: true, removed: true, event };
   });
 }

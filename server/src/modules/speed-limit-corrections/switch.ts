@@ -28,7 +28,7 @@ export async function syncCorrectionsOverlaySwitch(db: Database["db"], env: Env,
   await db.transaction(async (tx) => {
     await tx.execute(sql`update static_data_state set corrections_overlay_enabled = ${env.COMMUNITY_CORRECTIONS_ENABLED} where id = 1`);
     const applied = await listAppliedKeys(tx);
-    await announceChanges(tx, applied, env.COMMUNITY_CORRECTIONS_ENABLED);
+    await announceChanges(tx, applied, env.COMMUNITY_CORRECTIONS_ENABLED, env.STATIC_DATA_PARTITION_H3_RESOLUTION);
     await bumpStaticDataVersion(tx);
   });
   log?.info(

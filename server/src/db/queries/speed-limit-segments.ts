@@ -1,8 +1,8 @@
-import { sql } from "drizzle-orm";
+import { sql, type SQL } from "drizzle-orm";
 import type { Queryable } from "../client.js";
 import type { SpeedLimitUnit } from "../../config/constants.js";
 import { isoTimestamp } from "../sql-iso.js";
-import { bboxPrefilter } from "../../lib/geo-bbox.js";
+import { bboxPrefilter, envelopeOverlap, type Envelope } from "../../lib/geo-bbox.js";
 
 /**
  * Community-correction detail attached to a segment whose *effective* value is
@@ -212,4 +212,15 @@ export async function findNearestSpeedLimit(
     result.correction = segment.correction;
   }
   return result;
+}
+
+/** Candidate segments of one partition tile (bounding-box match, overlay applied, ordered by id for stable package hashes). */
+export function tileSpeedLimitSegmentsQuery(envelopes: readonly Envelope[], overlay: boolean): { query: SQL; map: (row: Record<string, unknown>) => SpeedLimitSegmentApi } {
+  return {
+    query: sql`
+      select ${COLUMNS} ${fromClause(overlay)}
+      where ${envelopeOverlap(sql`s.geometry`, envelopes)} order by s.id
+    `,
+    map: (row) => toSegmentApi(row as Row),
+  };
 }

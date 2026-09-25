@@ -22,6 +22,8 @@ import {
 import { findSpeedLimitSegmentById, findSpeedLimitSegmentsByKey, type SpeedLimitSegmentApi } from "../../db/queries/speed-limit-segments.js";
 import { conflict, forbidden, notFound, tooManyRequests, unprocessable } from "../../lib/errors.js";
 import { validateCorrectionValue } from "./plausibility.js";
+import { markTilesDirty } from "../../db/queries/static-packages.js";
+import { segmentTilesOf } from "../static-data/tiles.js";
 import { candidateKey, correctionId, currentStance, decideWinners, deriveStatus, tallyVotes } from "./tally.js";
 
 type AppendedEvent = Awaited<ReturnType<typeof appendEvent>>;
@@ -118,8 +120,10 @@ export async function announceChanges(
   tx: Transaction,
   changes: readonly Pick<EffectiveChange, "segmentKey" | "unit">[],
   overlay: boolean,
+  partitionResolution: number,
 ): Promise<AppendedEvent[]> {
   const events: AppendedEvent[] = [];
+  const tiles = new Set<string>();
   for (const change of changes) {
     for (const segment of await findSpeedLimitSegmentsByKey(tx, change.segmentKey, change.unit, overlay)) {
       events.push(
@@ -132,8 +136,12 @@ export async function announceChanges(
           source: "community",
         }),
       );
+      for (const tile of segmentTilesOf(segment.geometry, partitionResolution)) tiles.add(tile);
     }
   }
+  // The static packages of every tile these segments touch are now stale (add-on E-B) — marked
+  // after the event above, in the same transaction, so the mark carries the bumped version.
+  await markTilesDirty(tx, [...tiles]);
   return events;
 }
 
@@ -182,7 +190,7 @@ export async function applyVote(db: Database["db"], env: Env, vote: NewVote, opt
     if (seq === null) return { recorded: false, noop: "duplicate", changes: [], events: [] };
 
     const changes = await recomputeSegment(tx, env, vote.segmentKey);
-    const events = await announceChanges(tx, changes, true);
+    const events = await announceChanges(tx, changes, true, env.STATIC_DATA_PARTITION_H3_RESOLUTION);
     return { recorded: true, changes, events };
   });
 }

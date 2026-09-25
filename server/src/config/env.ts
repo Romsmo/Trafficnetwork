@@ -48,6 +48,53 @@ const envSchema = z.object({
   // dataset per partition, not per-request filtering.
   STATIC_DATA_PARTITION_H3_RESOLUTION: z.coerce.number().int().min(0).max(15).default(2),
 
+  // Disk-backed, pre-built static-data packages (add-on E-B, docs/europe-scale.md).
+  // Where the content-addressed package files live. In Docker this is a volume
+  // (docker-compose.yml); a Europe-sized set needs roughly the compressed size of
+  // the dataset (see docs/operating.md for measured numbers).
+  STATIC_PACKAGES_DIR: z.string().min(1).default("./data/static-packages"),
+  // false: this process never builds packages in the background (build them with
+  // `npm run static-packages -- build`, or run the worker in another process).
+  STATIC_PACKAGES_WORKER_ENABLED: z
+    .enum(["true", "false"])
+    .default("true")
+    .transform((v) => v === "true"),
+  // The worker waits until static data has been quiet this long before rebuilding
+  // the tiles a write touched — a bulk import marks tiles for hours and must not
+  // trigger a rebuild per batch. (It still rebuilds after STATIC_PACKAGES_MAX_WAIT_SECONDS
+  // of continuous writes, so packages are never starved indefinitely.)
+  STATIC_PACKAGES_DEBOUNCE_SECONDS: z.coerce.number().int().nonnegative().default(30),
+  STATIC_PACKAGES_MAX_WAIT_SECONDS: z.coerce.number().int().positive().default(900),
+  // Up to this many static rows the packages are built on demand, inside the
+  // first request that needs them (today's behaviour, no waiting for a worker).
+  // Above it a request that finds no complete package set answers 503 +
+  // Retry-After until the worker has finished the initial build.
+  STATIC_PACKAGES_INLINE_BUILD_MAX_ROWS: z.coerce.number().int().nonnegative().default(200_000),
+  // Rows fetched per round trip while streaming a tile into its file — bounds
+  // the builder's memory regardless of how big a tile is.
+  STATIC_PACKAGES_PAGE_ROWS: z.coerce.number().int().positive().default(5000),
+  // Compression of the stored files. gzip 9 / brotli 9 are slow but the packages
+  // are built once and downloaded many times; lower them if builds are too slow.
+  STATIC_PACKAGES_GZIP_LEVEL: z.coerce.number().int().min(1).max(9).default(9),
+  STATIC_PACKAGES_BROTLI_QUALITY: z.coerce.number().int().min(0).max(11).default(9),
+  // How long a replaced package file is kept, so a client that started
+  // downloading it before the rebuild can finish.
+  STATIC_PACKAGES_KEEP_MINUTES: z.coerce.number().int().nonnegative().default(120),
+  // true: GET /v1/static-data/packages/:tile/:hash needs no Authorization header,
+  // so a reverse proxy or CDN can cache and serve it. The data is public OSM data
+  // and the URL is content-addressed, but it does mean anyone can download it
+  // from your server (or your CDN) without a client credential — hence off by default.
+  STATIC_PACKAGES_PUBLIC: z
+    .enum(["true", "false"])
+    .default("false")
+    .transform((v) => v === "true"),
+  // GET /v1/snapshot with static data reads every static row into memory. Above
+  // this many rows it answers 413 and points at the manifest/package endpoints
+  // instead of taking the process down. 0 disables the check.
+  SNAPSHOT_STATIC_MAX_ROWS: z.coerce.number().int().nonnegative().default(1_000_000),
+  // Rows accepted per POST /v1/bulk-import/* call.
+  BULK_IMPORT_MAX_ROWS: z.coerce.number().int().positive().max(50_000).default(5000),
+
   // Anonymous device registration (client-lib P2.0): max devices a single app
   // key may register per rolling day, on top of the per-IP @fastify/rate-limit
   // on the route itself.

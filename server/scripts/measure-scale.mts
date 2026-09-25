@@ -34,6 +34,7 @@ const { values } = parseArgs({
     json: { type: "string" },
     "import-rows": { type: "string", default: "100000" },
     "import-batch": { type: "string", default: "5000" },
+    "import-impl": { type: "string", default: "batched" },
   },
 });
 const phases = new Set((values.phase ?? "sizes,reads").split(","));
@@ -42,6 +43,23 @@ const report: Record<string, unknown> = { label: values.label, at: new Date().to
 process.env["LOG_LEVEL"] ??= "silent";
 const env = loadEnv();
 const { db, client } = createDb(env);
+
+/**
+ * The one-INSERT-per-row implementation the server used before add-on E-B, kept here only so
+ * `--import-impl legacy` can measure the difference against the batched one on the same database.
+ */
+async function legacyBulkInsert(rows: SpeedLimitSegmentImportRow[]): Promise<void> {
+  await db.transaction(async (tx) => {
+    for (const row of rows) {
+      const wkt = `LINESTRING(${row.lineString.map(([lng, lat]) => `${lng} ${lat}`).join(", ")})`;
+      await tx.execute(sql`
+        insert into speed_limit_segments (geometry, speed_limit, speed_limit_unit, source, source_license, imported_at)
+        values (ST_SetSRID(ST_GeomFromText(${wkt}), 4326), ${row.speedLimit}, ${row.speedLimitUnit}::speed_limit_unit,
+                ${row.source}, ${row.sourceLicense ?? null}, ${row.importedAt ?? new Date().toISOString()})
+      `);
+    }
+  });
+}
 
 const MB = 1024 * 1024;
 const round = (n: number, digits = 1) => Math.round(n * 10 ** digits) / 10 ** digits;
@@ -203,11 +221,12 @@ async function main() {
     while (done < total) {
       const size = Math.min(batchSize, total - done);
       const rows = Array.from({ length: size }, (_, k) => makeRow(done + k));
-      await bulkInsertSpeedLimitSegments(db, rows);
+      if (values["import-impl"] === "legacy") await legacyBulkInsert(rows);
+      else await bulkInsertSpeedLimitSegments(db, rows, { partitionResolution: env.STATIC_DATA_PARTITION_H3_RESOLUTION });
       done += size;
     }
     const seconds = (performance.now() - started) / 1000;
-    report["import"] = { rows: total, batchSize, seconds: round(seconds), rowsPerSecond: Math.round(total / seconds) };
+    report["import"] = { implementation: values["import-impl"], rows: total, batchSize, seconds: round(seconds), rowsPerSecond: Math.round(total / seconds) };
     await db.execute(sql`delete from speed_limit_segments where source = 'bench'`);
   }
 

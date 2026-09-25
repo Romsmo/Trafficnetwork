@@ -71,6 +71,11 @@ export async function registerAuthHook(app: FastifyInstance) {
   app.addHook("onRequest", async (req: FastifyRequest, _reply: FastifyReply) => {
     const path = req.url.split("?")[0] ?? "";
     if (PUBLIC_PATHS.has(path)) return;
+    // Add-on E-B, opt-in (STATIC_PACKAGES_PUBLIC): the content-addressed package URLs need no
+    // credential so a reverse proxy / CDN can cache and serve them. Prefix rule, not a Set
+    // entry, because the tile and hash are part of the path — covered by
+    // tests/integration/europe-scale.test.ts (off by default; on only when asked).
+    if (app.deps.env.STATIC_PACKAGES_PUBLIC && path.startsWith("/v1/static-data/packages/")) return;
     if (!path.startsWith("/v1/")) return;
 
     const header = req.headers.authorization;
