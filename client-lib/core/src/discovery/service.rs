@@ -143,7 +143,27 @@ impl DiscoveryService {
             match self.transport.send(request).await {
                 Ok(response) if response.is_success() => match parse_directory(&response) {
                     Ok(directory) => {
-                        self.pool.lock().unwrap().ingest_directory(&directory);
+                        let mut pool = self.pool.lock().unwrap();
+                        pool.ingest_directory(&directory);
+                        // The server that just answered is a server too. Its
+                        // directory lists the *other* nodes, so on a network
+                        // of one (or a client that only knows the seed) the
+                        // pool would otherwise stay empty and nothing could
+                        // ever be synced. It is reached at the address it
+                        // was just reached at, not the one it claims.
+                        let already_known = pool
+                            .node_ids()
+                            .filter_map(|id| pool.get(id))
+                            .any(|known| same_address(&known.address, &base_url));
+                        if !already_known {
+                            pool.add_known_server(
+                                directory.self_info.node_id.clone(),
+                                directory.self_info.public_key.clone(),
+                                base_url.clone(),
+                                ReputationTier::Active,
+                            );
+                        }
+                        drop(pool);
                         *self.cache_meta.lock().unwrap() = Some(CachedDirectory {
                             fetched_at_unix_ms: self.clock.now_unix_ms(),
                             generated_at: directory.generated_at.clone(),
@@ -369,6 +389,12 @@ impl DiscoveryService {
     }
 }
 
+/// The same server, allowing for a trailing slash and letter case.
+fn same_address(a: &str, b: &str) -> bool {
+    a.trim_end_matches('/')
+        .eq_ignore_ascii_case(b.trim_end_matches('/'))
+}
+
 fn parse_directory(response: &HttpResponse) -> Result<NetworkDirectory, DiscoveryError> {
     response
         .json()
@@ -473,6 +499,43 @@ mod tests {
 
         service.refresh_directory().await.unwrap();
         assert!(service.has_any_directory_data());
+    }
+
+    #[tokio::test]
+    async fn the_seed_that_answered_is_itself_in_the_pool() {
+        // A network of one: the directory has no peers, only the seed itself.
+        let transport = Arc::new(MockTransport::new());
+        transport.set(
+            "https://seed1.example/v1/network/directory",
+            200,
+            serde_json::json!({
+                "self": { "nodeId": "seed1", "publicKey": "pk-seed1", "address": "https://public.example", "federationEnabled": false },
+                "peers": [],
+                "generatedAt": "2026-01-01T00:00:00Z"
+            }),
+        );
+        let clock = Arc::new(FixedClock(AtomicI64::new(1000)));
+        let service = DiscoveryService::new(
+            transport,
+            clock,
+            DiscoveryConfig {
+                seeds: vec!["https://seed1.example".to_string()],
+                pool_size: 3,
+                directory_ttl_ms: 60_000,
+            },
+        );
+
+        service.refresh_directory().await.unwrap();
+
+        let pool = service.current_pool();
+        assert_eq!(pool.len(), 1);
+        assert_eq!(pool[0].node_id, "seed1");
+        // Where it was reached, not what it says about itself.
+        assert_eq!(pool[0].address, "https://seed1.example");
+        assert_eq!(
+            service.directory_generated_at().as_deref(),
+            Some("2026-01-01T00:00:00Z")
+        );
     }
 
     #[tokio::test]

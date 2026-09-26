@@ -76,10 +76,7 @@ fn handle(mut stream: std::net::TcpStream, routes: &Routes, log: &Mutex<Vec<(Str
     let path = parts.next().unwrap_or("").split('?').next().unwrap_or("");
     let key = format!("{method} {path}");
     log.lock().unwrap().push((key.clone(), body));
-    let (status, payload) = routes
-        .get(&key)
-        .cloned()
-        .unwrap_or((404, "{}".to_string()));
+    let (status, payload) = routes.get(&key).cloned().unwrap_or((404, "{}".to_string()));
     let response = format!(
         "HTTP/1.1 {status} X\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{payload}",
         payload.len()
@@ -124,7 +121,11 @@ fn working_routes() -> Routes {
         200,
         json!({ "accessToken": "tok", "tokenType": "Bearer", "expiresIn": 3600, "scopes": ["client"] }),
     );
-    add("POST /v1/devices/bind-key", 200, json!({ "bound": true, "publicKey": "x" }));
+    add(
+        "POST /v1/devices/bind-key",
+        200,
+        json!({ "bound": true, "publicKey": "x" }),
+    );
     add(
         "GET /v1/config",
         200,
@@ -161,7 +162,11 @@ fn working_routes() -> Routes {
             "hazardReports": [], "fixedSpeedCameras": []
         }),
     );
-    add("POST /v1/hazard-reports", 201, json!({ "report": {}, "merged": false }));
+    add(
+        "POST /v1/hazard-reports",
+        201,
+        json!({ "report": {}, "merged": false }),
+    );
     add(
         "POST /v1/devices/register",
         201,
@@ -229,11 +234,19 @@ fn a_client_syncs_reads_and_reports_through_the_c_functions() {
     let sync = call(client, "sync", json!({}));
     assert_eq!(sync["ok"]["ok"], true, "{sync}");
 
-    let limit = call(client, "getSpeedLimitAt", json!({ "lat": 52.0, "lng": 13.005 }));
+    let limit = call(
+        client,
+        "getSpeedLimitAt",
+        json!({ "lat": 52.0, "lng": 13.005 }),
+    );
     assert_eq!(limit["ok"]["value"], 50.0);
     assert_eq!(limit["ok"]["unit"], "kmh");
 
-    let report = call(client, "submitReport", json!({ "type": "traffic", "lat": 52.0, "lng": 13.0 }));
+    let report = call(
+        client,
+        "submitReport",
+        json!({ "type": "traffic", "lat": 52.0, "lng": 13.0 }),
+    );
     assert!(report["ok"]["localId"].is_string());
     let synced = call(client, "sync", json!({}));
     assert_eq!(synced["ok"]["submitted"], 1, "{synced}");
@@ -251,7 +264,11 @@ fn a_client_syncs_reads_and_reports_through_the_c_functions() {
         log: Arc::new(Mutex::new(Vec::new())),
     };
     let again = new_client(&options(&dead_server, &dir, device_credentials()));
-    let limit = call(again, "getSpeedLimitAt", json!({ "lat": 52.0, "lng": 13.005 }));
+    let limit = call(
+        again,
+        "getSpeedLimitAt",
+        json!({ "lat": 52.0, "lng": 13.005 }),
+    );
     assert_eq!(limit["ok"]["value"], 50.0);
     unsafe { tn_client_free(again) };
     let _ = std::fs::remove_dir_all(&dir);
@@ -276,7 +293,10 @@ fn errors_come_back_as_json_never_as_a_crash() {
     assert_eq!(take(error)["error"]["code"], "invalidArgument");
 
     let client = new_client(&options(&server, &dir, device_credentials()));
-    assert_eq!(call(client, "noSuchMethod", json!({}))["error"]["code"], "invalidArgument");
+    assert_eq!(
+        call(client, "noSuchMethod", json!({}))["error"]["code"],
+        "invalidArgument"
+    );
     assert_eq!(
         call(client, "getSpeedLimitAt", json!({ "lat": "x" }))["error"]["code"],
         "invalidArgument"
@@ -284,14 +304,18 @@ fn errors_come_back_as_json_never_as_a_crash() {
     // A NULL handle and a NULL method are errors too.
     let method = CString::new("sync").unwrap();
     // Safety: NULL is documented as allowed and answered with an error.
-    let result = take(unsafe { tn_client_call(std::ptr::null_mut(), method.as_ptr(), std::ptr::null()) });
+    let result =
+        take(unsafe { tn_client_call(std::ptr::null_mut(), method.as_ptr(), std::ptr::null()) });
     assert_eq!(result["error"]["code"], "closed");
     let result = take(unsafe { tn_client_call(client, std::ptr::null(), std::ptr::null()) });
     assert_eq!(result["error"]["code"], "invalidArgument");
 
     // After the client is closed, calls fail cleanly.
     assert!(call(client, "close", Value::Null)["ok"].is_object());
-    assert_eq!(call(client, "getSyncStatus", Value::Null)["error"]["code"], "closed");
+    assert_eq!(
+        call(client, "getSyncStatus", Value::Null)["error"]["code"],
+        "closed"
+    );
     unsafe { tn_client_free(client) };
     // Freeing NULL is fine.
     unsafe { tn_client_free(std::ptr::null_mut()) };
@@ -301,7 +325,10 @@ fn errors_come_back_as_json_never_as_a_crash() {
 extern "C" fn deliver_to_channel(user_data: *mut c_void, result: *const c_char) {
     // Safety: `user_data` is the `Sender` leaked by the test, `result` a valid string.
     let sender = unsafe { &*user_data.cast::<Mutex<Sender<String>>>() };
-    let text = unsafe { CStr::from_ptr(result) }.to_str().unwrap().to_string();
+    let text = unsafe { CStr::from_ptr(result) }
+        .to_str()
+        .unwrap()
+        .to_string();
     sender.lock().unwrap().send(text).unwrap();
 }
 
@@ -339,7 +366,10 @@ fn an_asynchronous_call_returns_at_once_and_calls_back() {
 extern "C" fn record_event(user_data: *mut c_void, event: *const c_char) {
     // Safety: `user_data` is the `Mutex<Vec<String>>` owned by the test.
     let events = unsafe { &*user_data.cast::<Mutex<Vec<String>>>() };
-    let text = unsafe { CStr::from_ptr(event) }.to_str().unwrap().to_string();
+    let text = unsafe { CStr::from_ptr(event) }
+        .to_str()
+        .unwrap()
+        .to_string();
     events.lock().unwrap().push(text);
 }
 
@@ -357,8 +387,14 @@ fn events_reach_the_registered_callback() {
 
     // Safety: still owned by this test.
     let seen = unsafe { &*events }.lock().unwrap().clone();
-    assert!(seen.iter().any(|e| e.contains("\"syncCompleted\"")), "{seen:?}");
-    assert!(seen.iter().any(|e| e.contains("\"bootstrapProgress\"")), "{seen:?}");
+    assert!(
+        seen.iter().any(|e| e.contains("\"syncCompleted\"")),
+        "{seen:?}"
+    );
+    assert!(
+        seen.iter().any(|e| e.contains("\"bootstrapProgress\"")),
+        "{seen:?}"
+    );
     unsafe {
         tn_client_free(client);
         drop(Box::from_raw(events));
@@ -368,7 +404,12 @@ fn events_reach_the_registered_callback() {
 
 struct SecretMap(Mutex<HashMap<String, String>>);
 
-extern "C" fn secret_get(user_data: *mut c_void, key: *const c_char, buffer: *mut c_char, capacity: i32) -> i32 {
+extern "C" fn secret_get(
+    user_data: *mut c_void,
+    key: *const c_char,
+    buffer: *mut c_char,
+    capacity: i32,
+) -> i32 {
     // Safety: `user_data` is a `SecretMap` owned by the test; `key` a valid string;
     // `buffer` writable for `capacity` bytes.
     let map = unsafe { &*user_data.cast::<SecretMap>() };
@@ -388,7 +429,10 @@ extern "C" fn secret_get(user_data: *mut c_void, key: *const c_char, buffer: *mu
 extern "C" fn secret_set(user_data: *mut c_void, key: *const c_char, value: *const c_char) -> i32 {
     let map = unsafe { &*user_data.cast::<SecretMap>() };
     let key = unsafe { CStr::from_ptr(key) }.to_str().unwrap().to_string();
-    let value = unsafe { CStr::from_ptr(value) }.to_str().unwrap().to_string();
+    let value = unsafe { CStr::from_ptr(value) }
+        .to_str()
+        .unwrap()
+        .to_string();
     map.0.lock().unwrap().insert(key, value);
     0
 }
@@ -430,12 +474,20 @@ fn the_hosts_own_secret_store_holds_the_device_credential_and_key() {
 
     // Safety: still owned by this test.
     let stored = unsafe { &*secrets }.0.lock().unwrap().clone();
-    assert_eq!(stored.get("device.clientId").map(String::as_str), Some("device-77"));
-    assert_eq!(stored.get("device.clientSecret").map(String::as_str), Some("device-secret"));
+    assert_eq!(
+        stored.get("device.clientId").map(String::as_str),
+        Some("device-77")
+    );
+    assert_eq!(
+        stored.get("device.clientSecret").map(String::as_str),
+        Some("device-secret")
+    );
     assert!(stored.contains_key("device.privateKey"));
     assert_eq!(server.requests_to("POST /v1/devices/register").len(), 1);
     // And the default file store was not used.
-    assert!(!std::path::Path::new(&dir).join("secure-store.json").exists());
+    assert!(!std::path::Path::new(&dir)
+        .join("secure-store.json")
+        .exists());
     unsafe {
         tn_client_free(client);
         drop(Box::from_raw(secrets));
@@ -447,7 +499,10 @@ fn the_hosts_own_secret_store_holds_the_device_credential_and_key() {
 fn the_library_version_is_a_string() {
     let version = tn_library_version();
     // Safety: a string this library returned.
-    let text = unsafe { CStr::from_ptr(version) }.to_str().unwrap().to_string();
+    let text = unsafe { CStr::from_ptr(version) }
+        .to_str()
+        .unwrap()
+        .to_string();
     unsafe { tn_free_string(version) };
     assert!(text.starts_with("0."), "{text}");
 }

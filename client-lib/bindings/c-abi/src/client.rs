@@ -43,7 +43,9 @@ fn runtime() -> &'static Runtime {
 
 fn to_c_string(text: String) -> *mut c_char {
     CString::new(text)
-        .unwrap_or_else(|_| CString::new(r#"{"error":{"code":"internal","message":"NUL byte in result"}}"#).unwrap())
+        .unwrap_or_else(|_| {
+            CString::new(r#"{"error":{"code":"internal","message":"NUL byte in result"}}"#).unwrap()
+        })
         .into_raw()
 }
 
@@ -74,7 +76,10 @@ unsafe fn read_str(ptr: *const c_char) -> Option<String> {
         return None;
     }
     // Safety: the caller promises a valid NUL-terminated string.
-    unsafe { CStr::from_ptr(ptr) }.to_str().ok().map(str::to_owned)
+    unsafe { CStr::from_ptr(ptr) }
+        .to_str()
+        .ok()
+        .map(str::to_owned)
 }
 
 /// What a handle points at.
@@ -86,8 +91,12 @@ struct Handle {
 
 /// Reads a secret: writes the value (NUL-terminated, shorter than `capacity`)
 /// into `buffer` and returns its length, or returns -1 if there is none.
-pub type TnSecureGet =
-    unsafe extern "C" fn(user_data: *mut c_void, key: *const c_char, buffer: *mut c_char, capacity: i32) -> i32;
+pub type TnSecureGet = unsafe extern "C" fn(
+    user_data: *mut c_void,
+    key: *const c_char,
+    buffer: *mut c_char,
+    capacity: i32,
+) -> i32;
 /// Stores a secret; returns 0 on success.
 pub type TnSecureSet =
     unsafe extern "C" fn(user_data: *mut c_void, key: *const c_char, value: *const c_char) -> i32;
@@ -136,11 +145,14 @@ impl SecureStore for CallbackSecureStore {
         let key = CString::new(key).map_err(|e| e.to_string())?;
         let value = CString::new(value).map_err(|e| e.to_string())?;
         // Safety: valid NUL-terminated strings for the duration of the call.
-        let status = unsafe { (self.set)(self.user_data as *mut c_void, key.as_ptr(), value.as_ptr()) };
+        let status =
+            unsafe { (self.set)(self.user_data as *mut c_void, key.as_ptr(), value.as_ptr()) };
         if status == 0 {
             Ok(())
         } else {
-            Err(format!("the host's secret store refused the write ({status})"))
+            Err(format!(
+                "the host's secret store refused the write ({status})"
+            ))
         }
     }
 
@@ -151,7 +163,9 @@ impl SecureStore for CallbackSecureStore {
         if status == 0 {
             Ok(())
         } else {
-            Err(format!("the host's secret store refused the delete ({status})"))
+            Err(format!(
+                "the host's secret store refused the delete ({status})"
+            ))
         }
     }
 }
@@ -191,7 +205,10 @@ unsafe fn new_client(
     let outcome = catch_unwind(AssertUnwindSafe(|| {
         // Safety: forwarded from the caller's promise about `options_json`.
         let Some(options) = (unsafe { read_str(options_json) }) else {
-            return Err(ApiError::new(code::INVALID_ARGUMENT, "options must be a JSON string"));
+            return Err(ApiError::new(
+                code::INVALID_ARGUMENT,
+                "options must be a JSON string",
+            ));
         };
         create(&options, secure_store)
     }));
@@ -328,12 +345,17 @@ pub unsafe extern "C" fn tn_client_call(
             "the method name must be a string",
         )));
     };
-    to_c_string(run_call(&handle.client, &method, args.as_deref().unwrap_or("")))
+    to_c_string(run_call(
+        &handle.client,
+        &method,
+        args.as_deref().unwrap_or(""),
+    ))
 }
 
 /// Called with the result string (valid only during the call — copy it) when
 /// an asynchronous call is done, from a thread of the library.
-pub type TnResultCallback = unsafe extern "C" fn(user_data: *mut c_void, result_json: *const c_char);
+pub type TnResultCallback =
+    unsafe extern "C" fn(user_data: *mut c_void, result_json: *const c_char);
 
 /// [`tn_client_call`] without blocking: returns at once and calls `callback`
 /// with the result when the call is done.
