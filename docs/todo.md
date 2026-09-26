@@ -88,11 +88,11 @@ _Zuletzt aktualisiert: 2026-09-17 von der F-C-Session._
 ## Phase 3 — Ingestion-Programm (Grundstock-Befüllung) — nach Überarbeitung F
 - [x] Claude-Code-Prompt erstellt (`docs/prompt-phase3-ingestion.md`)
 - [x] Umfang der Erstbefüllung entschieden: **zuerst eine einzelne Region** (Bundesland-Extrakt, ~100 MB); Deutschland/Europa später per Konfiguration
-- [ ] Quellenkatalog vervollständigen, Limits/Lizenzen mit Beleg dokumentieren
-- [ ] OSM-Worker regionsparametrisiert bauen, Wiederaufnahme nach Abbruch
-- [ ] Weitere Quellen hinter Schaltern inkl. Kill-Switches (HERE/TomTom standardmäßig aus)
-- [ ] Ausschließlich über die öffentliche Bulk-Import-API anbinden (kein privilegierter Zugriff)
-- [ ] Grundbefüllung durchführen, danach Ingestion optional abschalten
+- [x] Quellenkatalog vervollständigen, Limits/Lizenzen mit Beleg dokumentieren (`ingestion/docs/sources.md`)
+- [x] OSM-Worker regionsparametrisiert bauen, Wiederaufnahme nach Abbruch
+- [x] Weitere Quellen hinter Schaltern inkl. Kill-Switches (HERE/TomTom standardmäßig aus, nur katalogisiert; Baustellen-Feeds und NVDB Norwegen je eigener Schalter)
+- [x] Ausschließlich über die öffentliche Bulk-Import-API anbinden (kein privilegierter Zugriff)
+- [x] Grundbefüllung durchführen, danach Ingestion optional abschalten (Bayern in Launch L, ganz Europa in Zusatz A)
 
 ## Launch L — Lokaler Testbetrieb auf dem Windows-PC (Docker)
 - [x] Claude-Code-Prompt erstellt (`docs/prompt-launch-local-test.md`)
@@ -129,7 +129,7 @@ _Zuletzt aktualisiert: 2026-09-17 von der F-C-Session._
 - [x] Entschieden: ganz Europa, **einmaliger** Import des aktuellsten Stands; kein wiederkehrender Update-Lauf vorerst
 - [x] Entschieden: statische Daten weiterhin **vollständig an jedes Gerät** — Machbarkeit wird nach dem Import gemessen, nicht geraten
 - [x] Zusatz-Prompts erstellt (`docs/prompt-addon-europe-basemap.md`)
-- [ ] E-A Ingestion: Machbarkeitsbericht (Platz, RAM, Dauer), dann Europa-Import in Abschnitten, Update-Weg nur dokumentiert
+- [x] E-A Ingestion: Machbarkeitsbericht, Europa-Import (13,68 Mio. Zeilen, 4,1 GB) und Bericht (`ingestion/docs/europe-feasibility.md`, `europe-run-report.md`), Update-Weg nur dokumentiert
 - [~] E-B Server: Code fertig (Branch `feature/europe-scale`, gestapelt auf K-A + Perf-Fix, gepusht, PR wartet; vorgebaute, streamende, zwischenspeicherbare Pakete, Batch-Import, Snapshot-Schutz, `?since=`, Range). **Entschieden 2026-09-25:** Auflösung 4 ist Code-Standard, `partitionResolution` steht im Manifest (Client-Instanz: bei Abweichung neu bootstrappen); Migration 0007 bleibt als dokumentiertes Wartungsfenster (Migrations-Regel + Warnung eingeführt). **Offen:** Vollsuite mit Docker laufen lassen (erst nach dem Europa-Import), Integrationstest `europe-scale` nach der Auflösungs-Änderung wiederholen, vollständige Messung (Bau-Dauer, Spitzen-RSS, Kachelgrößen, Manifest, Migration 0007+0008) **auf einer Kopie des echten Bestands**, danach Migration + Paketbau auf `tn-europe` selbst
 - [ ] E-C Client-Bibliothek: vollständigen Bootstrap messen und berichten (Datenmenge, Dauer, Speicher)
 - [ ] E-D Web: Startansicht Europa, nur sichtbaren Ausschnitt laden, Cluster bei kleiner Zoomstufe
@@ -148,14 +148,18 @@ _Zuletzt aktualisiert: 2026-09-17 von der F-C-Session._
 ## Zusatz Q — Quellenkatalog (Blitzer, Baustellen, Verkehrsschilder)
 - [x] Recherche des Betreibers liegt vor (Rechtslage, OSM, DATEX II/NAPCORE, nordische Behördenquellen)
 - [x] Zusatz-Prompt erstellt (`docs/prompt-addon-source-catalogue.md`) — für den Ingestion-Chat
-- [ ] Q0 Quellenkatalog mit belegten Lizenzen + Ampel je Quelle (`ingestion/docs/sources.md`)
-- [ ] Q1 Blitzer aus OSM (Namensraum bleibt deaktiviert)
-- [ ] Q2 Verkehrsschilder aus OSM, Codes länderoffen
-- [ ] Q3 Baustellen: DATEX-II-Leser + Autobahn GmbH, periodisch lauffähig
-- [ ] Q4 Eine amtliche Schildquelle (Digiroad oder NVDB) inkl. Koordinatenumrechnung
-- [ ] Entscheiden: läuft der Baustellen-Anbinder dauerhaft, und welche Länder zuerst?
+- [x] Q0 Quellenkatalog mit belegten Lizenzen + Ampel je Quelle (`ingestion/docs/sources.md`)
+- [x] Q1 Blitzer aus OSM (Namensraum bleibt deaktiviert; Test `camera-namespace.test.ts`)
+- [x] Q2 Verkehrsschilder aus OSM, Codes länderoffen
+- [x] Q3 Baustellen: DATEX-II-Leser + Autobahn GmbH, periodisch lauffähig (`ingestion/docs/roadworks.md`; Frankreich an, NL/DE aus)
+- [x] Q4 Eine amtliche Schildquelle inkl. Mapping-Tabelle: **NVDB Norwegen** (Schwedens offene API enthält keine Schilder, Digiroad ist abgeschaltet)
+- [x] Entschieden: Baustellen-Anbinder läuft dauerhaft (Zeitplan extern, Kosten in `ingestion/docs/roadworks.md`); Länder: Frankreich an, Niederlande und Deutschland aus bis zur Lizenzklärung
 - [ ] Entscheiden: Mapillary/KartaView einbinden? (erst nach belegter Lizenzprüfung, standardmäßig aus)
-- [ ] Attribution aus `ingestion/docs/attribution.md` in die Weboberfläche übernehmen
+- [ ] Attribution aus `ingestion/docs/attribution.md` in die Weboberfläche übernehmen (Web-Instanz; dazu braucht die Hazard-API das Feld `source_feed`, Server-Instanz)
+- [ ] Offen (Betreiber): Lizenz von NDW klären, danach `nl-ndw` einschalten; Entscheidung zur Autobahn-API (`de-autobahn`, Lizenz ungeklärt)
+- [ ] Offen (Betreiber): NVDB-Norwegen-Vollimport ausführen (`--region norway`, geschätzt 20–40 min, auf einem Knoten mit den Europa-Daten nur mit `--allow-non-empty`)
+- [ ] Offen (Betreiber): NVDB Schweden nur, wenn ein Lastkajen-Zugang samt Beispieldatei vorliegt
+- [ ] Offen (Betreiber): die 2.000 doppelt importierten Segmente auf `tn-europe` entfernen (SQL im Europa-Bericht), danach `pg_dump` als Grundstock
 
 ## Launch P — Öffentlicher Betrieb (gemieteter Server + Domain)
 - [x] Claude-Code-Prompt erstellt (`docs/prompt-launch-public-server.md`)
