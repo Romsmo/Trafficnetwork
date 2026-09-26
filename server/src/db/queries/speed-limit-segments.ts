@@ -2,6 +2,7 @@ import { sql } from "drizzle-orm";
 import type { Queryable } from "../client.js";
 import type { SpeedLimitUnit } from "../../config/constants.js";
 import { isoTimestamp } from "../sql-iso.js";
+import { bboxPrefilter } from "../../lib/geo-bbox.js";
 
 /**
  * Community-correction detail attached to a segment whose *effective* value is
@@ -126,7 +127,7 @@ export async function findSpeedLimitSegmentsNearby(
 ): Promise<SpeedLimitSegmentApi[]> {
   const rows = await db.execute<Row>(sql`
     select ${COLUMNS} ${fromClause(overlay)}
-    where ST_DWithin(
+    where ${bboxPrefilter(sql`s.geometry`, lat, lng, radiusM)}ST_DWithin(
       s.geometry::geography,
       ST_SetSRID(ST_MakePoint(${lng}, ${lat}), 4326)::geography,
       ${radiusM}
@@ -187,7 +188,7 @@ export async function findNearestSpeedLimit(
     select ${COLUMNS},
            ST_Distance(s.geometry::geography, ST_SetSRID(ST_MakePoint(${lng}, ${lat}), 4326)::geography) as distance_m
     ${fromClause(overlay)}
-    where ST_DWithin(
+    where ${bboxPrefilter(sql`s.geometry`, lat, lng, maxDistanceM)}ST_DWithin(
       s.geometry::geography,
       ST_SetSRID(ST_MakePoint(${lng}, ${lat}), 4326)::geography,
       ${maxDistanceM}

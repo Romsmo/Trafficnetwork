@@ -41,6 +41,7 @@ describe("auth hook: PUBLIC_PATHS coverage", () => {
     "/v1/health",
     "/v1/network/node-info",
     "/v1/network/directory",
+    "/v1/stats/online",
     "/v1/federation/peers",
   ];
 

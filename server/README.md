@@ -49,6 +49,7 @@ Siehe [`.env.example`](.env.example) — alle Werte sind dokumentiert und haben 
 - `FEDERATION_PUBLIC_ADDRESS` / `FEDERATION_SEEDS` / `FEDERATION_HEARTBEAT_INTERVAL_SECONDS` / `FEDERATION_ANTI_ENTROPY_INTERVAL_SECONDS` / `FEDERATION_EVENT_MAX_AGE_HOURS` / `FEDERATION_PEER_TIMEOUT_MS` — Föderationsprotokoll (F-S3), siehe "Föderation: Beitritt, Peers, Replikation" unten.
 - `COMMUNITY_CORRECTIONS_ENABLED` / `COMMUNITY_CORRECTIONS_CONFIRMATIONS_REQUIRED` / `COMMUNITY_CORRECTIONS_KMH_MIN` / `_KMH_MAX` / `_MPH_MIN` / `_MPH_MAX` / `_VALUE_STEP` / `COMMUNITY_CORRECTIONS_RATE_LIMIT_MAX` / `_WINDOW_MINUTES` — Community-Korrekturen falscher Tempolimits (Zusatz K-A): Schalter, Schwellwert (Standard 3 verschiedene Geräte), Plausibilitätsbereich je Einheit und eigenes, strengeres Limit pro Gerät. Siehe "Community-Korrekturen von Tempolimits" unten.
 - `REPUTATION_PROBATION_MIN_HOURS` / `REPUTATION_MIN_SUCCESSFUL_HEALTH_CHECKS` / `REPUTATION_TRUSTED_MIN_HOURS` / `REPUTATION_TRUSTED_MIN_SUCCESSFUL_HEALTH_CHECKS` / `REPUTATION_DEMOTE_AFTER_CONSECUTIVE_FAILURES` / `REPUTATION_DIRECTORY_PROBATION_MAX_SHARE` / `FEDERATION_OVERLOAD_MAX_CONCURRENT_PUSHES` — Reputation & Überlast-Signal (F-S4), siehe "Reputation, Verzeichnis & Überlast-Signal" unten.
+- `ONLINE_COUNTER_ENABLED` / `ONLINE_WINDOW_SECONDS` / `ONLINE_MIN_DISPLAY_THRESHOLD` / `ONLINE_CACHE_SECONDS` / `ONLINE_PEER_STALE_SECONDS` / `ONLINE_MAX_TRACKED` — Anzeige "aktuell online" (Zusatz O-A), siehe "Aktuell online" unten.
 
 ## Network keys & signed config (F-S2)
 
@@ -101,12 +102,29 @@ Nutzer können ein falsches Tempolimit melden und einen Wert vorschlagen. Die Ko
 - Betreiber: `npm run corrections -- list | show | reset | restore | ban | unban | orphans` (Zurücksetzen mit **einem Befehl**: `reset --all`), Funktion abschalten mit `COMMUNITY_CORRECTIONS_ENABLED=false` — siehe [`docs/operating.md`](docs/operating.md).
 - **Upgrade-Hinweis:** Migration 0007 schreibt die Tabelle `speed_limit_segments` einmalig um (neue berechnete Spalte `geometry_key`), ca. 20 s pro Million Segmente unter exklusivem Lock — vor dem Start des neuen Servers ausführen.
 
+## Aktuell online (Zusatz O-A)
+
+`GET /v1/stats/online` (öffentlich, kein Auth) liefert, wie viele Clients gerade an diesem Knoten hängen, plus eine **geschätzte** Summe für das ganze Netz. Als "online" zählt ein Client (einmal, egal wie viele Verbindungen), wenn er eine authentifizierte WebSocket-Verbindung offen hat **oder** innerhalb von `ONLINE_WINDOW_SECONDS` (Standard 5 Minuten) eine erfolgreiche Sync- oder Schreibanfrage gemacht hat — so sind auch reine Polling-Clients sichtbar. Nur Tokens mit Scope `client` zählen, keine Dienst-Zugänge (Bulk-Import, Geräteregistrierung).
+
+```json
+{ "enabled": true,
+  "node":    { "online": 12, "windowSeconds": 300 },
+  "network": { "online": 87, "nodes": 4, "estimated": true, "asOf": "2026-09-24T12:00:00.000Z" },
+  "minDisplayThreshold": 5 }
+```
+
+- **Nur Zahlen, keine Personen:** gezählt wird im Arbeitsspeicher (gesalzener Hash der Token-Kennung, Salz pro Prozess zufällig); keine IP-Adresse, keine Position, keine Datenbank, keine Logzeile. Neustart setzt den Zähler zurück.
+- **Schwellenwert:** unter `ONLINE_MIN_DISPLAY_THRESHOLD` (Standard 5) steht `{ "online": null, "below": 5 }` ("weniger als 5") statt der genauen Zahl — für den Knoten und für das Netz getrennt.
+- **Netzweite Summe:** jeder Knoten trägt seine eigene Zahl als `onlineCount` in den ohnehin gesendeten signierten Heartbeats mit. Die Summe zählt nur Peers, die im eigenen Reputationsblick `active`/`trusted` sind (nie Probezeit), nicht ausgeschlossen sind und deren Heartbeat jünger als `ONLINE_PEER_STALE_SECONDS` ist. Fremde Zahlen sind Behauptungen, daher immer `estimated: true`; Einzelwerte von Peers werden nie veröffentlicht. Ohne Föderation entfällt `network`.
+- **Abschaltbar:** `ONLINE_COUNTER_ENABLED=false` → Endpunkt antwortet `{ "enabled": false }`, nichts wird gezählt oder in Heartbeats gesendet.
+- Zwischengespeichert (`ONLINE_CACHE_SECONDS`, Standard 10 s), Details und Datenschutz-Überlegungen: [`docs/api.md`](docs/api.md#get-v1statsonline-add-on-o-a), [`docs/federation-protocol.md`](docs/federation-protocol.md) (§4.2), [`docs/threat-model.md`](docs/threat-model.md).
+
 ## API
 
 Vollständige Referenz: [`docs/api.md`](docs/api.md). Kurzfassung:
 
-- **Auth**: `POST /v1/auth/token` (Client-Credentials → JWT) oder, additiv seit F-S2, `POST /v1/auth/device-token` (geräteseitig signierte Assertion → JWT, für Clients mit gebundenem Ed25519-Schlüssel). Jeder `/v1/*`-Endpunkt außer `/v1/health`, beiden Token-Endpunkten, `/v1/ws`, `/v1/network/node-info` und den `/v1/federation/*`-Endpunkten (F-S3, nur bei `FEDERATION_ENABLED=true`) braucht `Authorization: Bearer <token>`. `reporterId` kommt bei Schreibzugriffen immer aus dem Token, nie aus dem Body.
-- **Lesen**: `GET /v1/speed-limit`, `/v1/speed-limit-segments/nearby`, `/v1/static-signs/nearby`, `/v1/hazard-reports/{nearby,by-tile}`, `/v1/speed-cameras/{nearby,by-tile}` (leer, solange das Blitzer-Flag aus ist), `/v1/snapshot`, `/v1/delta`, `/v1/config`, `/v1/static-data/{manifest,partitions/:tile}`, `/v1/network/node-info` und `/v1/network/directory` (beide öffentlich, kein Auth).
+- **Auth**: `POST /v1/auth/token` (Client-Credentials → JWT) oder, additiv seit F-S2, `POST /v1/auth/device-token` (geräteseitig signierte Assertion → JWT, für Clients mit gebundenem Ed25519-Schlüssel). Jeder `/v1/*`-Endpunkt außer `/v1/health`, beiden Token-Endpunkten, `/v1/ws`, `/v1/network/{node-info,directory}`, `/v1/stats/online` und den `/v1/federation/*`-Endpunkten (F-S3, nur bei `FEDERATION_ENABLED=true`) braucht `Authorization: Bearer <token>`. `reporterId` kommt bei Schreibzugriffen immer aus dem Token, nie aus dem Body.
+- **Lesen**: `GET /v1/speed-limit`, `/v1/speed-limit-segments/nearby`, `/v1/static-signs/nearby`, `/v1/hazard-reports/{nearby,by-tile}`, `/v1/speed-cameras/{nearby,by-tile}` (leer, solange das Blitzer-Flag aus ist), `/v1/snapshot`, `/v1/delta`, `/v1/config`, `/v1/static-data/{manifest,partitions/:tile}`, `/v1/network/node-info`, `/v1/network/directory` und `/v1/stats/online` (alle öffentlich, kein Auth).
 - **Schreiben**: `POST /v1/hazard-reports` (läuft durchs Moderationsgate: Plausibilität, Rate-Limit, Duplikat-Merge; `type: "fixedSpeedCamera"` wird in den Blitzer-Namensraum umgeleitet; optionales `deviceAssertion`-Feld seit F-S3 macht die Meldung föderationsfähig), `POST /v1/hazard-reports/:id/confirmations`, `POST /v1/speed-cameras/:id/removal-reports`. Schreibzugriffe auf den Blitzer-Namensraum funktionieren unabhängig vom Flag — nur Lesezugriffe sind gegated.
 - **Bulk-Import** (Scope `bulk-import`): `POST /v1/bulk-import/{speed-limit-segments,static-signs,speed-cameras}`, max. 5000 Zeilen/Aufruf, erzeugt bewusst keine Event-Log-Einträge (Abholung nur über `/v1/snapshot` bzw. die Paket-Endpunkte, siehe `docs/api.md`).
 - **Geräteregistrierung** (Scope `device-registration`, client-lib P2.0): `POST /v1/devices/register` — App-Schlüssel → frisches, pseudonymes Geräte-Credential. Additiv seit F-S2: `POST /v1/devices/bind-key` bindet einen selbst erzeugten Ed25519-Schlüssel an die eigene, bestehende Identität (jeder Client, nicht nur `device-registration`).
