@@ -62,9 +62,9 @@ services:
       MAP_TILE_URL: ${MAP_TILE_URL:-}
       MAP_TILE_ATTRIBUTION_TEXT: ${MAP_TILE_ATTRIBUTION_TEXT:-© OpenStreetMap contributors}
       MAP_TILE_ATTRIBUTION_URL: ${MAP_TILE_ATTRIBUTION_URL:-https://www.openstreetmap.org/copyright}
+      MAP_TILE_MAX_ZOOM: ${MAP_TILE_MAX_ZOOM:-19}
       # Behind Caddy/nginx/Apache set this (e.g. to the proxy's address or hop count) — otherwise every visitor
       # looks like the proxy and shares one rate-limit budget. Empty = trust no proxy.
-      MAP_TILE_MAX_ZOOM: ${MAP_TILE_MAX_ZOOM:-19}
       TRUST_PROXY: ${TRUST_PROXY:-}
       LOG_PRIVACY_MODE: ${LOG_PRIVACY_MODE:-true}
       WEB_SESSION_TTL_SECONDS: ${WEB_SESSION_TTL_SECONDS:-900}
