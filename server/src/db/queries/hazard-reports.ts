@@ -212,3 +212,135 @@ export async function applyConfirmationEffect(
   if (!row) throw new Error("applyConfirmationEffect: update returned no row");
   return toApi(row);
 }
+
+// ---------------------------------------------------------------------------------------------
+// Seed reports (source = 'seed'): authoritative, periodically re-imported reports such as roadworks
+// from a national access point. Identity is (source_feed, external_id); see db/schema/hazards.ts and
+// modules/bulk-import/seed-reports.ts for the rules that use these.
+// ---------------------------------------------------------------------------------------------
+
+export interface ExistingSeedRow {
+  id: string;
+  externalId: string;
+  status: "active" | "expired" | "removed";
+  expiresAt: Date;
+  lat: number;
+  lng: number;
+}
+
+/** Locks (FOR UPDATE) the existing rows of one feed for a batch of external ids — the upsert decides per row from this. */
+export async function findSeedReportsForUpdate(db: Queryable, feedId: string, externalIds: string[]): Promise<ExistingSeedRow[]> {
+  const rows = await db.execute<{ id: string; external_id: string; status: ExistingSeedRow["status"]; expires_at: string; lat: number; lng: number } & Record<string, unknown>>(sql`
+    select id, external_id, status, expires_at, ST_Y(position) as lat, ST_X(position) as lng
+    from hazard_reports
+    where source_feed = ${feedId} and external_id = any(${pgArray(externalIds)}::text[])
+    for update
+  `);
+  return rows.map((r) => ({ id: r.id, externalId: r.external_id, status: r.status, expiresAt: new Date(r.expires_at), lat: Number(r.lat), lng: Number(r.lng) }));
+}
+
+export interface InsertSeedReportInput {
+  type: Exclude<HazardType, "fixedSpeedCamera">;
+  lat: number;
+  lng: number;
+  reporterId: string;
+  regionTile: string;
+  expiresAt: Date;
+  sourceLicense: string;
+  feedId: string;
+  externalId: string;
+  runId: string;
+}
+
+/** Returns null when a concurrent import inserted the same (feed, external id) first — the caller then treats it as an existing row. */
+export async function insertSeedReportRow(db: Queryable, input: InsertSeedReportInput): Promise<HazardReportApi | null> {
+  const rows = await db.execute<Row>(sql`
+    insert into hazard_reports (type, position, region_tile, reporter_id, expires_at, status, source, source_license, source_feed, external_id, last_seen_run)
+    values (
+      ${input.type}::hazard_type,
+      ST_SetSRID(ST_MakePoint(${input.lng}, ${input.lat}), 4326),
+      ${input.regionTile},
+      ${input.reporterId},
+      ${input.expiresAt.toISOString()},
+      'active',
+      'seed',
+      ${input.sourceLicense},
+      ${input.feedId},
+      ${input.externalId},
+      ${input.runId}
+    )
+    on conflict (source_feed, external_id) where source_feed is not null do nothing
+    returning ${SELECT_COLUMNS}
+  `);
+  const row = rows[0];
+  return row ? toApi(row) : null;
+}
+
+export interface UpdateSeedReportInput {
+  id: string;
+  lat: number;
+  lng: number;
+  regionTile: string;
+  expiresAt: Date;
+  sourceLicense: string;
+  runId: string;
+}
+
+/** Re-activates (if it had expired) and refreshes position/expiry/license of an existing seed row; returns the new state. */
+export async function updateSeedReportRow(db: Queryable, input: UpdateSeedReportInput): Promise<HazardReportApi> {
+  const rows = await db.execute<Row>(sql`
+    update hazard_reports
+    set position = ST_SetSRID(ST_MakePoint(${input.lng}, ${input.lat}), 4326),
+        region_tile = ${input.regionTile},
+        expires_at = ${input.expiresAt.toISOString()},
+        status = 'active',
+        source_license = ${input.sourceLicense},
+        last_seen_run = ${input.runId},
+        updated_at = now()
+    where id = ${input.id}
+    returning ${SELECT_COLUMNS}
+  `);
+  const row = rows[0];
+  if (!row) throw new Error("updateSeedReportRow: update returned no row");
+  return toApi(row);
+}
+
+/** Marks rows as seen by this run and (optionally) moves their expiry, without changing anything a client would render. No event. */
+export async function touchSeedReports(db: Queryable, ids: string[], runId: string, newExpiresAt?: Date): Promise<void> {
+  if (ids.length === 0) return;
+  await db.execute(sql`
+    update hazard_reports
+    set last_seen_run = ${runId},
+        expires_at = ${newExpiresAt ? newExpiresAt.toISOString() : sql`expires_at`},
+        updated_at = now()
+    where id = any(${pgArray(ids)}::uuid[])
+  `);
+}
+
+export async function countSeedReportsOfRun(db: Queryable, feedId: string, runId: string): Promise<number> {
+  const rows = await db.execute<{ n: number } & Record<string, unknown>>(sql`
+    select count(*)::int as n from hazard_reports where source_feed = ${feedId} and last_seen_run = ${runId}
+  `);
+  return Number(rows[0]?.n ?? 0);
+}
+
+export interface RetiredSeedRow {
+  id: string;
+  type: string;
+  regionTile: string;
+}
+
+/** Expires every active row of the feed that this run did not see (locks them first); returns what was retired for the events. */
+export async function retireUnseenSeedReports(db: Queryable, feedId: string, runId: string): Promise<RetiredSeedRow[]> {
+  const rows = await db.execute<{ id: string; type: string; region_tile: string } & Record<string, unknown>>(sql`
+    update hazard_reports
+    set status = 'expired', updated_at = now()
+    where id in (
+      select id from hazard_reports
+      where source_feed = ${feedId} and status = 'active' and last_seen_run is distinct from ${runId}
+      for update skip locked
+    )
+    returning id, type, region_tile
+  `);
+  return rows.map((r) => ({ id: r.id, type: r.type, regionTile: r.region_tile }));
+}
