@@ -233,6 +233,20 @@ BESTÄTIGUNG:    Ich bestätige, dass in meinem Bereich alle Tests in CI grün s
                 die Doku dem Code entspricht und keine Geheimnisse im Repo liegen.
 ```
 
+## Abschluss Server-Instanz (Stand 2026-09-26, Usage-Limit erreicht — **offen**, siehe unten)
+
+```
+BEREICH:        server
+BRANCHES:       fix/spatial-index-prefilter → feature/online-counter → feature/speed-limit-corrections → feature/europe-scale → feature/persistent-enforcement-devices (linearer Stapel, jeweils Merge-Commit des Vorgängers; PR-Basis = Vorgänger-Branch)
+LETZTE COMMITS: a86119b / 023217c / c46984a / 1bbda22 / 5b5314d
+CI:             PR #4, #5, #6, #7 grün (test, docker-build, install-smoke). PR #9 (D): erster Lauf rot (1 Test, K-A-Migrationstest zählte die Version über alle Migrationen), Fix 5b5314d gepusht — Neulauf NICHT abgewartet
+PULL REQUESTS:  #4 (perf), #5 (O-A), #6 (K-A), #7 (E-B), #9 (D) — Merge in dieser Reihenfolge, mit Merge-Commit (kein Squash); nichts gemergt
+FERTIG:         Stapel neu geordnet und Konflikte zwischen den Add-ons gelöst; O-A, K-A, E-B, D im Code fertig; D: Migration 0009 (5 ms bei 1 Mio. Zeilen, gemessen), Rückroll-Skript, Test mit Altbestand, API/Doku; .env.example vollständig (10 fehlende Variablen), docker-compose reicht .env durch (Föderation & Co. waren unter Docker nicht einstellbar)
+OFFEN:          (1) E-B-Messung auf einer Kopie des echten Europa-Bestands: Migration 0007+0008 gemessen (373,6 s bei 12,08 Mio. Segmenten), Größen (434 B/Segment) und Lesezeiten (Lookup ~2 ms) gemessen — der vollständige Paketbau läuft noch detached (Skript E:	n-eb-measureun-measure.ps1, Container tn-eb-pg auf Volume tn-eb-copy, Cache-Dropper) und ist I/O-bound; Ergebnisse gehören noch in server/docs/europe-scale.md + operating.md. (2) Vollsuite lokal auf dem D-Stand (nur CI-Lauf von PR #9 nach Fix). (3) Migration auf tn-europe selbst nicht ausgeführt. (4) Acht offene Fragen aus server/docs/persistent-enforcement-devices.md §10 (mit Standardwerten gebaut). (5) Abschnittskontrolle nicht gebaut (Client-Bibliothek dekodiert HazardType geschlossen).
+RISIKEN:        feature/server-web-ui (Web-Instanz) kollidiert mit dem Stapel in .env.example, docker-compose.yml, docs/api.md, app.ts, env.ts, auth/hook.ts, realtime/plugin.ts, auth-public-paths-Test; phase3/source-catalogue (Ingestion) in migrations/meta (0007_snapshot, _journal) und bulk-import/routes.ts (Migrationsnummer 0007 doppelt). Migration 0007 = Wartungsfenster (~6 min bei 12 M Zeilen). Scratch-Reste: Container tn-eb-pg, Volume tn-eb-copy, E:	n-eb-measure, Cache-Dropper (Stop-Datei E:	n-eb-measure\stop-cache-dropper).
+BESTÄTIGUNG:    Eingeschränkt: CI grün nur für #4–#7; #9 nach Testfix noch nicht bestätigt; E-B-Messung auf echten Daten unvollständig; Doku entspricht dem Code bis auf die fehlenden Messwerte.
+```
+
 ## Wie diese Datei genutzt wird
 
 1. Vor dem Weiterarbeiten: `git fetch origin main && git show origin/main:docs/status.md` (oder einfach `main` separat auschecken), um zu sehen, was die andere Instanz zuletzt getan hat.
