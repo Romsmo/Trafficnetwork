@@ -22,6 +22,7 @@
 use std::sync::Arc;
 
 use serde::de::DeserializeOwned;
+use sha2::{Digest, Sha256};
 
 use crate::discovery::{DiscoveryError, DiscoveryService, KnownServer};
 use crate::platform::{Clock, HttpRequest, HttpResponse};
@@ -464,7 +465,7 @@ impl SyncEngine {
         &self,
         bearer_token: &str,
     ) -> Result<BootstrapPlan, SyncError> {
-        let manifest = self.fetch_manifest(bearer_token).await?;
+        let (_, manifest) = self.fetch_manifest(bearer_token).await?;
         let pending = self.pending_partitions(&manifest)?;
         Ok(BootstrapPlan {
             partitions_total: manifest.partitions.len(),
@@ -474,16 +475,55 @@ impl SyncEngine {
         })
     }
 
+    /// True when the server cuts its packages at another H3 resolution than
+    /// the stored ones were: tile ids of different resolutions never match,
+    /// so what is stored cannot be brought up to date, only replaced.
+    fn resolution_changed(&self, manifest: &StaticDataManifest) -> Result<bool, SyncError> {
+        let Some(resolution) = manifest.partition_resolution else {
+            return Ok(false);
+        };
+        let stored = self
+            .store
+            .static_partition_resolution()
+            .map_err(SyncError::from_store)?;
+        Ok(stored.is_some_and(|stored| stored != resolution))
+    }
+
+    /// On a resolution change, forgets the old packages (and only then
+    /// records the new resolution — a run killed in between just repeats
+    /// this). The first time a resolution is seen it is only recorded.
+    fn reconcile_partition_resolution(
+        &self,
+        manifest: &StaticDataManifest,
+    ) -> Result<(), SyncError> {
+        let Some(resolution) = manifest.partition_resolution else {
+            return Ok(());
+        };
+        if self.resolution_changed(manifest)? {
+            self.store
+                .clear_static_data()
+                .map_err(SyncError::from_store)?;
+        }
+        self.store
+            .set_static_partition_resolution(resolution)
+            .map_err(SyncError::from_store)
+    }
+
     fn pending_partitions<'a>(
         &self,
         manifest: &'a StaticDataManifest,
     ) -> Result<Vec<&'a PartitionSummary>, SyncError> {
+        // After a resolution change everything stored is about to go.
+        let everything_stale = self.resolution_changed(manifest)?;
         let mut pending = Vec::new();
         for partition in &manifest.partitions {
-            let current = self
-                .store
-                .get_partition_hash(&partition.tile)
-                .map_err(SyncError::from_store)?;
+            let current = if everything_stale {
+                None
+            } else {
+                self.store
+                    .get_partition_hash(&partition.tile)
+                    .map_err(SyncError::from_store)?
+            };
             if current.as_deref() != Some(partition.hash.as_str()) {
                 pending.push(partition);
             }
@@ -496,8 +536,17 @@ impl SyncEngine {
     /// its hash, so a bootstrap that is interrupted — killed, offline, out of
     /// space — picks up at the next partition the next time this is called
     /// instead of starting over. Progress goes to the observer, if any.
+    ///
+    /// Every package is fetched from the server that answered with the
+    /// manifest (not from whichever server answers next: another server's
+    /// package may differ), and its SHA-256 must equal the manifest's hash
+    /// before anything is stored — a package that does not match is rejected
+    /// and counts against the server that sent it. If the manifest names
+    /// another partition resolution than the one the stored packages have,
+    /// the stored packages are dropped and downloaded again.
     pub async fn sync_static_data(&self, bearer_token: &str) -> Result<(), SyncError> {
-        let manifest = self.fetch_manifest(bearer_token).await?;
+        let (server, manifest) = self.fetch_manifest(bearer_token).await?;
+        self.reconcile_partition_resolution(&manifest)?;
         let pending = self.pending_partitions(&manifest)?;
         let mut progress = BootstrapProgress {
             partitions_total: pending.len(),
@@ -507,7 +556,9 @@ impl SyncEngine {
         };
         self.report(&progress);
         for partition in pending {
-            let content = self.fetch_partition(bearer_token, &partition.tile).await?;
+            let content = self
+                .fetch_partition(bearer_token, &server, partition)
+                .await?;
             let data = StoredEntities {
                 speed_limit_segments: content.speed_limit_segments,
                 static_signs: content.static_signs,
@@ -530,9 +581,12 @@ impl SyncEngine {
         }
     }
 
-    async fn fetch_manifest(&self, bearer_token: &str) -> Result<StaticDataManifest, SyncError> {
+    async fn fetch_manifest(
+        &self,
+        bearer_token: &str,
+    ) -> Result<(KnownServer, StaticDataManifest), SyncError> {
         let (name, value) = auth_header(bearer_token);
-        let (_, response) = self
+        let (server, response) = self
             .discovery
             .request_with_failover(|server| {
                 let url = format!(
@@ -543,29 +597,44 @@ impl SyncEngine {
             })
             .await
             .map_err(SyncError::Discovery)?;
-        parse_ok(&response)
+        Ok((server, parse_ok(&response)?))
     }
 
+    /// One package from `server`, checked against the manifest's hash. The
+    /// content-addressed `path` is preferred where the manifest has one: it
+    /// can only answer with the content the hash names, whereas the
+    /// per-tile URL answers with whatever the server holds by now.
     async fn fetch_partition(
         &self,
         bearer_token: &str,
-        tile: &str,
+        server: &KnownServer,
+        partition: &PartitionSummary,
     ) -> Result<PartitionContent, SyncError> {
         let (name, value) = auth_header(bearer_token);
-        let (_, response) = self
+        let base = server.address.trim_end_matches('/');
+        let url = match &partition.path {
+            Some(path) => format!("{base}{path}"),
+            None => format!("{base}/v1/static-data/partitions/{}", partition.tile),
+        };
+        let response = self
             .discovery
-            .request_with_failover(|server| {
-                let url = format!(
-                    "{}/v1/static-data/partitions/{}",
-                    server.address.trim_end_matches('/'),
-                    tile
-                );
-                HttpRequest::get(url).with_header(name.clone(), value.clone())
-            })
+            .request_to_server(server, HttpRequest::get(url).with_header(name, value))
             .await
             .map_err(SyncError::Discovery)?;
+        if response.is_success() && !hash_matches(&response.body, &partition.hash) {
+            self.discovery.record_invalid_data(&server.node_id);
+            return Err(SyncError::InvalidResponse(format!(
+                "the package for tile {} does not match the hash in the manifest",
+                partition.tile
+            )));
+        }
         parse_ok(&response)
     }
+}
+
+/// Whether `body` hashes (SHA-256, hex) to `expected_hex`.
+fn hash_matches(body: &[u8], expected_hex: &str) -> bool {
+    hex::encode(Sha256::digest(body)).eq_ignore_ascii_case(expected_hex)
 }
 
 #[cfg(test)]
@@ -957,42 +1026,63 @@ mod tests {
         })
     }
 
-    /// Three partitions of 100 bytes each: A and B hold two segments, C one.
+    /// What the mock server serves for one of the three test tiles: A and B
+    /// hold two segments, C one.
+    fn tile_content(tile: &str) -> serde_json::Value {
+        let ids: Vec<&str> = match tile {
+            "tileA" => vec!["a1", "a2"],
+            "tileB" => vec!["b1", "b2"],
+            _ => vec!["c1"],
+        };
+        let segments: Vec<serde_json::Value> = ids.into_iter().map(plain_segment_json).collect();
+        serde_json::json!({
+            "tile": tile,
+            "speedLimitSegments": segments,
+            "staticSigns": [],
+            "fixedSpeedCameras": []
+        })
+    }
+
+    /// The hash a server's manifest names for `content`: SHA-256 of the bytes
+    /// that are served.
+    fn hash_of(content: &serde_json::Value) -> String {
+        hex::encode(Sha256::digest(serde_json::to_vec(content).unwrap()))
+    }
+
+    fn tile_hash(tile: &str) -> String {
+        hash_of(&tile_content(tile))
+    }
+
+    /// Three partitions of 100 bytes each; only the `available` ones can be
+    /// downloaded.
     fn set_three_partitions(transport: &MockTransport, available: &[&str]) {
-        transport.set(
-            MANIFEST_URL,
-            200,
-            serde_json::json!({
-                "staticDataVersion": 1,
-                "generatedAt": "2026-01-01T00:00:00Z",
-                "partitions": [
-                    { "tile": "tileA", "hash": "hash-a", "sizeBytes": 100 },
-                    { "tile": "tileB", "hash": "hash-b", "sizeBytes": 100 },
-                    { "tile": "tileC", "hash": "hash-c", "sizeBytes": 100 }
-                ]
-            }),
-        );
-        let contents = [
-            ("tileA", vec!["a1", "a2"]),
-            ("tileB", vec!["b1", "b2"]),
-            ("tileC", vec!["c1"]),
-        ];
-        for (tile, ids) in contents {
-            if !available.contains(&tile) {
-                continue;
+        set_three_partitions_at(transport, available, None);
+    }
+
+    fn set_three_partitions_at(
+        transport: &MockTransport,
+        available: &[&str],
+        resolution: Option<u8>,
+    ) {
+        let partitions: Vec<serde_json::Value> = ["tileA", "tileB", "tileC"]
+            .iter()
+            .map(|tile| {
+                serde_json::json!({ "tile": tile, "hash": tile_hash(tile), "sizeBytes": 100 })
+            })
+            .collect();
+        let mut manifest = serde_json::json!({
+            "staticDataVersion": 1,
+            "generatedAt": "2026-01-01T00:00:00Z",
+            "partitions": partitions
+        });
+        if let Some(resolution) = resolution {
+            manifest["partitionResolution"] = serde_json::json!(resolution);
+        }
+        transport.set(MANIFEST_URL, 200, manifest);
+        for tile in ["tileA", "tileB", "tileC"] {
+            if available.contains(&tile) {
+                transport.set(&partition_url(tile), 200, tile_content(tile));
             }
-            let segments: Vec<serde_json::Value> =
-                ids.into_iter().map(plain_segment_json).collect();
-            transport.set(
-                &partition_url(tile),
-                200,
-                serde_json::json!({
-                    "tile": tile,
-                    "speedLimitSegments": segments,
-                    "staticSigns": [],
-                    "fixedSpeedCameras": []
-                }),
-            );
         }
     }
 
@@ -1008,8 +1098,8 @@ mod tests {
 
         assert!(matches!(first, Err(SyncError::StorageFull)));
         assert_eq!(
-            store.get_partition_hash("tileA").unwrap().as_deref(),
-            Some("hash-a")
+            store.get_partition_hash("tileA").unwrap(),
+            Some(tile_hash("tileA"))
         );
         assert_eq!(store.get_partition_hash("tileB").unwrap(), None);
 
@@ -1080,6 +1170,120 @@ mod tests {
                 bytes_pending: 200
             }
         );
+    }
+
+    #[tokio::test]
+    async fn a_package_that_does_not_match_its_hash_is_rejected_and_not_stored() {
+        let transport = Arc::new(MockTransport::new());
+        set_three_partitions(&transport, &["tileA", "tileB", "tileC"]);
+        // Tile B is served with different content than the manifest names.
+        let mut tampered = tile_content("tileB");
+        tampered["speedLimitSegments"][0]["speedLimit"] = serde_json::json!(130);
+        transport.set(&partition_url("tileB"), 200, tampered);
+        let (engine, store) = engine_with_one_server(transport.clone());
+
+        let result = engine.sync_static_data("token").await;
+
+        assert!(matches!(result, Err(SyncError::InvalidResponse(_))));
+        // Tile A came first and is kept; B was refused and C never asked for.
+        assert_eq!(
+            store.get_partition_hash("tileA").unwrap(),
+            Some(tile_hash("tileA"))
+        );
+        assert_eq!(store.get_partition_hash("tileB").unwrap(), None);
+        assert_eq!(transport.request_count(&partition_url("tileC")), 0);
+        assert_eq!(store.all_entities().unwrap().speed_limit_segments.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn the_content_addressed_path_is_used_when_the_manifest_has_one() {
+        let transport = Arc::new(MockTransport::new());
+        let content = tile_content("tileA");
+        let hash = hash_of(&content);
+        transport.set(
+            MANIFEST_URL,
+            200,
+            serde_json::json!({
+                "staticDataVersion": 1,
+                "generatedAt": "2026-01-01T00:00:00Z",
+                "partitionResolution": 4,
+                "partitions": [{
+                    "tile": "tileA", "hash": hash, "sizeBytes": 100,
+                    "gzipBytes": 30, "brotliBytes": 28,
+                    "path": format!("/v1/static-data/packages/tileA/{hash}")
+                }]
+            }),
+        );
+        transport.set(
+            &format!("https://a.example/v1/static-data/packages/tileA/{hash}"),
+            200,
+            content,
+        );
+        let (engine, store) = engine_with_one_server(transport.clone());
+
+        engine.sync_static_data("token").await.unwrap();
+
+        assert_eq!(transport.request_count(&partition_url("tileA")), 0);
+        assert_eq!(store.all_entities().unwrap().speed_limit_segments.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn a_new_partition_resolution_replaces_the_stored_packages() {
+        let transport = Arc::new(MockTransport::new());
+        set_three_partitions_at(&transport, &["tileA", "tileB", "tileC"], Some(2));
+        let (engine, store) = engine_with_one_server(transport.clone());
+        engine.sync_static_data("token").await.unwrap();
+        assert_eq!(store.static_partition_resolution().unwrap(), Some(2));
+        assert_eq!(store.all_entities().unwrap().speed_limit_segments.len(), 5);
+
+        // The same server, now cutting its packages at resolution 4: a single
+        // new tile, and the old ones gone from the manifest.
+        let content = tile_content("tileC");
+        transport.set(
+            MANIFEST_URL,
+            200,
+            serde_json::json!({
+                "staticDataVersion": 2,
+                "generatedAt": "2026-01-02T00:00:00Z",
+                "partitionResolution": 4,
+                "partitions": [{ "tile": "tile4", "hash": hash_of(&content), "sizeBytes": 100 }]
+            }),
+        );
+        transport.set(&partition_url("tile4"), 200, content);
+
+        let before = engine.plan_static_bootstrap("token").await.unwrap();
+        engine.sync_static_data("token").await.unwrap();
+
+        assert_eq!(before.partitions_pending, 1);
+        assert_eq!(store.static_partition_resolution().unwrap(), Some(4));
+        // Only the new package is left — the old ones were dropped, not merged.
+        assert_eq!(store.all_entities().unwrap().speed_limit_segments.len(), 1);
+        assert_eq!(store.get_partition_hash("tileA").unwrap(), None);
+    }
+
+    #[tokio::test]
+    async fn an_unchanged_resolution_keeps_what_is_stored() {
+        let transport = Arc::new(MockTransport::new());
+        set_three_partitions_at(&transport, &["tileA", "tileB", "tileC"], Some(4));
+        let (engine, store) = engine_with_one_server(transport.clone());
+        engine.sync_static_data("token").await.unwrap();
+        engine.sync_static_data("token").await.unwrap();
+
+        assert_eq!(transport.request_count(&partition_url("tileA")), 1);
+        assert_eq!(store.all_entities().unwrap().speed_limit_segments.len(), 5);
+    }
+
+    #[tokio::test]
+    async fn a_server_without_a_resolution_in_its_manifest_is_never_second_guessed() {
+        let transport = Arc::new(MockTransport::new());
+        set_three_partitions(&transport, &["tileA", "tileB", "tileC"]);
+        let (engine, store) = engine_with_one_server(transport);
+        store.set_static_partition_resolution(2).unwrap();
+
+        engine.sync_static_data("token").await.unwrap();
+
+        assert_eq!(store.static_partition_resolution().unwrap(), Some(2));
+        assert_eq!(store.all_entities().unwrap().speed_limit_segments.len(), 5);
     }
 
     #[cfg(not(target_arch = "wasm32"))]

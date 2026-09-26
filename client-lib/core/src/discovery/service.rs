@@ -329,6 +329,17 @@ impl DiscoveryService {
         }
     }
 
+    /// A server handed over data that failed verification (for example a
+    /// static package whose hash does not match its manifest): it counts
+    /// against that server exactly like a failed request.
+    pub fn record_invalid_data(&self, node_id: &str) {
+        self.pool.lock().unwrap().record_failure(
+            node_id,
+            self.clock.now_unix_ms(),
+            random_jitter(),
+        );
+    }
+
     pub fn record_withholding_suspicion(&self, node_id: &str) {
         self.pool
             .lock()

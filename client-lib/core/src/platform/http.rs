@@ -112,7 +112,16 @@ impl ReqwestHttpTransport {
     /// constructor is fallible everywhere rather than infallible on native
     /// and panicking on wasm32.
     pub fn new() -> Result<Self, HttpError> {
-        let client = reqwest::Client::builder()
+        let builder = reqwest::Client::builder();
+        // Without a limit a stalled connection would hang a sync forever.
+        // The read timeout applies to every single read, not to the whole
+        // body, so a 100 MB package on a slow line is still fine as long as
+        // bytes keep arriving. (A browser's fetch() has its own timeouts.)
+        #[cfg(not(target_arch = "wasm32"))]
+        let builder = builder
+            .connect_timeout(std::time::Duration::from_secs(15))
+            .read_timeout(std::time::Duration::from_secs(60));
+        let client = builder
             .build()
             .map_err(|e| HttpError::Network(e.to_string()))?;
         Ok(Self { client })

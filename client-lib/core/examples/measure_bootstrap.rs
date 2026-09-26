@@ -105,8 +105,7 @@ fn parse_args() -> Args {
 // ------------------------------------------------------------------ transport
 
 /// Wraps a transport and counts what crosses it: bytes (as the app sees them,
-/// which is what goes over the wire today — the server does not compress),
-/// how long the calls themselves took, and what the partitions would compress
+/// that is after decompression; a server that compresses sends less), how long the calls themselves took, and what the partitions would compress
 /// to with gzip.
 struct CountingTransport {
     inner: Arc<dyn HttpTransport>,
@@ -551,7 +550,7 @@ async fn main() {
     );
     println!("--- transfer ---");
     println!(
-        "bytes on the wire : {:.1} MB in {} requests (server does not compress today)",
+        "bytes received    : {:.1} MB in {} requests (after decompression; a server that compresses sends less)",
         mb(wire_bytes as f64),
         counting.requests.load(Ordering::Relaxed)
     );

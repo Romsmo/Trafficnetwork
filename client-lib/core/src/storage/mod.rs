@@ -259,4 +259,18 @@ pub trait Store: Send + Sync {
     fn storage_bytes(&self) -> Option<u64> {
         None
     }
+
+    /// The H3 resolution the stored static partitions were cut at, if it has
+    /// been recorded — so a change on the server (tile ids at another
+    /// resolution never match the stored ones) is noticed and the packages
+    /// are downloaded again instead of merged. `clear_static_data` forgets
+    /// it. (The default remembers nothing, so a store that does not override
+    /// this never detects a change.)
+    fn static_partition_resolution(&self) -> Result<Option<u8>, StoreError> {
+        Ok(None)
+    }
+
+    fn set_static_partition_resolution(&self, _resolution: u8) -> Result<(), StoreError> {
+        Ok(())
+    }
 }

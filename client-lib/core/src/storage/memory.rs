@@ -21,6 +21,7 @@ struct Inner {
     pending_writes: Vec<PendingWrite>,
     local_proposals: Vec<LocalCorrectionProposal>,
     static_entity_limit: Option<usize>,
+    static_partition_resolution: Option<u8>,
 }
 
 #[derive(Default)]
@@ -89,6 +90,15 @@ impl Store for InMemoryStore {
             .cloned())
     }
 
+    fn static_partition_resolution(&self) -> Result<Option<u8>, StoreError> {
+        Ok(self.inner.lock().unwrap().static_partition_resolution)
+    }
+
+    fn set_static_partition_resolution(&self, resolution: u8) -> Result<(), StoreError> {
+        self.inner.lock().unwrap().static_partition_resolution = Some(resolution);
+        Ok(())
+    }
+
     fn set_partition_hash(&self, tile: &str, hash: &str) -> Result<(), StoreError> {
         self.inner
             .lock()
@@ -104,6 +114,7 @@ impl Store for InMemoryStore {
         inner.entities.static_signs.clear();
         inner.entities.fixed_speed_cameras.clear();
         inner.partition_hashes.clear();
+        inner.static_partition_resolution = None;
         Ok(())
     }
 

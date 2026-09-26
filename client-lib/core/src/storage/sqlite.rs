@@ -41,6 +41,7 @@ CREATE TABLE IF NOT EXISTS partition_hashes (
     tile TEXT PRIMARY KEY,
     hash TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS speed_limit_segments (
     rid INTEGER PRIMARY KEY,
     id TEXT NOT NULL UNIQUE,
@@ -424,9 +425,31 @@ impl Store for SqliteStore {
             tx.execute_batch(
                 "DELETE FROM segment_rtree; DELETE FROM speed_limit_segments; \
                  DELETE FROM static_signs; DELETE FROM fixed_speed_cameras; \
-                 DELETE FROM partition_hashes;",
+                 DELETE FROM partition_hashes;                  DELETE FROM meta WHERE key = 'static_partition_resolution';",
             )?;
             tx.commit()
+        })
+    }
+
+    fn static_partition_resolution(&self) -> Result<Option<u8>, StoreError> {
+        self.with_conn(|conn| {
+            conn.query_row(
+                "SELECT value FROM meta WHERE key = 'static_partition_resolution'",
+                [],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()
+            .map(|value| value.and_then(|v| v.parse().ok()))
+        })
+    }
+
+    fn set_static_partition_resolution(&self, resolution: u8) -> Result<(), StoreError> {
+        self.with_conn(|conn| {
+            conn.execute(
+                "INSERT INTO meta (key, value) VALUES ('static_partition_resolution', ?1)                  ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                [resolution.to_string()],
+            )
+            .map(|_| ())
         })
     }
 

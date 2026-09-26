@@ -29,6 +29,13 @@ pub enum HazardType {
     TrailerCamera,
     RedLightCamera,
     DistanceControl,
+    /// A type this build does not know — a newer server may add hazard types
+    /// (the list is append-only). Decoding it as this instead of failing
+    /// keeps a sync working when the server is ahead of the library: one new
+    /// value in a snapshot or in `GET /v1/config` must not make the whole
+    /// response unreadable. Never sent to a server.
+    #[serde(other)]
+    Unknown,
 }
 
 /// A GeoJSON `Point`/`LineString` as the server's `ST_AsGeoJSON` produces it
@@ -240,9 +247,16 @@ pub struct DeltaPage {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PartitionSummary {
     pub tile: String,
+    /// SHA-256 (hex) of the package's JSON exactly as delivered, before any
+    /// transfer compression — checked against what arrives.
     pub hash: String,
     #[serde(rename = "sizeBytes")]
     pub size_bytes: u64,
+    /// Where exactly this content lives (`/v1/static-data/packages/<tile>/<hash>`),
+    /// on servers that offer it — a URL that can only ever answer with the
+    /// content the hash names. Absent on older servers.
+    #[serde(default)]
+    pub path: Option<String>,
 }
 
 /// `GET /v1/static-data/manifest` response.
@@ -252,6 +266,13 @@ pub struct StaticDataManifest {
     pub static_data_version: u64,
     #[serde(rename = "generatedAt")]
     pub generated_at: String,
+    /// The H3 resolution the tiles are cut at. Absent on a server that
+    /// predates the Europe-scale packages (then the client cannot tell and
+    /// does not check). Tile ids at different resolutions never match, so a
+    /// change makes the stored packages useless — see
+    /// [`crate::sync::SyncEngine::sync_static_data`].
+    #[serde(rename = "partitionResolution", default)]
+    pub partition_resolution: Option<u8>,
     pub partitions: Vec<PartitionSummary>,
 }
 
@@ -487,6 +508,50 @@ mod tests {
         assert_eq!(map.get(&HazardType::Traffic), Some(&900_000));
         assert_eq!(map.get(&HazardType::MobileSpeedCamera), Some(&300_000));
         assert_eq!(map.get(&HazardType::Construction), Some(&2_592_000_000));
+    }
+
+    #[test]
+    fn a_hazard_type_this_build_does_not_know_decodes_as_unknown() {
+        // A newer server may append hazard types; one of them must not make a
+        // whole snapshot or config response unreadable.
+        let single: HazardType = serde_json::from_str("\"averageSpeedCheck\"").unwrap();
+        assert_eq!(single, HazardType::Unknown);
+
+        let list: Vec<HazardType> = serde_json::from_str("[\"ice\", \"somethingNew\"]").unwrap();
+        assert_eq!(list, vec![HazardType::Ice, HazardType::Unknown]);
+
+        let map: HashMap<HazardType, i64> =
+            serde_json::from_str("{\"traffic\": 900000, \"somethingNew\": 1}").unwrap();
+        assert_eq!(map.get(&HazardType::Traffic), Some(&900_000));
+        assert_eq!(map.get(&HazardType::Unknown), Some(&1));
+    }
+
+    #[test]
+    fn a_manifest_from_an_older_server_has_no_resolution_and_a_newer_one_has_more_fields() {
+        let old: StaticDataManifest = serde_json::from_value(serde_json::json!({
+            "staticDataVersion": 1,
+            "generatedAt": "2026-01-01T00:00:00Z",
+            "partitions": [{ "tile": "t", "hash": "h", "sizeBytes": 10 }]
+        }))
+        .unwrap();
+        assert_eq!(old.partition_resolution, None);
+        assert_eq!(old.partitions[0].path, None);
+
+        let new: StaticDataManifest = serde_json::from_value(serde_json::json!({
+            "staticDataVersion": 2,
+            "partitionResolution": 4,
+            "generatedAt": "2026-01-01T00:00:00Z",
+            "partitions": [{
+                "tile": "t", "hash": "h", "sizeBytes": 10,
+                "gzipBytes": 3, "brotliBytes": 2, "path": "/v1/static-data/packages/t/h"
+            }]
+        }))
+        .unwrap();
+        assert_eq!(new.partition_resolution, Some(4));
+        assert_eq!(
+            new.partitions[0].path.as_deref(),
+            Some("/v1/static-data/packages/t/h")
+        );
     }
 
     #[test]

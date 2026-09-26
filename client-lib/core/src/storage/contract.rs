@@ -126,6 +126,7 @@ pub(crate) fn run(make: &dyn Fn() -> Box<dyn Store>) {
     correction_fields_and_geometry_survive_storage(make().as_ref());
     a_position_lookup_finds_the_nearby_segments_only(make().as_ref());
     a_segment_can_be_fetched_by_id(make().as_ref());
+    the_partition_resolution_is_remembered_until_static_data_is_cleared(make().as_ref());
 }
 
 fn cursors_are_kept_per_node(store: &dyn Store) {
@@ -288,6 +289,17 @@ fn a_position_lookup_finds_the_nearby_segments_only(store: &dyn Store) {
 
     let nowhere = store.speed_limit_segments_near(60.0, 30.0, 100.0).unwrap();
     assert!(nowhere.is_empty());
+}
+
+fn the_partition_resolution_is_remembered_until_static_data_is_cleared(store: &dyn Store) {
+    assert_eq!(store.static_partition_resolution().unwrap(), None);
+    store.set_static_partition_resolution(4).unwrap();
+    assert_eq!(store.static_partition_resolution().unwrap(), Some(4));
+    store.set_static_partition_resolution(5).unwrap();
+    assert_eq!(store.static_partition_resolution().unwrap(), Some(5));
+
+    store.clear_static_data().unwrap();
+    assert_eq!(store.static_partition_resolution().unwrap(), None);
 }
 
 fn a_segment_can_be_fetched_by_id(store: &dyn Store) {
