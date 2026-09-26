@@ -70,7 +70,38 @@ accept incoming joins.
 currently-known peer. Unlike join, a heartbeat is verified against the
 **stored** key for that `nodeId` — it can update a peer's advertised
 address, but it can't re-assert a new identity. Carries a self-reported
-`capacityHint` (§6) and `version`.
+`capacityHint` (§6), `version`, and — since add-on O-A — an optional
+`onlineCount`.
+
+**`onlineCount`** (optional integer ≥ 0): how many clients are online at the
+sending node right now. A plain head count — no identifiers, positions or
+timestamps — produced by the same in-memory counter that backs
+`GET /v1/stats/online` (`server/docs/api.md`). It is:
+
+- **omitted**, not sent as `null`/`0`, when the sender has
+  `ONLINE_COUNTER_ENABLED=false` or predates the field. The signature covers
+  the exact JSON, so the field is either there or not there; a receiver that
+  doesn't know the field ignores it (the payload schema is `passthrough`, and
+  the signature still verifies over it), and a receiver that gets no field
+  treats the sender's figure as unknown.
+- **exact**, not thresholded. The "fewer than N" masking is applied where a
+  figure is *published* (`GET /v1/stats/online`), never here: this is
+  operator-to-operator traffic between joined peers, per-peer figures are never
+  republished, and masking here would make the network total meaningless for a
+  network of many small nodes.
+- **a claim.** Like `capacityHint`, a receiver can't check it. It feeds only
+  the *estimated* network total — never reputation. A receiver drops a value
+  that isn't a plausible head count (negative, fractional, non-numeric, above
+  1 000 000) without rejecting the heartbeat, keeps the last figure per peer
+  **in memory only**, and counts it only while that peer is `active` or
+  `trusted` in the receiver's own reputation view (never `probation`), not in
+  `excludedNodeIds`, and its last heartbeat is younger than
+  `ONLINE_PEER_STALE_SECONDS` (default 300). Restarting a node forgets the
+  figures until the next round of heartbeats (≤ one interval).
+
+A peer that lies within the plausible range can still skew the estimate; that
+is exactly why the total is labelled `estimated` and why only nodes the
+receiver has itself measured as reliable count.
 
 ### 4.3 Reputation
 

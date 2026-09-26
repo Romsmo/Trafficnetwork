@@ -47,6 +47,7 @@ const PUBLIC_PATHS = new Set([
   "/v1/ws",
   "/v1/network/node-info",
   "/v1/network/directory",
+  "/v1/stats/online",
   "/v1/federation/join",
   "/v1/federation/peers",
   "/v1/federation/heartbeat",
