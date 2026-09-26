@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { ApiError } from "../api/client.js";
 import { BULK_IMPORT_KINDS, type BulkImportKind, type BulkImportPoster, type BulkImportRow } from "../api/types.js";
 import { Batcher } from "../batching/batcher.js";
+import type { Env } from "../config/env.js";
 import type { Region } from "../config/regions.js";
 import type { Logger } from "../logging.js";
 import type { KeySet } from "../state/keyset.js";
@@ -34,6 +35,8 @@ export interface RunWorkerOptions {
   onlySections?: string[];
   /** Passed to the worker as WorkerContext.indexDir. */
   indexDir?: string;
+  /** Passed to the worker as WorkerContext.env. */
+  env?: Env;
   /** How often the progress line is logged. Default 60 s. */
   progressIntervalMs?: number;
   /**
@@ -231,7 +234,7 @@ export async function runWorker(options: RunWorkerOptions): Promise<RunWorkerRes
     if (valid.length > 0) await postWithBisect(kind, valid);
   };
 
-  const ctx: WorkerContext = { regionId, region, logger, downloadDir, stateDir: stateStore.directory, indexDir: options.indexDir };
+  const ctx: WorkerContext = { regionId, region, logger, downloadDir, stateDir: stateStore.directory, indexDir: options.indexDir, env: options.env };
   const sections = worker.runSections ? worker.runSections(ctx) : singleSection(worker.run(ctx));
 
   for await (const section of sections) {

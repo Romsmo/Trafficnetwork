@@ -106,10 +106,17 @@ async function main() {
   }
 
   const totalInsertedByKind: Record<BulkImportKind, number> = { "speed-limit-segment": 0, "static-sign": 0, "fixed-speed-camera": 0 };
+  let sourcesRun = 0;
 
   for (const id of enabledSources) {
     const worker = WORKER_REGISTRY[id];
     if (!worker) throw new Error(`Source "${id}" is enabled but has no implemented worker yet — see ingestion/docs/sources.md`);
+    const unsupported = worker.supportsRegion?.(region);
+    if (unsupported) {
+      logger.info({ source: id, region: regionId, reason: unsupported }, "source skipped for this region");
+      continue;
+    }
+    sourcesRun++;
 
     const stateStore = new StateStore(env.STATE_DIR, regionId, id);
     if (fresh) {
@@ -137,9 +144,12 @@ async function main() {
       maxQuarantined: env.MAX_QUARANTINED,
       indexDir: env.OSMIUM_INDEX_DIR,
       testOnlyBatchDelayMs,
+      env,
     });
     for (const kind of BULK_IMPORT_KINDS) totalInsertedByKind[kind] += result.insertedByKind[kind];
   }
+
+  if (sourcesRun === 0) throw new Error(`None of the enabled sources (${enabledSources.join(", ")}) can import region "${regionId}" — see the "source skipped" messages above (config/regions.json: geofabrik URLs for osm, officialSources for the official sources)`);
 
   await verifyRun(apiClient, region, totalInsertedByKind, logger);
 }

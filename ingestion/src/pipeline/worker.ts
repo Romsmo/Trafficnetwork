@@ -1,3 +1,4 @@
+import type { Env } from "../config/env.js";
 import type { Region } from "../config/regions.js";
 import type { SourceId } from "../config/sources.js";
 import type { Logger } from "../logging.js";
@@ -18,6 +19,8 @@ export interface WorkerContext {
   stateDir: string;
   /** Scratch directory for randomly-accessed indexes (put it on an SSD); defaults to the worker's own work directory. */
   indexDir?: string;
+  /** The run's environment configuration, for workers with source-specific settings (e.g. NVDB_NO_*). */
+  env?: Env;
 }
 
 /**
@@ -46,6 +49,8 @@ export interface WorkerSection {
  */
 export interface SourceWorker {
   readonly id: SourceId;
+  /** Why this source cannot import into the region, or undefined if it can. The CLI skips a source that cannot, with this reason. */
+  supportsRegion?(region: Region): string | undefined;
   run(ctx: WorkerContext): AsyncGenerator<NormalizedRow>;
   runSections?(ctx: WorkerContext): AsyncGenerator<WorkerSection>;
 }

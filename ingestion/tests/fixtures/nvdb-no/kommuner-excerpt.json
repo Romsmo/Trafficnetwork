@@ -1,0 +1,23 @@
+[
+ {
+  "id": 1002101479,
+  "navn": "Oslo",
+  "nummer": 301,
+  "fylke": 3,
+  "organisasjonsnummer": 958935420
+ },
+ {
+  "id": 1006202708,
+  "navn": "Stavanger",
+  "nummer": 1103,
+  "fylke": 11,
+  "organisasjonsnummer": 964965226
+ },
+ {
+  "id": 1002101630,
+  "navn": "Utsira",
+  "nummer": 1151,
+  "fylke": 11,
+  "organisasjonsnummer": 964979901
+ }
+]

@@ -11,8 +11,11 @@ const verificationPointSchema = z.object({
 
 const regionSchema = z.object({
   name: z.string().min(1),
-  geofabrikExtractUrl: z.string().url(),
-  geofabrikChecksumUrl: z.string().url(),
+  // The OSM source needs both; a region served only by an official source (officialSources) has neither.
+  geofabrikExtractUrl: z.string().url().optional(),
+  geofabrikChecksumUrl: z.string().url().optional(),
+  // Official (non-OSM) sources that import into this region, by source id — e.g. ["nvdb-no"]. See pipeline/registry.ts.
+  officialSources: z.array(z.string().min(1)).optional(),
   // [minLng, minLat, maxLng, maxLat] — used by verify.ts (P3.4) to compute
   // which H3 partitions to cross-check a completed import against. Sourced
   // from Geofabrik's own published boundary geometry, not hand-drawn.

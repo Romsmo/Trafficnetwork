@@ -55,6 +55,18 @@ const envSchema = z
     MOBILITHEK_ENABLED: z.enum(["true", "false"]).default("false").transform((v) => v === "true"),
     AUTOBAHN_API_ENABLED: z.enum(["true", "false"]).default("false").transform((v) => v === "true"),
 
+    // NVDB Norway sign plates (pipeline/nvdb/, config/sign-mappings/no.json). Off by default like every source but OSM;
+    // run it as its own region: OSM_ENABLED=false NVDB_NO_ENABLED=true npm run ingest -- --region norway
+    NVDB_NO_ENABLED: z.enum(["true", "false"]).default("false").transform((v) => v === "true"),
+    NVDB_NO_BASE_URL: z.string().url().default("https://nvdbapiles.atlas.vegvesen.no"),
+    // Sent as X-Client (the API refuses requests without it) and, when set, X-Kontaktperson (the operator's contact, recommended by Statens vegvesen).
+    NVDB_NO_CLIENT_ID: z.string().min(1).default("Trafficnetwork-ingestion (+https://github.com/Romsmo/Trafficnetwork)"),
+    NVDB_NO_CONTACT: z.string().min(1).optional(),
+    NVDB_NO_MIN_REQUEST_INTERVAL_MS: z.coerce.number().int().nonnegative().default(200),
+    // Stop the run after this many API requests (the run resumes later). Unset = no cap.
+    NVDB_NO_MAX_REQUESTS: z.coerce.number().int().positive().optional(),
+    NVDB_NO_MAPPING_PATH: z.string().optional(),
+
     // Roadworks feeds (pipeline/roadworks/, config/roadworks-feeds.json). Each feed has its own enabled
     // flag in that file; a feed whose terms are not settled ships disabled. These are the operator's switches:
     ROADWORKS_ENABLED: z.enum(["true", "false"]).default("true").transform((v) => v === "true"), // global kill switch

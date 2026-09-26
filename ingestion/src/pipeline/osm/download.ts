@@ -68,6 +68,7 @@ export async function downloadExtract(regionId: string, region: Region, download
   const partMetaPath = `${tmpPath}.meta.json`;
   const markerPath = `${filePath}.verified`;
   const url = region.geofabrikExtractUrl;
+  if (!url || !region.geofabrikChecksumUrl) throw new Error(`Region "${regionId}" has no Geofabrik extract configured (geofabrikExtractUrl / geofabrikChecksumUrl in config/regions.json) — the OSM source cannot import it`);
 
   const expectedChecksum = await fetchExpectedChecksum(region.geofabrikChecksumUrl);
 

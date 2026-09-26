@@ -2,12 +2,12 @@ import type { Env } from "./env.js";
 
 /**
  * The full source catalog (ingestion/docs/sources.md has the evidence for
- * each). Only "osm" has a real worker as of P3.1/P3.2 — the other four are
- * catalog-only entries (documented, off, not implemented) per the project
- * owner's decision, kept here so config/CLI validation already knows their
- * names and doesn't need a later breaking change to add a real worker.
+ * each). "osm" (P3.2) and "nvdb-no" (official Norwegian sign plates, add-on Q4) have real
+ * workers; here, tomtom, mobilithek and autobahn-api are catalog-only entries (documented,
+ * off, not implemented) per the project owner's decision, kept here so config/CLI
+ * validation already knows their names and doesn't need a later breaking change to add a real worker.
  */
-export const SOURCE_IDS = ["osm", "here", "tomtom", "mobilithek", "autobahn-api"] as const;
+export const SOURCE_IDS = ["osm", "here", "tomtom", "mobilithek", "autobahn-api", "nvdb-no"] as const;
 export type SourceId = (typeof SOURCE_IDS)[number];
 
 export interface SourceConfig {
@@ -32,6 +32,7 @@ export function resolveSources(env: Env): Record<SourceId, SourceConfig> {
     },
     mobilithek: { id: "mobilithek", enabled: env.MOBILITHEK_ENABLED },
     "autobahn-api": { id: "autobahn-api", enabled: env.AUTOBAHN_API_ENABLED },
+    "nvdb-no": { id: "nvdb-no", enabled: env.NVDB_NO_ENABLED },
   };
 }
 

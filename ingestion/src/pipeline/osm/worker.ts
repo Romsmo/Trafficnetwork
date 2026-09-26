@@ -80,6 +80,7 @@ async function* runSections(ctx: WorkerContext): AsyncGenerator<WorkerSection> {
 
 export const osmWorker: SourceWorker = {
   id: "osm",
+  supportsRegion: (region) => (region.geofabrikExtractUrl && region.geofabrikChecksumUrl ? undefined : "the region has no Geofabrik extract (geofabrikExtractUrl / geofabrikChecksumUrl in config/regions.json)"),
   runSections,
   async *run(ctx: WorkerContext): AsyncGenerator<NormalizedRow> {
     for await (const section of runSections(ctx)) yield* section.rows;
