@@ -56,6 +56,10 @@ jobs:
         working-directory: ingestion
         run: npm run typecheck
 
+      - name: Build
+        working-directory: ingestion
+        run: npm run build
+
       - name: Unit tests
         working-directory: ingestion
         run: npm run test:unit
