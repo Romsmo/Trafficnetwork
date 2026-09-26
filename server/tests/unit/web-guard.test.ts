@@ -51,6 +51,35 @@ describe("classifyWebRequest (default-deny allowlist)", () => {
     expect(decision).toMatchObject({ kind: "deny", code: "WEB_NO_DEVICE_SIGNATURE" });
   });
 
+  describe("speed-limit corrections (add-on K-A)", () => {
+    const id = "2b7c6d10-0000-4000-8000-000000000000";
+
+    it("lets a web session read them and cast unsigned votes, counted like other writes", () => {
+      expect(classifyWebRequest(req({ path: "/v1/speed-limit-corrections", query: { tiles: "871f8d922ffffff" } }), policy)).toEqual({ kind: "allow", category: "read" });
+      expect(classifyWebRequest(req({ path: `/v1/speed-limit-segments/${id}/corrections` }), policy)).toEqual({ kind: "allow", category: "read" });
+      expect(classifyWebRequest(req({ method: "POST", path: `/v1/speed-limit-segments/${id}/corrections`, body: { value: 30, unit: "kmh" } }), policy)).toEqual({ kind: "allow", category: "write" });
+      expect(classifyWebRequest(req({ method: "POST", path: `/v1/speed-limit-corrections/${id}/confirmations`, body: { kind: "confirm" } }), policy)).toEqual({ kind: "allow", category: "write" });
+    });
+
+    it("never lets a web session sign a vote: theirs count on this node only", () => {
+      const signed = { deviceAssertion: { payload: {}, keyId: "x", signature: "y" } };
+      expect(classifyWebRequest(req({ method: "POST", path: `/v1/speed-limit-segments/${id}/corrections`, body: { value: 30, unit: "kmh", ...signed } }), policy)).toMatchObject({ kind: "deny", code: "WEB_NO_DEVICE_SIGNATURE" });
+      expect(classifyWebRequest(req({ method: "POST", path: `/v1/speed-limit-corrections/${id}/confirmations`, body: { kind: "confirm", ...signed } }), policy)).toMatchObject({ kind: "deny", code: "WEB_NO_DEVICE_SIGNATURE" });
+    });
+
+    it.each([
+      ["DELETE", "/v1/speed-limit-corrections"],
+      ["PUT", `/v1/speed-limit-segments/${id}/corrections`],
+      ["GET", `/v1/speed-limit-corrections/${id}/confirmations`],
+      ["POST", "/v1/speed-limit-corrections"],
+      ["GET", `/v1/speed-limit-segments/${id}/corrections/extra`],
+      ["POST", "/v1/speed-limit-segments/nearby/extra/corrections"],
+      ["POST", "/v1/federation/speed-limit-votes"],
+    ])("opens nothing else around them: %s %s stays denied", (method, path) => {
+      expect(classifyWebRequest(req({ method, path }), policy)).toMatchObject({ kind: "deny", status: 403, code: "WEB_SESSION_FORBIDDEN" });
+    });
+  });
+
   it("refuses camera categories while the namespace flag is off, and allows them once it is on", () => {
     const camera = req({ method: "POST", path: "/v1/hazard-reports", body: { type: "mobileSpeedCamera", lat: 1, lng: 2 } });
     expect(classifyWebRequest(camera, policy)).toMatchObject({ kind: "deny", code: "WEB_TYPE_NOT_ALLOWED" });

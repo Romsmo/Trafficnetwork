@@ -623,6 +623,8 @@ the route runs; everything not listed answers `403 WEB_SESSION_FORBIDDEN`:
 | `GET /v1/speed-limit-segments/nearby` | `radiusM` ≤ `WEB_MAX_SEGMENT_RADIUS_M`; additionally limited by `WEB_HEAVY_READ_LIMIT_PER_IP_PER_MINUTE` |
 | `POST /v1/hazard-reports` | no `deviceAssertion` (`403 WEB_NO_DEVICE_SIGNATURE`; web reports never federate); camera categories only when the node enables them (`403 WEB_TYPE_NOT_ALLOWED`) |
 | `POST /v1/hazard-reports/:id/confirmations` | — |
+| `GET /v1/speed-limit-corrections`, `GET /v1/speed-limit-segments/:id/corrections` | read limit per IP. Only meaningful on a node with the community-corrections add-on (K-A); elsewhere the route answers 404 |
+| `POST /v1/speed-limit-segments/:id/corrections`, `POST /v1/speed-limit-corrections/:id/confirmations` | no `deviceAssertion` (`403 WEB_NO_DEVICE_SIGNATURE`): a web vote is unsigned and counts **on this node only**; counted like other web writes (see below) |
 
 Writes count against the session (`WEB_REPORT_LIMIT_PER_SESSION`), the client IP
 (`WEB_REPORT_LIMIT_PER_IP_PER_HOUR`) and the node (`WEB_REPORT_LIMIT_NODE_PER_HOUR`), on

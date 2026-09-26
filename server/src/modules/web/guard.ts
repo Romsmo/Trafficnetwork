@@ -35,6 +35,15 @@ export interface WebRequestInfo {
 const deny = (status: number, code: string, message: string): GuardDecision => ({ kind: "deny", status, code, message });
 
 const CONFIRMATION_PATH = /^\/v1\/hazard-reports\/[^/]+\/confirmations$/;
+// Community speed-limit corrections (add-on K-A). The endpoints exist only on nodes that have that add-on; on any other
+// node these paths simply answer 404 after passing the guard.
+const CORRECTIONS_OF_SEGMENT_PATH = /^\/v1\/speed-limit-segments\/[^/]+\/corrections$/;
+const CORRECTION_VOTE_PATH = /^\/v1\/speed-limit-corrections\/[^/]+\/confirmations$/;
+
+/** A device signature makes a submission federation-eligible; browser sessions are anonymous and free to mint, so theirs never carry one. */
+function carriesDeviceSignature(body: unknown): boolean {
+  return Boolean(body) && typeof body === "object" && (body as Record<string, unknown>)["deviceAssertion"] !== undefined;
+}
 
 function radiusExceeds(query: Record<string, unknown>, max: number): boolean {
   const raw = query["radiusM"];
@@ -58,6 +67,7 @@ export function classifyWebRequest(info: WebRequestInfo, policy: WebPolicy): Gua
       case "/v1/hazard-reports/by-tile":
       case "/v1/speed-cameras/nearby":
       case "/v1/speed-cameras/by-tile":
+      case "/v1/speed-limit-corrections":
         return { kind: "allow", category: "read" };
       case "/v1/hazard-reports/nearby":
         if (radiusExceeds(query, policy.maxHazardRadiusM)) {
@@ -70,15 +80,15 @@ export function classifyWebRequest(info: WebRequestInfo, policy: WebPolicy): Gua
         }
         return { kind: "allow", category: "heavy-read" };
       default:
+        if (CORRECTIONS_OF_SEGMENT_PATH.test(path)) return { kind: "allow", category: "read" };
         break;
     }
   }
 
   if (method === "POST" && path === "/v1/hazard-reports") {
     const record = body && typeof body === "object" ? (body as Record<string, unknown>) : {};
-    // A device signature would make the report federation-eligible; browser sessions are anonymous and
-    // free to mint, so their reports stay on this node (docs/web-ui.md, "Trust model").
-    if (record["deviceAssertion"] !== undefined) {
+    // Their reports stay on this node (docs/web-ui.md, "Trust model").
+    if (carriesDeviceSignature(body)) {
       return deny(403, "WEB_NO_DEVICE_SIGNATURE", "Web sessions cannot submit device-signed reports; their reports stay on this node");
     }
     const type = record["type"];
@@ -91,6 +101,14 @@ export function classifyWebRequest(info: WebRequestInfo, policy: WebPolicy): Gua
   }
 
   if (method === "POST" && CONFIRMATION_PATH.test(path)) {
+    return { kind: "allow", category: "write" };
+  }
+
+  // Proposing or confirming/denying a speed-limit correction: unsigned, so the vote counts on this node only (add-on K-A).
+  if (method === "POST" && (CORRECTIONS_OF_SEGMENT_PATH.test(path) || CORRECTION_VOTE_PATH.test(path))) {
+    if (carriesDeviceSignature(body)) {
+      return deny(403, "WEB_NO_DEVICE_SIGNATURE", "Web sessions cannot submit device-signed votes; their votes count on this node only");
+    }
     return { kind: "allow", category: "write" };
   }
 

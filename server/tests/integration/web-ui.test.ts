@@ -20,6 +20,7 @@ describe("web UI (server/web)", () => {
   let limited: FastifyInstance;
   let limitedEnv: Env;
   let cameras: FastifyInstance;
+  let corrections: FastifyInstance; // its own node: the session-minting limit is per app, and these tests mint a few sessions
   let off: FastifyInstance;
   const closers: (() => Promise<void>)[] = [];
 
@@ -53,6 +54,7 @@ describe("web UI (server/web)", () => {
     }));
     ({ app: cameras } = await build({ SPEED_CAMERA_NAMESPACE_ENABLED: "true" }));
     ({ app: off } = await build({ WEB_UI_ENABLED: "false" }));
+    ({ app: corrections } = await build());
 
     await insertSpeedLimitSegment(testDb.db, { lineString: [[MUNICH.lng, MUNICH.lat], [MUNICH.lng + 0.001, MUNICH.lat + 0.0006]], speedLimit: 30, source: "osm" });
     await insertSpeedLimitSegment(testDb.db, { lineString: [[MUNICH.lng - 0.02, MUNICH.lat], [MUNICH.lng - 0.01, MUNICH.lat + 0.005]], speedLimit: 50, source: "osm" });
@@ -213,6 +215,45 @@ describe("web UI (server/web)", () => {
 
       const normal = await app.inject({ method: method as "GET" | "POST", url, headers: authHeader(await testToken(env)), payload: method === "POST" ? {} : undefined });
       expect(normal.json()?.error?.code).not.toBe("WEB_SESSION_FORBIDDEN");
+    });
+  });
+
+  describe("speed-limit corrections (add-on K-A) — the guard's side of it", () => {
+    // The correction endpoints exist only on nodes that have the K-A add-on. What this checks is the guard: a web session is
+    // let through to them (on a node without the add-on the route then answers 404, with it the endpoint's own validation
+    // answers), except for a device signature, which a browser can never legitimately carry.
+    const segment = "2b7c6d10-0000-4000-8000-000000000000";
+
+    it.each([
+      ["GET", "/v1/speed-limit-corrections?tiles=871f8d922ffffff", undefined],
+      ["GET", `/v1/speed-limit-segments/${segment}/corrections`, undefined],
+      ["POST", `/v1/speed-limit-segments/${segment}/corrections`, { value: 30, unit: "kmh" }],
+      ["POST", `/v1/speed-limit-corrections/${segment}/confirmations`, { kind: "confirm" }],
+    ])("lets %s %s pass the guard", async (method, url, payload) => {
+      const res = await corrections.inject({ method: method as "GET" | "POST", url, headers: authHeader(await webToken(corrections)), payload });
+      expect(res.statusCode).not.toBe(429);
+      expect(res.json()?.error?.code).not.toBe("WEB_SESSION_FORBIDDEN");
+      expect(res.json()?.error?.code).not.toBe("WEB_NO_DEVICE_SIGNATURE");
+    });
+
+    it("refuses a device signature on a vote, and counts the votes like other writes", async () => {
+      const token = await webToken(corrections);
+      const signed = await corrections.inject({
+        method: "POST",
+        url: `/v1/speed-limit-segments/${segment}/corrections`,
+        headers: authHeader(token),
+        payload: { value: 30, unit: "kmh", deviceAssertion: { payload: {}, keyId: "x", signature: "y" } },
+      });
+      expect(signed.statusCode).toBe(403);
+      expect(signed.json().error.code).toBe("WEB_NO_DEVICE_SIGNATURE");
+
+      const { app: tight } = await build({ WEB_REPORT_LIMIT_PER_SESSION: "1" });
+      const tightToken = await webToken(tight);
+      const vote = () => tight.inject({ method: "POST", url: `/v1/speed-limit-corrections/${segment}/confirmations`, headers: authHeader(tightToken), payload: { kind: "confirm" } });
+      expect((await vote()).statusCode).not.toBe(429);
+      const limited = await vote();
+      expect(limited.statusCode).toBe(429);
+      expect(limited.json().error.code).toBe("WEB_RATE_LIMITED");
     });
   });
 

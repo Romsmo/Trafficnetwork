@@ -112,6 +112,10 @@ What a web session may do is decided by a **default-deny allowlist** (`src/modul
   `/v1/speed-limit-segments/nearby` (the last two with the radius caps above),
 * `POST /v1/hazard-reports` (without `deviceAssertion`; camera categories only when the node enables them),
 * `POST /v1/hazard-reports/:id/confirmations`,
+* the speed-limit correction endpoints of add-on K-A (`GET /v1/speed-limit-corrections`, `GET|POST
+  /v1/speed-limit-segments/:id/corrections`, `POST /v1/speed-limit-corrections/:id/confirmations`; votes unsigned and counted on
+  this node only, like web reports — on a node without that add-on these paths answer 404). The UI for it ("that's wrong?" form)
+  is a separate milestone (K-B) and not part of this page yet; the API side is open so the two can be merged in either order,
 * the `/v1/ws` handshake (with the subscription cap).
 
 Everything else — snapshot/delta/static-data downloads, device registration, bulk import, federation, every endpoint that will
