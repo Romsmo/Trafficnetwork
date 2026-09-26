@@ -1,5 +1,6 @@
 import { sql } from "drizzle-orm";
 import type { Queryable } from "../client.js";
+import { bboxPrefilter } from "../../lib/geo-bbox.js";
 
 export interface SpeedLimitSegmentApi {
   id: string;
@@ -56,7 +57,7 @@ export async function findSpeedLimitSegmentsNearby(
     select id, ST_AsGeoJSON(geometry)::json as geometry_geojson, speed_limit, speed_limit_unit,
            source, source_license, imported_at, last_confirmed_at
     from speed_limit_segments
-    where ST_DWithin(
+    where ${bboxPrefilter(sql`geometry`, lat, lng, radiusM)}ST_DWithin(
       geometry::geography,
       ST_SetSRID(ST_MakePoint(${lng}, ${lat}), 4326)::geography,
       ${radiusM}
@@ -97,7 +98,7 @@ export async function findNearestSpeedLimit(
     select id, speed_limit, speed_limit_unit,
            ST_Distance(geometry::geography, ST_SetSRID(ST_MakePoint(${lng}, ${lat}), 4326)::geography) as distance_m
     from speed_limit_segments
-    where ST_DWithin(
+    where ${bboxPrefilter(sql`geometry`, lat, lng, maxDistanceM)}ST_DWithin(
       geometry::geography,
       ST_SetSRID(ST_MakePoint(${lng}, ${lat}), 4326)::geography,
       ${maxDistanceM}
