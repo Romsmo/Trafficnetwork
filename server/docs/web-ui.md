@@ -13,7 +13,7 @@ unchanged (one additive endpoint, `POST /v1/web/session`), and with `WEB_UI_ENAB
 |---|---|
 | ![Speed-limit layer and lookup](web-ui/map-speed-limits.jpg) | ![Map on a phone](web-ui/map-mobile.jpg) |
 
-More: [dark mode](web-ui/map-dark.jpg), [online display](web-ui/online-display.jpg) (mock data), [Connect page](web-ui/connect.png), [About page](web-ui/about.png).
+More: [dark mode](web-ui/map-dark.jpg), [online display](web-ui/online-display.jpg) (fixed example figures), [Connect page](web-ui/connect.png), [About page](web-ui/about.png).
 The images are regenerated with `npm run e2e:screenshots` (see [Tests](#tests)); they show the end-to-end suite's synthetic
 test data (a few straight streets and six reports in Munich) on real map tiles — a real node shows the roads its own data has.
 
@@ -75,8 +75,9 @@ not verified — and a note that only counting happens. It is text, not a colour
 `<details>` (keyboard operable, closes with Escape), it reserves its place so neither its first appearance nor a changing
 number moves anything, and it stays out of the way on a phone.
 
-**Status: built against a mock.** The server part (O-A, `GET /v1/stats/online`, `docs/prompt-addon-online-counter.md`) does not
-exist yet, so the page follows the contract *proposed* there:
+**Contract.** The server part is add-on O-A (`GET /v1/stats/online`, documented in `docs/api.md`; branch `feature/online-counter`).
+The page was first written against the shape proposed in `docs/prompt-addon-online-counter.md` and then checked against O-A's
+real endpoint in a trial merge of both branches — the two agree:
 
 ```json
 { "node": { "online": 12, "windowSeconds": 300 },
@@ -87,8 +88,10 @@ exist yet, so the page follows the contract *proposed* there:
 Below the threshold a figure is `"online": null` with `"below": 5` (or just `null`, then `minDisplayThreshold` applies); the page
 also enforces the threshold itself and never shows an exact number under it. `{ "enabled": false }` means "switched off".
 The reader (`parseOnlineStats` in `assets/js/online-badge.js`) is deliberately tolerant; **anything it does not understand
-hides the display**. If O-A ends up with another shape, adapt that one function and its unit tests
-(`tests/unit/web-online.test.ts`); the end-to-end tests (`e2e/online.spec.ts`) answer the endpoint with a mock until then.
+hides the display**. If the shape ever changes, adapt that one function and its unit tests
+(`tests/unit/web-online.test.ts`). The end-to-end tests (`e2e/online.spec.ts`) cover every state with a mocked answer and,
+where the endpoint exists, also run against the node's real one (documented shape, "fewer than 5" for one visitor, the exact
+number once enough are connected); on a node without it those are skipped.
 
 Behaviour: one request when the page opens, then every 30 seconds (none while the tab is hidden; a refresh when it becomes
 visible again). The request is the public one — no token, no cookie, so it does not use up a web session. If the node answers

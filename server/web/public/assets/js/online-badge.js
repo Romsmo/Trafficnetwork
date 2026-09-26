@@ -5,8 +5,9 @@ import { currentTranslator } from "./i18n.js";
  * The small "N online" display at the bottom right of every page (add-on O-B, docs/prompt-addon-online-counter.md).
  * It reads the public, unauthenticated GET /v1/stats/online. Numbers only: nothing about a person is ever shown or sent.
  *
- * STATUS: built against the contract *proposed* in the add-on prompt, before the server part (O-A) exists. The reader is
- * deliberately tolerant (see parseOnlineStats) and everything that is not understood simply hides the display.
+ * The contract is the server's (docs/api.md, "GET /v1/stats/online", add-on O-A). The page was first written against the shape
+ * proposed in the add-on prompt and checked against the real endpoint afterwards; the reader is deliberately tolerant (see
+ * parseOnlineStats) and everything that is not understood simply hides the display.
  */
 
 export const REFRESH_MS = 30_000;

@@ -18,6 +18,9 @@ const RELAXED_LIMITS: Record<string, string> = {
   WEB_READ_LIMIT_PER_IP_PER_MINUTE: "100000",
   WEB_HEAVY_READ_LIMIT_PER_IP_PER_MINUTE: "100000",
   REPORT_RATE_LIMIT_MAX: "1000",
+  // Online counter (a separate add-on; nodes without it ignore these): count open sockets only, answer fresh every time.
+  ONLINE_WINDOW_SECONDS: "0",
+  ONLINE_CACHE_SECONDS: "0",
 };
 
 function nodeEnv(databaseUrl: string, extra: Record<string, string>): NodeJS.ProcessEnv {

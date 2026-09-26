@@ -3,8 +3,8 @@ import { createTranslator } from "../../web/public/assets/js/i18n.js";
 import { OnlineStatsPoller, REFRESH_MS, detailLines, isSwitchedOff, parseOnlineStats, summaryText } from "../../web/public/assets/js/online-badge.js";
 
 /**
- * The "N online" display is built against the contract proposed in docs/prompt-addon-online-counter.md, before the
- * server part exists — these tests pin down what the page accepts, and that anything else hides the display.
+ * The "N online" display reads GET /v1/stats/online (contract: server/docs/api.md, add-on O-A) — these tests pin down
+ * what the page accepts, and that anything else hides the display.
  */
 const PROPOSED = {
   node: { online: 12, windowSeconds: 300 },
@@ -16,7 +16,7 @@ const de = createTranslator("de");
 const en = createTranslator("en");
 
 describe("parseOnlineStats", () => {
-  it("reads the proposed shape", () => {
+  it("reads the documented shape", () => {
     expect(parseOnlineStats(PROPOSED)).toEqual({
       node: { exact: 12 },
       network: { exact: 87, nodes: 4, asOf: "2026-09-24T10:15:00.000Z" },

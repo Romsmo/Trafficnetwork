@@ -1,12 +1,12 @@
 import { AxeBuilder } from "@axe-core/playwright";
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type APIRequestContext, type Page } from "@playwright/test";
 import { openMap, watchTraffic } from "./helpers.js";
 import { instanceUrl } from "./instances.js";
 
 /**
- * The "N online" display (add-on O-B, docs/prompt-addon-online-counter.md). The server part (O-A, GET /v1/stats/online)
- * does not exist yet, so these tests answer that endpoint with a MOCK of the proposed contract. Where a test says "no mock"
- * it runs against the real node, which today has no such endpoint — exactly the situation of an older server.
+ * The "N online" display (add-on O-B, docs/prompt-addon-online-counter.md). Two groups: tests that answer GET /v1/stats/online
+ * with a MOCK of the documented contract (they run everywhere and pin down every state), and tests against the node's REAL
+ * endpoint (they run only where the online-counter add-on O-A is merged and are skipped otherwise).
  */
 const node = instanceUrl("main");
 
@@ -94,8 +94,9 @@ test.describe("online display (against a mock of the proposed endpoint)", () => 
     expect(traffic.consoleErrors).toEqual([]);
   });
 
-  test("no mock: an older node without the endpoint shows nothing and no error", async ({ page }) => {
+  test("an older node without the endpoint (404) shows nothing and no error", async ({ page }) => {
     const traffic = await watchTraffic(page, node);
+    await page.route("**/v1/stats/online", (route) => route.fulfill({ status: 404, contentType: "application/json", body: '{"error":{"code":"NOT_FOUND","message":"not found"}}' }));
     await openMap(page, node);
     await expect(badge(page)).toBeHidden();
     await expect(page.locator("#site-footer")).not.toContainText("online");
@@ -193,5 +194,57 @@ test.describe("online display (against a mock of the proposed endpoint)", () => 
     await page.keyboard.press("Escape");
     await expect(badge(page).locator(".online-detail")).toBeHidden();
     await expect(summary).toBeFocused();
+  });
+});
+
+/**
+ * Against the node's REAL endpoint. These run only where GET /v1/stats/online exists (the online-counter add-on, O-A,
+ * merged); on a node without it they are skipped, so this file is green before and after that merge.
+ */
+test.describe("online display (against this node's real endpoint)", () => {
+  async function requireRealEndpoint(request: APIRequestContext): Promise<void> {
+    const probe = await request.get(`${node}/v1/stats/online`);
+    test.skip(probe.status() !== 200, "this node has no GET /v1/stats/online yet (add-on O-A not merged)");
+  }
+
+  test("the answer has the documented shape (the page's reader accepts exactly this)", async ({ request }) => {
+    await requireRealEndpoint(request);
+    const body = (await (await request.get(`${node}/v1/stats/online`)).json()) as Record<string, unknown>;
+    expect(body["enabled"]).toBe(true);
+    expect(typeof body["minDisplayThreshold"]).toBe("number");
+    const figure = body["node"] as { online: number | null; below?: number; windowSeconds: number };
+    expect(typeof figure.online === "number" || (figure.online === null && typeof figure.below === "number")).toBe(true);
+    expect(body["network"]).toBeUndefined(); // no federation in this suite: nothing to estimate
+  });
+
+  test("shows fewer-than for one visitor and the exact number once enough are connected", async ({ page, browser, request }) => {
+    await requireRealEndpoint(request);
+    await watchTraffic(page, node);
+    await openMap(page, node); // an open, authenticated live connection is what counts as online
+    await expect(badge(page).locator("summary")).toHaveText(/^weniger als \d+ online$/);
+
+    const others = [];
+    for (let i = 0; i < 5; i += 1) {
+      const context = await browser.newContext({ locale: "de-DE" });
+      const other = await context.newPage();
+      await watchTraffic(other, node);
+      await openMap(other, node);
+      others.push(context);
+    }
+    await page.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
+    await expect(badge(page).locator("summary")).toHaveText(/^\d+ online$/);
+    const shown = Number((await badge(page).locator("summary").innerText()).split(" ")[0]);
+    expect(shown).toBeGreaterThanOrEqual(5);
+    for (const context of others) await context.close();
+  });
+
+  test("is gone for good when the operator switched the counter off (ONLINE_COUNTER_ENABLED=false)", async ({ page, request }) => {
+    await requireRealEndpoint(request);
+    await watchTraffic(page, node);
+    // the real node answers { enabled: true }; a switched-off node answers { enabled: false } — same handling as tested with the mock above
+    await page.route("**/v1/stats/online", (route) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ enabled: false }) }));
+    await page.goto(`${node}/`);
+    await expect(page.locator("#site-footer .footer-links")).toBeVisible();
+    await expect(badge(page)).toBeHidden();
   });
 });

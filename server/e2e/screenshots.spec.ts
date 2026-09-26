@@ -109,9 +109,9 @@ test.describe("phone", () => {
   });
 });
 
-test("online display (mock of the proposed endpoint)", async ({ page }) => {
+test("online display (mocked figures)", async ({ page }) => {
   await watchTraffic(page, node, { fakeTiles: false });
-  // The server part of the online counter does not exist yet: this picture shows the page reading a MOCK of the proposed answer.
+  // Fixed figures instead of the live count, so the picture always shows the same numbers (and the network estimate, which a single node has none of).
   await page.route("**/v1/stats/online", (route) =>
     route.fulfill({
       status: 200,
