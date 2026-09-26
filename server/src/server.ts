@@ -15,7 +15,7 @@ async function main() {
   const expiryWorker = startExpiryWorker(db, app.log, app.realtime);
   const retentionWorker = startRetentionWorker(db, env, app.log);
   const federationWorkers: FederationWorkersHandle | null = env.FEDERATION_ENABLED
-    ? startFederationWorkers({ db, env, nodeIdentity: app.nodeIdentity, realtime: app.realtime, log: app.log })
+    ? startFederationWorkers({ db, env, nodeIdentity: app.nodeIdentity, realtime: app.realtime, log: app.log, online: app.online })
     : null;
   // Pre-built static-data packages (add-on E-B): rebuilt in the background after static data changes.
   const packageWorker = env.STATIC_PACKAGES_WORKER_ENABLED ? startStaticPackageWorker(db, env, app.log) : null;

@@ -155,6 +155,46 @@ unit. Everything is switchable with `COMMUNITY_CORRECTIONS_ENABLED`, and a flip
 is announced to clients through the static-data version and events
 (`docs/speed-limit-corrections.md` D11).
 
+## Online counter notes (add-on O-A)
+
+`GET /v1/stats/online` publishes how many clients are online. What that adds,
+and what keeps it from becoming a tracking feature:
+
+- **Only numbers leave the counting code.** Distinct clients are told apart by a
+  salted hash of the token subject held in process memory (random salt per
+  process, never persisted or logged) — no IP address, position or per-client
+  history is kept, nothing goes to the database, and the counter writes no log
+  lines. A memory dump of a running node yields hashes that mean nothing
+  without that process's salt, not client identifiers.
+- **A small number is a statement about people.** In a network with a handful of
+  users "1 online" says something about one person, so below
+  `ONLINE_MIN_DISPLAY_THRESHOLD` (default 5) the endpoint says "fewer than N"
+  for both the node and the network figure. Residual, accepted: someone who can
+  read *both* the node figure and the network total (say 5 and 7) can subtract
+  and learn the aggregate of the *other* nodes (2) — an aggregate of fewer than
+  N people, not any one of them, and per-peer figures are never published.
+- **Peer figures are claims.** A heartbeat's `onlineCount` can't be verified.
+  Mitigations: only `active`/`trusted` peers (which this node has measured as
+  reliable itself) count, excluded and stale peers don't, implausible values
+  (negative, fractional, > 1 000 000) are dropped, and the total is labelled
+  `estimated`. **Not** mitigated: a peer that has earned `active` and then
+  reports a plausible-but-false figure inflates or deflates the estimate. That
+  is the same residual as self-reported `capacityHint`, at the same low stakes —
+  the number decides nothing but what a display says.
+- **Inflating the count** needs authenticated clients: activity only counts
+  requests that succeeded and carry a `client`-scope token, so unauthenticated
+  or rejected traffic can't move it. Anyone who can mint client credentials
+  (device registration is self-service, capped per app key per day) can still
+  make the figure larger than the number of real people — again only a display
+  number. Memory is bounded (`ONLINE_MAX_TRACKED`).
+- **The endpoint is public and unauthenticated** by design (the web UI and any
+  client read it before or without a token). It has no per-route rate limit,
+  like the other public read endpoints; it is safe because the answer is cached
+  (`ONLINE_CACHE_SECONDS`) and concurrent requests share one computation.
+- **Off means off.** `ONLINE_COUNTER_ENABLED=false` stops all tracking and stops
+  the node from sending or using `onlineCount`; the endpoint answers
+  `{ "enabled": false }`.
+
 ## What this rework does *not* attempt
 
 - Full Sybil resistance (see table above — not achievable in an open-membership system per current literature).

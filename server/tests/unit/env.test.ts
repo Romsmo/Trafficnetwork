@@ -164,4 +164,30 @@ describe("loadEnv", () => {
       expect(() => loadEnv({ ...validEnv, COMMUNITY_CORRECTIONS_CONFIRMATIONS_REQUIRED: "0" })).toThrow(/CONFIRMATIONS_REQUIRED/);
     });
   });
+
+  it("applies the online-counter defaults (on, 5 minute window, mask below 5, cache 10 s)", () => {
+    resetEnvCache();
+    const env = loadEnv(validEnv);
+    expect(env.ONLINE_COUNTER_ENABLED).toBe(true);
+    expect(env.ONLINE_WINDOW_SECONDS).toBe(300);
+    expect(env.ONLINE_MIN_DISPLAY_THRESHOLD).toBe(5);
+    expect(env.ONLINE_CACHE_SECONDS).toBe(10);
+    expect(env.ONLINE_PEER_STALE_SECONDS).toBe(300);
+    expect(env.ONLINE_MAX_TRACKED).toBe(100_000);
+  });
+
+  it("switches the online counter off with the literal string \"false\"", () => {
+    resetEnvCache();
+    expect(loadEnv({ ...validEnv, ONLINE_COUNTER_ENABLED: "false" }).ONLINE_COUNTER_ENABLED).toBe(false);
+  });
+
+  it("allows a threshold, window and cache of 0 (never mask / connections only / no caching) but not negatives", () => {
+    resetEnvCache();
+    const env = loadEnv({ ...validEnv, ONLINE_MIN_DISPLAY_THRESHOLD: "0", ONLINE_WINDOW_SECONDS: "0", ONLINE_CACHE_SECONDS: "0" });
+    expect(env.ONLINE_MIN_DISPLAY_THRESHOLD).toBe(0);
+    expect(env.ONLINE_WINDOW_SECONDS).toBe(0);
+    expect(env.ONLINE_CACHE_SECONDS).toBe(0);
+    resetEnvCache();
+    expect(() => loadEnv({ ...validEnv, ONLINE_MIN_DISPLAY_THRESHOLD: "-1" })).toThrow(/ONLINE_MIN_DISPLAY_THRESHOLD/);
+  });
 });
