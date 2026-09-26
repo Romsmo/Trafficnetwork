@@ -559,7 +559,11 @@ fn vote_payload(
             let vote = if *agrees { "support" } else { "deny" };
             (vote, segment_key.clone(), *value, *unit, None)
         }
-        WriteKind::HazardReport => return None,
+        // Not votes on a segment (and not signed: the server takes these
+        // unsigned, they are not replicated between servers).
+        WriteKind::HazardReport
+        | WriteKind::HazardConfirmation { .. }
+        | WriteKind::CameraRemoval { .. } => return None,
     };
     Some(SpeedLimitVotePayload {
         kind: "speedLimitVote",
@@ -649,8 +653,16 @@ async fn send_to_server(
             let path = format!("/v1/speed-limit-corrections/{correction_id}/confirmations");
             post(discovery, server, bearer_token, &path, body).await
         }
+        WriteKind::HazardConfirmation { report_id } => {
+            let path = format!("/v1/hazard-reports/{report_id}/confirmations");
+            post(discovery, server, bearer_token, &path, body).await
+        }
+        WriteKind::CameraRemoval { camera_id } => {
+            let path = format!("/v1/speed-cameras/{camera_id}/removal-reports");
+            post(discovery, server, bearer_token, &path, body).await
+        }
         WriteKind::HazardReport => Err(DiscoveryError::InvalidResponse(
-            "not a correction write".to_string(),
+            "a hazard report is sent by the hazard-report flush".to_string(),
         )),
     }
 }

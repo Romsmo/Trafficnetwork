@@ -127,6 +127,7 @@ pub(crate) fn run(make: &dyn Fn() -> Box<dyn Store>) {
     a_position_lookup_finds_the_nearby_segments_only(make().as_ref());
     a_segment_can_be_fetched_by_id(make().as_ref());
     the_partition_resolution_is_remembered_until_static_data_is_cleared(make().as_ref());
+    signs_are_found_by_position_and_can_be_removed(make().as_ref());
 }
 
 fn cursors_are_kept_per_node(store: &dyn Store) {
@@ -300,6 +301,45 @@ fn the_partition_resolution_is_remembered_until_static_data_is_cleared(store: &d
 
     store.clear_static_data().unwrap();
     assert_eq!(store.static_partition_resolution().unwrap(), None);
+}
+
+fn signs_are_found_by_position_and_can_be_removed(store: &dyn Store) {
+    let sign_at = |id: &str, lng: f64, lat: f64| StaticSign {
+        id: id.to_string(),
+        position: Geometry::Point {
+            coordinates: [round7(lng), round7(lat)],
+        },
+        ..sign(id)
+    };
+    store
+        .upsert_static_data(&StoredEntities {
+            static_signs: vec![
+                sign_at("near", 13.4, 52.5),
+                sign_at("also-near", 13.4005, 52.5003),
+                sign_at("far", 11.5, 48.1),
+            ],
+            ..StoredEntities::default()
+        })
+        .unwrap();
+
+    let mut near: Vec<String> = store
+        .static_signs_near(52.5, 13.4, 200.0)
+        .unwrap()
+        .into_iter()
+        .map(|s| s.id)
+        .collect();
+    near.sort();
+    assert_eq!(near, vec!["also-near".to_string(), "near".to_string()]);
+
+    store.remove_static_entity("staticSign", "near").unwrap();
+    let near: Vec<String> = store
+        .static_signs_near(52.5, 13.4, 200.0)
+        .unwrap()
+        .into_iter()
+        .map(|s| s.id)
+        .collect();
+    assert_eq!(near, vec!["also-near".to_string()]);
+    assert_eq!(store.all_entities().unwrap().static_signs.len(), 2);
 }
 
 fn a_segment_can_be_fetched_by_id(store: &dyn Store) {

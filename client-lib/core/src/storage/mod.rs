@@ -144,6 +144,10 @@ pub enum WriteKind {
         unit: SpeedLimitUnit,
         agrees: bool,
     },
+    /// `POST /v1/hazard-reports/:id/confirmations` — "still there" or "gone".
+    HazardConfirmation { report_id: String },
+    /// `POST /v1/speed-cameras/:id/removal-reports` — "this camera is gone".
+    CameraRemoval { camera_id: String },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -242,6 +246,29 @@ pub trait Store: Send + Sync {
         _radius_meters: f64,
     ) -> Result<Vec<SpeedLimitSegment>, StoreError> {
         Ok(self.all_entities()?.speed_limit_segments)
+    }
+
+    /// Signs that may lie within `radius_meters` of a point — a superset is
+    /// fine, the caller measures. (The default returns every sign.)
+    fn static_signs_near(
+        &self,
+        _lat: f64,
+        _lng: f64,
+        _radius_meters: f64,
+    ) -> Result<Vec<StaticSign>, StoreError> {
+        Ok(self.all_entities()?.static_signs)
+    }
+
+    /// The fixed speed cameras — a few tens of thousands at most, so all of
+    /// them at once. (The default goes through `all_entities`.)
+    fn fixed_speed_cameras(&self) -> Result<Vec<FixedSpeedCamera>, StoreError> {
+        Ok(self.all_entities()?.fixed_speed_cameras)
+    }
+
+    /// The stored hazard reports (dynamic data: a region's worth, not the
+    /// whole world). A store should read only these, not everything.
+    fn hazard_reports(&self) -> Result<Vec<HazardReport>, StoreError> {
+        Ok(self.all_entities()?.hazard_reports)
     }
 
     /// One segment by its id — indexed in a real store. (The default scans

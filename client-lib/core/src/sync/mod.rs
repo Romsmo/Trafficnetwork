@@ -42,5 +42,6 @@ pub use types::{
 };
 pub use withholding::{detects_withholding, sample_check, should_sample};
 pub use writebuffer::{
-    flush_pending, submit_report, FlushOutcome, ReportSubmission, WriteBufferError,
+    confirm_hazard_report, flush_pending, report_camera_removed, submit_report, FlushOutcome,
+    ReportSubmission, WriteBufferError,
 };

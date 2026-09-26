@@ -11,7 +11,7 @@ use super::{
     boxes_intersect, query_box, segment_bbox, LocalCorrectionProposal, PendingWrite,
     StorageFullError, Store, StoreError, StoredEntities,
 };
-use crate::sync::types::{HazardReport, SpeedLimitSegment};
+use crate::sync::types::{HazardReport, SpeedLimitSegment, StaticSign};
 
 #[derive(Default)]
 struct Inner {
@@ -88,6 +88,29 @@ impl Store for InMemoryStore {
             .partition_hashes
             .get(tile)
             .cloned())
+    }
+
+    fn static_signs_near(
+        &self,
+        lat: f64,
+        lng: f64,
+        radius_meters: f64,
+    ) -> Result<Vec<StaticSign>, StoreError> {
+        let query = query_box(lat, lng, radius_meters);
+        let inner = self.inner.lock().unwrap();
+        Ok(inner
+            .entities
+            .static_signs
+            .iter()
+            .filter(|sign| {
+                sign.position
+                    .as_lat_lng()
+                    .is_some_and(|(sign_lat, sign_lng)| {
+                        boxes_intersect(query, (sign_lng, sign_lng, sign_lat, sign_lat))
+                    })
+            })
+            .cloned()
+            .collect())
     }
 
     fn static_partition_resolution(&self) -> Result<Option<u8>, StoreError> {

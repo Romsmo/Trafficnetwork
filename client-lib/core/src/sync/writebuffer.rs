@@ -26,6 +26,9 @@ use super::types::HazardType;
 pub enum WriteBufferError {
     Store(StoreError),
     Signing(String),
+    /// The submission itself is not something a server could accept (for
+    /// example a hazard type this build does not know).
+    InvalidInput(String),
 }
 
 impl std::fmt::Display for WriteBufferError {
@@ -33,6 +36,7 @@ impl std::fmt::Display for WriteBufferError {
         match self {
             WriteBufferError::Store(e) => write!(f, "storage error: {e}"),
             WriteBufferError::Signing(msg) => write!(f, "signing error: {msg}"),
+            WriteBufferError::InvalidInput(msg) => write!(f, "invalid input: {msg}"),
         }
     }
 }
@@ -54,6 +58,11 @@ pub fn submit_report(
     clock: &dyn Clock,
     submission: &ReportSubmission,
 ) -> Result<String, WriteBufferError> {
+    if submission.hazard_type == HazardType::Unknown {
+        return Err(WriteBufferError::InvalidInput(
+            "the hazard type is not one this library knows".to_string(),
+        ));
+    }
     let now = clock.now_unix_ms();
     let mut body = serde_json::json!({
         "type": submission.hazard_type,
@@ -78,6 +87,69 @@ pub fn submit_report(
     Ok(id)
 }
 
+/// Queues a "still there" / "gone" vote on a hazard report
+/// (`POST /v1/hazard-reports/:id/confirmations`). Returns the local queue id.
+/// `report_id` is the id the report has in the local store — the server that
+/// gave it out knows it, another server may not, which the flush allows for
+/// by moving on to the next server on a `404`.
+pub fn confirm_hazard_report(
+    store: &dyn Store,
+    clock: &dyn Clock,
+    report_id: &str,
+    still_there: bool,
+) -> Result<String, WriteBufferError> {
+    let body = serde_json::json!({ "kind": if still_there { "stillThere" } else { "gone" } });
+    enqueue_simple(
+        store,
+        clock,
+        body,
+        WriteKind::HazardConfirmation {
+            report_id: report_id.to_string(),
+        },
+        report_id,
+    )
+}
+
+/// Queues a "this camera is gone" vote
+/// (`POST /v1/speed-cameras/:id/removal-reports`). Returns the local queue id.
+pub fn report_camera_removed(
+    store: &dyn Store,
+    clock: &dyn Clock,
+    camera_id: &str,
+) -> Result<String, WriteBufferError> {
+    enqueue_simple(
+        store,
+        clock,
+        serde_json::json!({}),
+        WriteKind::CameraRemoval {
+            camera_id: camera_id.to_string(),
+        },
+        camera_id,
+    )
+}
+
+fn enqueue_simple(
+    store: &dyn Store,
+    clock: &dyn Clock,
+    body: serde_json::Value,
+    kind: WriteKind,
+    target_id: &str,
+) -> Result<String, WriteBufferError> {
+    let now = clock.now_unix_ms();
+    let id = local_write_id(&serde_json::json!({ "body": body, "target": target_id }), now);
+    let item = PendingWrite {
+        id: id.clone(),
+        request_body: body,
+        created_at_unix_ms: now,
+        attempts: 0,
+        kind,
+    };
+    store
+        .enqueue_write(&item)
+        .map_err(WriteBufferError::Store)?;
+    Ok(id)
+}
+
 #[derive(Debug)]
 pub enum FlushOutcome {
     /// Accepted by the server (`201`/`200`), or a `409
@@ -93,8 +165,8 @@ pub enum FlushOutcome {
     Failed { local_id: String },
 }
 
-/// Retries every currently queued write — hazard reports and speed-limit
-/// corrections/confirmations alike — signing each fresh (see the module doc)
+/// Retries every currently queued write — hazard reports, votes on hazard
+/// reports and cameras, and speed-limit corrections/confirmations alike — signing each fresh (see the module doc)
 /// when `device_key` is `Some`. Writes without a bound device key are sent
 /// unsigned, exactly as before device identity existed — federation
 /// replication just won't pick them up (`deviceAssertion` is optional on
@@ -176,6 +248,16 @@ async fn flush_hazard_report(
                 local_id: item.id,
                 merged: false,
             })
+        }
+        // The server's per-device budget is used up for now — not a refusal
+        // of this report, so it stays queued for the next flush.
+        Ok((_, response)) if response.status == 429 => {
+            let mut retried = item.clone();
+            retried.attempts += 1;
+            store
+                .enqueue_write(&retried)
+                .map_err(WriteBufferError::Store)?;
+            Ok(FlushOutcome::Failed { local_id: item.id })
         }
         Ok((_, response)) => {
             store
@@ -400,6 +482,100 @@ mod tests {
         let pending = store.pending_writes().unwrap();
         assert_eq!(pending.len(), 1);
         assert_eq!(pending[0].attempts, 1);
+    }
+
+    #[test]
+    fn a_hazard_type_the_library_does_not_know_is_not_queued() {
+        let store = InMemoryStore::new();
+        let clock = FixedClock(AtomicI64::new(1000));
+        let unknown = ReportSubmission {
+            hazard_type: HazardType::Unknown,
+            ..submission()
+        };
+
+        let result = submit_report(&store, &clock, &unknown);
+
+        assert!(matches!(result, Err(WriteBufferError::InvalidInput(_))));
+        assert!(store.pending_writes().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_429_keeps_the_report_queued_for_the_next_flush() {
+        let transport = Arc::new(MockTransport::new());
+        transport.set(
+            "https://a.example/v1/hazard-reports",
+            429,
+            serde_json::json!({ "error": { "code": "RATE_LIMITED" } }),
+        );
+        let discovery = discovery_with_one_server(transport);
+        let store = InMemoryStore::new();
+        let clock = FixedClock(AtomicI64::new(1000));
+        submit_report(&store, &clock, &submission()).unwrap();
+
+        let outcomes = flush_pending(&store, &discovery, &clock, "token", None)
+            .await
+            .unwrap();
+
+        assert!(matches!(outcomes.as_slice(), [FlushOutcome::Failed { .. }]));
+        let pending = store.pending_writes().unwrap();
+        assert_eq!(pending.len(), 1);
+        assert_eq!(pending[0].attempts, 1);
+    }
+
+    #[tokio::test]
+    async fn a_vote_on_a_hazard_report_and_a_camera_removal_are_sent_unsigned() {
+        let transport = Arc::new(MockTransport::new());
+        transport.set(
+            "https://a.example/v1/hazard-reports/hr1/confirmations",
+            200,
+            serde_json::json!({ "report": {}, "recorded": true }),
+        );
+        transport.set(
+            "https://a.example/v1/speed-cameras/cam1/removal-reports",
+            200,
+            serde_json::json!({ "camera": {}, "recorded": true, "removed": false }),
+        );
+        let discovery = discovery_with_one_server(transport.clone());
+        let store = InMemoryStore::new();
+        let clock = FixedClock(AtomicI64::new(1000));
+        confirm_hazard_report(&store, &clock, "hr1", true).unwrap();
+        report_camera_removed(&store, &clock, "cam1").unwrap();
+        let key = generate_ed25519_keypair().unwrap();
+
+        let outcomes = flush_pending(&store, &discovery, &clock, "token", Some(&key))
+            .await
+            .unwrap();
+
+        assert!(matches!(
+            outcomes.as_slice(),
+            [
+                FlushOutcome::Submitted { .. },
+                FlushOutcome::Submitted { .. }
+            ]
+        ));
+        assert!(store.pending_writes().unwrap().is_empty());
+        let seen = transport.seen_bodies.lock().unwrap();
+        let vote: serde_json::Value = serde_json::from_slice(&seen[0]).unwrap();
+        assert_eq!(vote, serde_json::json!({ "kind": "stillThere" }));
+        // Neither carries a device assertion, even though a key was given.
+        let removal: serde_json::Value = serde_json::from_slice(&seen[1]).unwrap();
+        assert!(removal.get("deviceAssertion").is_none());
+    }
+
+    #[test]
+    fn a_vote_saying_gone_is_worded_as_the_server_expects() {
+        let store = InMemoryStore::new();
+        let clock = FixedClock(AtomicI64::new(1000));
+        confirm_hazard_report(&store, &clock, "hr1", false).unwrap();
+
+        let pending = store.pending_writes().unwrap();
+        assert_eq!(pending[0].request_body, serde_json::json!({ "kind": "gone" }));
+        assert_eq!(
+            pending[0].kind,
+            WriteKind::HazardConfirmation {
+                report_id: "hr1".to_string()
+            }
+        );
     }
 
     #[tokio::test]

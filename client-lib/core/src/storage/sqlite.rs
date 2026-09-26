@@ -58,7 +58,14 @@ CREATE TABLE IF NOT EXISTS speed_limit_segments (
 CREATE VIRTUAL TABLE IF NOT EXISTS segment_rtree USING rtree(
     rid, min_lng, max_lng, min_lat, max_lat
 );
-CREATE TABLE IF NOT EXISTS static_signs (id TEXT PRIMARY KEY, data TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS static_signs (
+    rid INTEGER PRIMARY KEY,
+    id TEXT NOT NULL UNIQUE,
+    data TEXT NOT NULL
+);
+CREATE VIRTUAL TABLE IF NOT EXISTS sign_rtree USING rtree(
+    rid, min_lng, max_lng, min_lat, max_lat
+);
 CREATE TABLE IF NOT EXISTS fixed_speed_cameras (id TEXT PRIMARY KEY, data TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS hazard_reports (id TEXT PRIMARY KEY, data TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS pending_writes (
@@ -74,6 +81,9 @@ const SEGMENT_COLUMNS: &str = "id, segment_key, speed_limit, unit, source, sourc
 
 const SEGMENT_COLUMNS_FROM_S: &str = "s.id, s.segment_key, s.speed_limit, s.unit, s.source, \
      s.source_license, s.imported_at, s.last_confirmed_at, s.geometry, s.correction";
+
+/// The page cache a store starts with, in KiB — see [`SqliteStore::set_cache_size_kib`].
+const DEFAULT_CACHE_KIB: u32 = 16 * 1024;
 
 pub struct SqliteStore {
     conn: Mutex<Connection>,
@@ -97,6 +107,12 @@ impl SqliteStore {
         conn.pragma_update(None, "journal_mode", "WAL")
             .map_err(db_error)?;
         conn.pragma_update(None, "synchronous", "NORMAL")
+            .map_err(db_error)?;
+        // SQLite's own default cache is about 2 MB, too small for the indexes
+        // of a Europe-sized bootstrap: 16 MB made the 5 M-segment import
+        // about 27 % faster in the measurements
+        // (client-lib/docs/bootstrap-measurements.md), more bought little.
+        conn.pragma_update(None, "cache_size", -i64::from(DEFAULT_CACHE_KIB))
             .map_err(db_error)?;
         let version: i64 = conn
             .query_row("PRAGMA user_version", [], |row| row.get(0))
@@ -350,6 +366,27 @@ fn upsert_json<T: Serialize>(
     Ok(())
 }
 
+/// A sign is a row of JSON plus an entry in the R*Tree (keyed by the row's
+/// `rid`), so that "the signs around here" does not read them all.
+fn upsert_sign(tx: &Transaction<'_>, sign: &StaticSign) -> rusqlite::Result<()> {
+    let data = serde_json::to_string(sign).map_err(to_sql_error)?;
+    let rid: i64 = tx
+        .prepare_cached(
+            "INSERT INTO static_signs (id, data) VALUES (?1, ?2) \
+             ON CONFLICT(id) DO UPDATE SET data = excluded.data \
+             RETURNING rid",
+        )?
+        .query_row(params![sign.id, data], |row| row.get(0))?;
+    if let Some((lat, lng)) = sign.position.as_lat_lng() {
+        tx.prepare_cached(
+            "INSERT OR REPLACE INTO sign_rtree (rid, min_lng, max_lng, min_lat, max_lat) \
+             VALUES (?1, ?2, ?2, ?3, ?3)",
+        )?
+        .execute(params![rid, lng, lat])?;
+    }
+    Ok(())
+}
+
 fn read_json<T: DeserializeOwned>(conn: &Connection, table: &str) -> rusqlite::Result<Vec<T>> {
     let mut stmt = conn.prepare(&format!("SELECT data FROM {table} ORDER BY rowid"))?;
     let rows = stmt.query_map([], |row| {
@@ -364,7 +401,7 @@ fn upsert_static(tx: &Transaction<'_>, data: &StoredEntities) -> rusqlite::Resul
         upsert_segment(tx, segment)?;
     }
     for sign in &data.static_signs {
-        upsert_json(tx, "static_signs", &sign.id, sign)?;
+        upsert_sign(tx, sign)?;
     }
     for camera in &data.fixed_speed_cameras {
         upsert_json(tx, "fixed_speed_cameras", &camera.id, camera)?;
@@ -424,8 +461,9 @@ impl Store for SqliteStore {
             let tx = conn.transaction()?;
             tx.execute_batch(
                 "DELETE FROM segment_rtree; DELETE FROM speed_limit_segments; \
-                 DELETE FROM static_signs; DELETE FROM fixed_speed_cameras; \
-                 DELETE FROM partition_hashes;                  DELETE FROM meta WHERE key = 'static_partition_resolution';",
+                 DELETE FROM sign_rtree; DELETE FROM static_signs; \
+                 DELETE FROM fixed_speed_cameras; DELETE FROM partition_hashes; \
+                 DELETE FROM meta WHERE key = 'static_partition_resolution';",
             )?;
             tx.commit()
         })
@@ -446,7 +484,8 @@ impl Store for SqliteStore {
     fn set_static_partition_resolution(&self, resolution: u8) -> Result<(), StoreError> {
         self.with_conn(|conn| {
             conn.execute(
-                "INSERT INTO meta (key, value) VALUES ('static_partition_resolution', ?1)                  ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                "INSERT INTO meta (key, value) VALUES ('static_partition_resolution', ?1) \
+                 ON CONFLICT(key) DO UPDATE SET value = excluded.value",
                 [resolution.to_string()],
             )
             .map(|_| ())
@@ -500,7 +539,17 @@ impl Store for SqliteStore {
                     }
                 }
                 "staticSign" => {
-                    tx.execute("DELETE FROM static_signs WHERE id = ?1", params![entity_id])?;
+                    let rid: Option<i64> = tx
+                        .query_row(
+                            "SELECT rid FROM static_signs WHERE id = ?1",
+                            params![entity_id],
+                            |row| row.get(0),
+                        )
+                        .optional()?;
+                    if let Some(rid) = rid {
+                        tx.execute("DELETE FROM sign_rtree WHERE rid = ?1", params![rid])?;
+                        tx.execute("DELETE FROM static_signs WHERE rid = ?1", params![rid])?;
+                    }
                 }
                 "fixedSpeedCamera" => {
                     tx.execute(
@@ -576,6 +625,36 @@ impl Store for SqliteStore {
             let rows = stmt.query_map(bounds, segment_from_row)?;
             rows.collect()
         })
+    }
+
+    fn static_signs_near(
+        &self,
+        lat: f64,
+        lng: f64,
+        radius_meters: f64,
+    ) -> Result<Vec<StaticSign>, StoreError> {
+        let (min_lng, max_lng, min_lat, max_lat) = query_box(lat, lng, radius_meters);
+        self.with_conn(|conn| {
+            let mut stmt = conn.prepare_cached(
+                "SELECT s.data FROM sign_rtree r JOIN static_signs s ON s.rid = r.rid \
+                 WHERE r.max_lng >= ?1 AND r.min_lng <= ?2 \
+                   AND r.max_lat >= ?3 AND r.min_lat <= ?4",
+            )?;
+            let bounds = params![min_lng, max_lng, min_lat, max_lat];
+            let rows = stmt.query_map(bounds, |row| {
+                let text: String = row.get(0)?;
+                serde_json::from_str::<StaticSign>(&text).map_err(|e| from_sql_error(0, e))
+            })?;
+            rows.collect()
+        })
+    }
+
+    fn fixed_speed_cameras(&self) -> Result<Vec<FixedSpeedCamera>, StoreError> {
+        self.with_conn(|conn| read_json::<FixedSpeedCamera>(conn, "fixed_speed_cameras"))
+    }
+
+    fn hazard_reports(&self) -> Result<Vec<HazardReport>, StoreError> {
+        self.with_conn(|conn| read_json::<HazardReport>(conn, "hazard_reports"))
     }
 
     fn storage_bytes(&self) -> Option<u64> {
