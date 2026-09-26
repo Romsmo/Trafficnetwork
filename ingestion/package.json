@@ -14,6 +14,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint src tests scripts",
     "generate:implicit-speeds": "tsx scripts/generate-implicit-speeds.mts",
+    "report:quality": "tsx scripts/source-quality-report.mts",
     "test": "vitest run",
     "test:unit": "vitest run tests/unit",
     "test:integration": "vitest run tests/integration",

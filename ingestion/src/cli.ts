@@ -8,6 +8,7 @@ import { WORKER_REGISTRY } from "./pipeline/registry.js";
 import { runWorker } from "./pipeline/run-worker.js";
 import { StateStore } from "./state/store.js";
 import { verifyRun } from "./verify/verify.js";
+import { collectSourceQuality } from "./report/quality.js";
 import { runRoadworksCommand } from "./roadworks-command.js";
 import { BULK_IMPORT_KINDS, type BulkImportKind } from "./api/types.js";
 
@@ -147,6 +148,7 @@ async function main() {
       env,
     });
     for (const kind of BULK_IMPORT_KINDS) totalInsertedByKind[kind] += result.insertedByKind[kind];
+    for (const quality of await collectSourceQuality(env.STATE_DIR, { region: regionId, source: id })) logger.info({ quality }, "source quality report (npm run report:quality for all sources)");
   }
 
   if (sourcesRun === 0) throw new Error(`None of the enabled sources (${enabledSources.join(", ")}) can import region "${regionId}" — see the "source skipped" messages above (config/regions.json: geofabrik URLs for osm, officialSources for the official sources)`);
