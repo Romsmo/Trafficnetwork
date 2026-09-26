@@ -145,6 +145,12 @@ pub struct BootstrapPlan {
 /// so keep it quick.
 pub trait SyncObserver: Send + Sync {
     fn on_bootstrap_progress(&self, progress: &BootstrapProgress);
+
+    /// A delta-pulled or pushed event changed the local data (a report
+    /// appeared or expired, a static entity changed or was removed).
+    /// Not called for a snapshot or a static package — those end in a sync
+    /// that reports its own completion. The default ignores it.
+    fn on_data_changed(&self, _event: &EventLogEntry) {}
 }
 
 pub struct SyncEngine {
@@ -178,12 +184,46 @@ impl SyncEngine {
     /// turn. `tiles` are the H3 resolution-7 region cells the caller
     /// currently cares about (subscribed via position/map-matching,
     /// outside this module's scope).
+    ///
+    /// The two parts do not hold each other up: a static bootstrap that is
+    /// interrupted, out of space or still in progress does not keep the
+    /// current hazard reports from arriving. Both are attempted; the error
+    /// of the static part, if any, is the one returned.
     pub async fn sync(&self, bearer_token: &str, tiles: &[String]) -> Result<(), SyncError> {
-        self.sync_static_data(bearer_token).await?;
-        for server in self.discovery.current_pool() {
-            self.sync_server(bearer_token, &server, tiles).await?;
+        let static_result = self.sync_static_data(bearer_token).await;
+        let dynamic_result = self.sync_dynamic(bearer_token, tiles).await;
+        static_result.and(dynamic_result)
+    }
+
+    /// The dynamic part of a sync: every server of the pool's own delta (or
+    /// snapshot), then the local clean-up that depends on it. One server
+    /// failing does not stop the others; the call fails only when none could
+    /// be synced — or when the store is full, which nothing else makes up for.
+    pub async fn sync_dynamic(
+        &self,
+        bearer_token: &str,
+        tiles: &[String],
+    ) -> Result<(), SyncError> {
+        let pool = self.discovery.current_pool();
+        if pool.is_empty() {
+            return Err(SyncError::Discovery(DiscoveryError::NoServersAvailable));
         }
-        self.prune_redundant_proposals()
+        let mut synced_any = false;
+        let mut first_error = None;
+        for server in pool {
+            match self.sync_server(bearer_token, &server, tiles).await {
+                Ok(()) => synced_any = true,
+                Err(SyncError::StorageFull) => return Err(SyncError::StorageFull),
+                Err(e) => {
+                    first_error.get_or_insert(e);
+                }
+            }
+        }
+        self.prune_redundant_proposals()?;
+        match first_error {
+            Some(e) if !synced_any => Err(e),
+            _ => Ok(()),
+        }
     }
 
     /// A local correction proposal whose value the community has since
@@ -383,7 +423,7 @@ impl SyncEngine {
     /// delta-pulled event are handled identically — no separate code path
     /// to drift.
     pub(crate) fn apply_event(&self, event: &EventLogEntry) -> Result<(), SyncError> {
-        match event.entity_type.as_str() {
+        let result = match event.entity_type.as_str() {
             "hazardReport" => self.apply_hazard_report_event(event),
             "speedLimitSegment" | "staticSign" | "fixedSpeedCamera" => {
                 self.apply_static_entity_event(event)
@@ -392,8 +432,14 @@ impl SyncEngine {
             // about yet is skipped, not fatal — matches how the server
             // itself treats unrecognized `types` filters as "drop, don't
             // reject" (server/docs/api.md).
-            _ => Ok(()),
+            _ => return Ok(()),
+        };
+        if result.is_ok() {
+            if let Some(observer) = &self.observer {
+                observer.on_data_changed(event);
+            }
         }
+        result
     }
 
     fn apply_hazard_report_event(&self, event: &EventLogEntry) -> Result<(), SyncError> {

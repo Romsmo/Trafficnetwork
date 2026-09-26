@@ -136,7 +136,10 @@ fn enqueue_simple(
     target_id: &str,
 ) -> Result<String, WriteBufferError> {
     let now = clock.now_unix_ms();
-    let id = local_write_id(&serde_json::json!({ "body": body, "target": target_id }), now);
+    let id = local_write_id(
+        &serde_json::json!({ "body": body, "target": target_id }),
+        now,
+    );
     let item = PendingWrite {
         id: id.clone(),
         request_body: body,
@@ -569,7 +572,10 @@ mod tests {
         confirm_hazard_report(&store, &clock, "hr1", false).unwrap();
 
         let pending = store.pending_writes().unwrap();
-        assert_eq!(pending[0].request_body, serde_json::json!({ "kind": "gone" }));
+        assert_eq!(
+            pending[0].request_body,
+            serde_json::json!({ "kind": "gone" })
+        );
         assert_eq!(
             pending[0].kind,
             WriteKind::HazardConfirmation {

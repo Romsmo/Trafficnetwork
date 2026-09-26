@@ -61,6 +61,8 @@ impl Default for DiscoveryConfig {
 
 struct CachedDirectory {
     fetched_at_unix_ms: i64,
+    /// The directory's own `generatedAt`, as the server reported it.
+    generated_at: String,
 }
 
 pub struct DiscoveryService {
@@ -144,6 +146,7 @@ impl DiscoveryService {
                         self.pool.lock().unwrap().ingest_directory(&directory);
                         *self.cache_meta.lock().unwrap() = Some(CachedDirectory {
                             fetched_at_unix_ms: self.clock.now_unix_ms(),
+                            generated_at: directory.generated_at.clone(),
                         });
                         return Ok(());
                     }
@@ -192,6 +195,22 @@ impl DiscoveryService {
             }
             Err(e) => Err(e),
         }
+    }
+
+    /// Every server the pool knows about, in no particular order — for a
+    /// status display, not for choosing a server (that is `current_pool`).
+    pub fn known_servers(&self) -> Vec<KnownServer> {
+        let pool = self.pool.lock().unwrap();
+        pool.node_ids().filter_map(|id| pool.get(id).cloned()).collect()
+    }
+
+    /// The `generatedAt` of the newest directory fetched, if any.
+    pub fn directory_generated_at(&self) -> Option<String> {
+        self.cache_meta
+            .lock()
+            .unwrap()
+            .as_ref()
+            .map(|cached| cached.generated_at.clone())
     }
 
     /// The ranked server list the sync engine should use right now.
