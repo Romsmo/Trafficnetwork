@@ -1,0 +1,18 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "trafficnetwork"
+version = "0.1.0"
+description = "Local-first client library for the Trafficnetwork traffic data network (a ctypes wrapper of the native library)"
+readme = "README.md"
+license = { text = "Apache-2.0" }
+requires-python = ">=3.9"
+dependencies = []
+
+[tool.setuptools]
+packages = ["trafficnetwork"]
+
+# The native library (libtrafficnetwork.so / .dylib / trafficnetwork.dll, built
+# from client-lib/bindings/c-abi) is not part of this source package; see README.md.

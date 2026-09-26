@@ -172,7 +172,10 @@ impl ServerPool {
 
     /// The ranked pool the sync engine should actually use right now —
     /// servers currently in backoff are excluded entirely (not just
-    /// deprioritized), everything else is ranked by `scoring::score`
+    /// deprioritized) — unless that would leave nothing to try: then the one
+    /// whose backoff ends soonest is tried anyway (a network of one server
+    /// must not lock itself out for minutes after a single failed request).
+    /// Everything else is ranked by `scoring::score`
     /// (withholding strikes apply an additional flat penalty per strike,
     /// on top of the usual reputation/latency/error factors) and truncated
     /// to `pool_size`. `jitter_fractions` supplies one `0.0..=1.0` value per
@@ -200,6 +203,15 @@ impl ServerPool {
             })
             .collect();
         ranked.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        if ranked.is_empty() {
+            let soonest = self
+                .servers
+                .values()
+                .min_by_key(|s| s.backoff_until_unix_ms.unwrap_or(i64::MIN));
+            if let Some(server) = soonest {
+                return vec![server.node_id.clone()];
+            }
+        }
         ranked
             .into_iter()
             .take(self.pool_size)
@@ -275,6 +287,33 @@ mod tests {
         let selected = pool.current_pool(1_000, &jitters); // still within backoff window
         assert!(!selected.contains(&"a".to_string()));
         assert!(selected.contains(&"b".to_string()));
+    }
+
+    #[test]
+    fn the_only_server_is_still_tried_while_it_is_in_backoff() {
+        let mut pool = ServerPool::new(3);
+        pool.ingest_directory(&directory_with_peers(&[("a", ReputationTier::Active)]));
+        pool.record_failure("a", 1_000, 0.0);
+
+        let selected = pool.current_pool(1_000, &HashMap::new());
+
+        assert_eq!(selected, vec!["a".to_string()]);
+    }
+
+    #[test]
+    fn when_all_are_in_backoff_the_one_that_recovers_first_is_tried() {
+        let mut pool = ServerPool::new(3);
+        pool.ingest_directory(&directory_with_peers(&[
+            ("a", ReputationTier::Active),
+            ("b", ReputationTier::Active),
+        ]));
+        pool.record_failure("a", 1_000, 0.0);
+        pool.record_failure("a", 1_000, 0.0);
+        pool.record_failure("b", 1_000, 0.0);
+
+        let selected = pool.current_pool(1_000, &HashMap::new());
+
+        assert_eq!(selected, vec!["b".to_string()]);
     }
 
     #[test]
