@@ -63,6 +63,44 @@ export interface BulkImportPoster {
   isStaticDataEmpty?(): Promise<boolean>;
 }
 
+/**
+ * Seed reports (roadworks): mirrored from server/src/modules/bulk-import/routes.ts (seedReportSchema). Unlike the three static
+ * kinds these are upserts keyed by (feedId, externalId), so re-sending a batch — including a retry after a lost response — is harmless.
+ */
+export interface SeedReportRow {
+  externalId: string;
+  type: "construction";
+  lat: number;
+  lng: number;
+  /** ISO 8601 with offset; the report expires then. Absent → ttlHours (or the server's default) from this sighting. */
+  endsAt?: string;
+  ttlHours?: number;
+}
+
+export interface SeedReportsRequest {
+  feedId: string;
+  /** New per import run; a run that completed retires what it did not re-send. */
+  runId: string;
+  sourceLicense: string;
+  reports: SeedReportRow[];
+}
+
+export interface SeedReportsResponse {
+  created: number;
+  reactivated: number;
+  updated: number;
+  refreshed: number;
+  skippedEnded: number;
+  duplicatesInRequest: number;
+}
+
+export interface SeedReportPoster {
+  postSeedReports(request: SeedReportsRequest): Promise<SeedReportsResponse>;
+  retireSeedReports(feedId: string, runId: string): Promise<{ retired: number }>;
+}
+
+export const SEED_REPORTS_MAX_ROWS = 5000;
+
 export interface TokenResponse {
   accessToken: string;
   tokenType: "Bearer";

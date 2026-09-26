@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+const csv = (value: string): string[] => value.split(",").map((s) => s.trim()).filter((s) => s.length > 0);
+
 const envSchema = z
   .object({
     SERVER_URL: z.string().url("SERVER_URL must be a valid URL"),
@@ -52,6 +54,17 @@ const envSchema = z
     TOMTOM_ENABLED: z.enum(["true", "false"]).default("false").transform((v) => v === "true"),
     MOBILITHEK_ENABLED: z.enum(["true", "false"]).default("false").transform((v) => v === "true"),
     AUTOBAHN_API_ENABLED: z.enum(["true", "false"]).default("false").transform((v) => v === "true"),
+
+    // Roadworks feeds (pipeline/roadworks/, config/roadworks-feeds.json). Each feed has its own enabled
+    // flag in that file; a feed whose terms are not settled ships disabled. These are the operator's switches:
+    ROADWORKS_ENABLED: z.enum(["true", "false"]).default("true").transform((v) => v === "true"), // global kill switch
+    ROADWORKS_FEEDS_ON: z.string().default("").transform(csv), // enable these feed ids on purpose
+    ROADWORKS_FEEDS_OFF: z.string().default("").transform(csv), // disable these (wins over everything)
+    ROADWORKS_FEEDS_CONFIG_PATH: z.string().optional(),
+    // A roadwork that starts within this many minutes is already sent (0 = only once it has started).
+    ROADWORKS_LOOKAHEAD_MINUTES: z.coerce.number().int().nonnegative().default(30),
+    // The same roadwork in two feeds within this distance (and overlapping in time) is created once.
+    ROADWORKS_MERGE_RADIUS_METERS: z.coerce.number().int().positive().default(250),
 
     // No default: current HERE/TomTom free-tier pricing could not be pinned
     // to one confirmed authoritative number as of this project's own source

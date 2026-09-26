@@ -8,6 +8,8 @@ import {
   type BulkImportResponse,
   type BulkImportRow,
   type NearbySpeedLimitSegment,
+  type SeedReportsRequest,
+  type SeedReportsResponse,
   type StaticDataManifest,
   type StaticDataPartition,
   type TokenResponse,
@@ -100,6 +102,34 @@ export class ApiClient {
       throw new ApiError(`Bulk import failed: ${res.status} ${body?.error?.message ?? res.statusText}`, res.status, body);
     }
     return (await res.json()) as BulkImportResponse;
+  }
+
+  /** Upserts one batch of seed reports (roadworks). Idempotent, so the generic retry-on-5xx is safe here. */
+  async postSeedReports(request: SeedReportsRequest): Promise<SeedReportsResponse> {
+    const res = await this.authedFetch("/v1/bulk-import/seed-reports", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(request),
+    });
+    if (!res.ok) {
+      const body = await safeJson<ApiErrorBody>(res);
+      throw new ApiError(`Seed-report import failed: ${res.status} ${body?.error?.message ?? res.statusText}`, res.status, body);
+    }
+    return (await res.json()) as SeedReportsResponse;
+  }
+
+  /** Ends a feed's reports that the given (complete) run did not re-send. */
+  async retireSeedReports(feedId: string, runId: string): Promise<{ retired: number }> {
+    const res = await this.authedFetch("/v1/bulk-import/seed-reports/retire", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ feedId, runId }),
+    });
+    if (!res.ok) {
+      const body = await safeJson<ApiErrorBody>(res);
+      throw new ApiError(`Seed-report retire failed: ${res.status} ${body?.error?.message ?? res.statusText}`, res.status, body);
+    }
+    return (await res.json()) as { retired: number };
   }
 
   async getNearbySpeedLimitSegments(lat: number, lng: number, radiusM: number): Promise<NearbySpeedLimitSegment[]> {

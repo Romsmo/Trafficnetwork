@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { createServer } from "node:net";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
@@ -11,7 +12,18 @@ export interface TestServer {
 }
 
 const SERVER_DIR = path.resolve(fileURLToPath(import.meta.url), "../../../../server");
-const LOCAL_TEST_PORT = 34127;
+
+/** A free port for this test file's own server: integration test files run in parallel workers, so a fixed port would clash. */
+function freePort(): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const probe = createServer();
+    probe.once("error", reject);
+    probe.listen(0, "127.0.0.1", () => {
+      const address = probe.address();
+      probe.close(() => (address && typeof address !== "string" ? resolve(address.port) : reject(new Error("could not find a free port"))));
+    });
+  });
+}
 
 /**
  * Two ways to get a real, running server for these tests to hit over real HTTP:
@@ -40,7 +52,8 @@ export async function startTestServer(): Promise<TestServer> {
   const container: StartedPostgreSqlContainer = await new PostgreSqlContainer("postgis/postgis:16-3.4").start();
   const databaseUrl = container.getConnectionUri();
   const jwtSecret = "test-jwt-secret-at-least-16-characters-long";
-  const serverUrl = `http://127.0.0.1:${LOCAL_TEST_PORT}`;
+  const port = await freePort();
+  const serverUrl = `http://127.0.0.1:${port}`;
 
   await runOnce("node", ["dist/db/migrate.js"], { DATABASE_URL: databaseUrl, JWT_SECRET: jwtSecret });
 
@@ -51,7 +64,7 @@ export async function startTestServer(): Promise<TestServer> {
     // writes are never gated by this flag (only reads are), so the flag being off
     // by default in production doesn't affect what ingestion actually writes; it
     // only affects whether *this test* can see it afterwards.
-    env: { ...process.env, DATABASE_URL: databaseUrl, JWT_SECRET: jwtSecret, PORT: String(LOCAL_TEST_PORT), SPEED_CAMERA_NAMESPACE_ENABLED: "true" },
+    env: { ...process.env, DATABASE_URL: databaseUrl, JWT_SECRET: jwtSecret, PORT: String(port), SPEED_CAMERA_NAMESPACE_ENABLED: "true" },
     stdio: "pipe",
   });
   let serverLog = "";

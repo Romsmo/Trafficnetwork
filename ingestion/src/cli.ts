@@ -8,12 +8,17 @@ import { WORKER_REGISTRY } from "./pipeline/registry.js";
 import { runWorker } from "./pipeline/run-worker.js";
 import { StateStore } from "./state/store.js";
 import { verifyRun } from "./verify/verify.js";
+import { runRoadworksCommand } from "./roadworks-command.js";
 import { BULK_IMPORT_KINDS, type BulkImportKind } from "./api/types.js";
 
 /**
  * Usage:
  *   npm run ingest -- --region bayern [--dry-run] [--fresh] [--batch-size N]
+ *   npm run ingest -- --roadworks [--feed id[,id…]] [--dry-run]
  *
+ * --roadworks   one poll pass over the enabled roadworks feeds (config/roadworks-feeds.json), then exit — run it periodically
+ *               from cron / a systemd timer / the Windows task scheduler; --feed limits it to some feeds, --dry-run reads and
+ *               parses the feeds and reports what it would send, sending nothing
  * --region      required; an id from config/regions.json (bayern, germany, europe)
  * --dry-run     validates config + server credentials, logs what would run, sends nothing
  * --fresh       wipes local progress state for this region+source first — WILL duplicate
@@ -26,8 +31,10 @@ import { BULK_IMPORT_KINDS, type BulkImportKind } from "./api/types.js";
  * --section     comma-separated section ids: import only those (regions with "sections" in
  *               config/regions.json); the run is then not marked complete
  */
-function parseArgs(argv: string[]): { region: string; dryRun: boolean; fresh: boolean; allowNonEmpty: boolean; onlySections?: string[]; batchSizeOverride?: number } {
+function parseArgs(argv: string[]): { region?: string; roadworks: boolean; onlyFeeds?: string[]; dryRun: boolean; fresh: boolean; allowNonEmpty: boolean; onlySections?: string[]; batchSizeOverride?: number } {
   let region: string | undefined;
+  let roadworks = false;
+  let onlyFeeds: string[] | undefined;
   let dryRun = false;
   let fresh = false;
   let allowNonEmpty = false;
@@ -37,6 +44,11 @@ function parseArgs(argv: string[]): { region: string; dryRun: boolean; fresh: bo
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === "--region") {
       region = argv[++i];
+    } else if (argv[i] === "--roadworks") {
+      roadworks = true;
+    } else if (argv[i] === "--feed") {
+      onlyFeeds = (argv[++i] ?? "").split(",").map((f) => f.trim()).filter((f) => f.length > 0);
+      if (onlyFeeds.length === 0) throw new Error("--feed needs at least one feed id");
     } else if (argv[i] === "--dry-run") {
       dryRun = true;
     } else if (argv[i] === "--fresh") {
@@ -54,15 +66,22 @@ function parseArgs(argv: string[]): { region: string; dryRun: boolean; fresh: bo
     }
   }
 
-  if (!region) throw new Error("--region is required (see ingestion/config/regions.json for valid ids)");
-  return { region, dryRun, fresh, allowNonEmpty, onlySections, batchSizeOverride };
+  if (!region && !roadworks) throw new Error("--region is required (see ingestion/config/regions.json for valid ids), or use --roadworks");
+  if (region && roadworks) throw new Error("--region and --roadworks are separate runs — pick one");
+  return { region, roadworks, onlyFeeds, dryRun, fresh, allowNonEmpty, onlySections, batchSizeOverride };
 }
 
 async function main() {
-  const { region: regionId, dryRun, fresh, allowNonEmpty, onlySections, batchSizeOverride } = parseArgs(process.argv.slice(2));
+  const { region: regionId, roadworks, onlyFeeds, dryRun, fresh, allowNonEmpty, onlySections, batchSizeOverride } = parseArgs(process.argv.slice(2));
 
   const env = loadEnv();
   const logger = createLogger(env);
+  if (roadworks) {
+    const reports = await runRoadworksCommand(env, logger, { dryRun, onlyFeeds });
+    if (reports.some((r) => r.status === "failed")) process.exitCode = 1;
+    return;
+  }
+  if (!regionId) throw new Error("--region is required");
   const region = resolveRegion(loadRegions(env.REGIONS_CONFIG_PATH), regionId);
   const sources = resolveSources(env);
   const batchSize = batchSizeOverride ?? env.BATCH_SIZE;
