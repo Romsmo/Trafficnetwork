@@ -76,7 +76,7 @@ async function main() {
           process.exitCode = 2;
         } else {
           console.log(
-            `Built ${result.tilesBuilt} tile(s) (${result.tilesEmpty} empty), ${result.tilesFailed} failed, ${mb(result.bytesWritten)} written in ${Math.round(result.seconds)} s. Ready: ${result.ready}.`,
+            `Built ${result.tilesBuilt} tile(s) (${result.tilesEmpty} empty), ${result.tilesFailed} failed, ${mb(result.bytesWritten)} written in ${Math.round(result.seconds)} s. Ready: ${result.ready}. Peak memory of this process: ${mb(process.resourceUsage().maxRSS * 1024)}.`,
           );
           if (result.tilesFailed > 0) process.exitCode = 1;
         }
