@@ -6,6 +6,7 @@ import {
   bulkInsertStaticSigns,
 } from "../../db/queries/bulk-import.js";
 import { requireScope } from "../auth/hook.js";
+import { PERSISTENT_CAMERA_TYPES } from "../../config/constants.js";
 import { badRequest } from "../../lib/errors.js";
 
 
@@ -32,6 +33,8 @@ const staticSignRowSchema = z.object({
 const fixedSpeedCameraRowSchema = z.object({
   lat: z.number().min(-90).max(90),
   lng: z.number().min(-180).max(180),
+  // Add-on D: which persistent device this is. Omitted = a speed camera, exactly as before.
+  cameraType: z.enum(PERSISTENT_CAMERA_TYPES).optional(),
   source: z.string().min(1),
   sourceLicense: z.string().optional(),
   importedAt: z.string().datetime().optional(),

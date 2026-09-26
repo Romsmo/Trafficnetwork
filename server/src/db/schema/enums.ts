@@ -7,6 +7,7 @@ import {
   ENTITY_TYPES,
   EVENT_TYPES,
   HAZARD_TYPES,
+  PERSISTENT_CAMERA_TYPES,
   SPEED_LIMIT_UNITS,
 } from "../../config/constants.js";
 
@@ -27,6 +28,8 @@ export const hazardSourceEnum = pgEnum("hazard_source", ["community", "seed"]);
 export const confirmationKindEnum = pgEnum("confirmation_kind", ["stillThere", "gone"]);
 
 export const cameraStatusEnum = pgEnum("camera_status", ["active", "removed"]);
+
+export const cameraTypeEnum = pgEnum("camera_type", PERSISTENT_CAMERA_TYPES);
 
 export const eventTypeEnum = pgEnum("event_type", EVENT_TYPES);
 

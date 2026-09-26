@@ -1,8 +1,11 @@
 # Persistent enforcement devices (red-light, distance) in the data model — plan (D0)
 
-Status: **plan only, no code yet** (milestone D0 of the add-on prompt "Dauerhafte Überwachungsanlagen").
-Branch `feature/persistent-enforcement-devices`, stacked on `feature/europe-scale` (see question 1).
-Everything below marked *measured* was measured on 2026-09-26; everything marked *checked in code* names the file.
+Status: **implemented (D1–D4)** on `feature/persistent-enforcement-devices`, stacked on `feature/europe-scale`. The plan (D0) was
+written first, before any code; the open questions in section 10 were **not answered by the operator before the final round**, so the
+implementation follows the defaults named there — each is a small change if the operator decides otherwise (list in section 10).
+Everything below marked *measured* was measured on 2026-09-26; everything marked *checked in code* names the file. Tests:
+`tests/integration/persistent-devices.test.ts` (reads, lifecycle, flag off, packages), `persistent-devices-migration.test.ts`
+(legacy data, forward, idempotent, rollback, refusal), the extended `federation-multi-node.test.ts` and `static-data-partitions.test.ts`.
 
 ## 0. What is being decided, in short
 
@@ -221,7 +224,7 @@ occur, because `cameraType` never crosses the federation boundary.
 * Renaming the table to `enforcement_devices`.
 * Federation of persistent devices (section 5).
 
-## 10. Open questions for the operator
+## 10. Open questions for the operator — and the default each one was built with
 
 1. **Branch base.** Stacked on `feature/europe-scale` (recommended: it holds the package builder this touches and migration numbers 0007/0008, so this becomes 0009), which fixes the merge
    order perf-fix → K-A → E-B → this. Based on `main` instead, the migration would collide with K-A's 0007 and the package work (D3) could not be done. — *Default taken: stacked.*
@@ -238,6 +241,11 @@ occur, because `cameraType` never crosses the federation boundary.
 7. **Ingestion.** The `type=enforcement` import (source-catalogue, section 3.1) may start writing `redLightCamera` / `distanceControl` with `cameraType` only once D2 runs on the target
    server — an older server would file them as speed cameras (unknown field ignored). I will state this in `docs/status.md`. Until then: do not import them.
 8. **Deferred on purpose:** section control (needs client-lib to decode unknown types first — a request to the client chat) and a "permanent" flag on user reports. OK to leave both out of this task?
+
+**Built with:** 1 stacked; 2 node-local (documented in `federation-protocol.md` §7, multi-node test reduced accordingly); 3 all
+persistent devices without `types` (the web UI needs its small fix — see the status file); 4 `enforcementDevices` = every persistent
+device; 5 by-tile includes the new kinds, not the speed cameras; 6 no dependency on this branch for `tn-europe`; 7 stated in the
+status file; 8 deferred. Changing 3, 4 or 5 is a change of one filter or one query each.
 
 ## 11. Milestones (from the prompt) and what each contains
 

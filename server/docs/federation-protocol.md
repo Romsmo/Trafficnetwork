@@ -289,7 +289,18 @@ sections, so it reads as a tracked gap rather than an unstated limitation:
 - **Fixed-camera federation.** `fixedSpeedCamera` reports have no automatic
   expiry and their own removal-report lifecycle (`camera_removal_reports`)
   — federating them would need their own merge semantics this milestone
-  didn't build.
+  didn't build. **The same holds for every persistent enforcement device**
+  (add-on D: `redLightCamera`, `distanceControl` next to the speed cameras in
+  `fixed_speed_cameras`): they are node-local static data, seeded by a node's own
+  import or a database dump, never replicated. `cameraType` therefore never
+  crosses the federation boundary, and there is no "peer with an unknown
+  `cameraType`" to handle. What *does* federate is the device-signed **report** of a
+  `redLightCamera` / `distanceControl`: an ordinary `hazard_reports` row that expires
+  like any other (`tests/integration/federation-multi-node.test.ts` checks that the
+  persistent device on one node does not appear on its peers while the report does).
+  Making the camera table federate needs the merge semantics above plus a
+  cross-node device identity and provenance for rows that carry no device signature —
+  a project of its own (see `docs/persistent-enforcement-devices.md`, §5).
 - **Withholding detection.** The original concept's "event X is known
   elsewhere, absent here" anti-entropy hash comparison needs a
   peer-graph-wide comparable summary of what each server knows — materially

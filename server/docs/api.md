@@ -412,8 +412,8 @@ one.
 | GET | `/v1/static-signs/nearby?lat&lng&radiusM` | |
 | GET | `/v1/hazard-reports/nearby?lat&lng&radiusM&types` | Never returns camera-adjacent types (see below) |
 | GET | `/v1/hazard-reports/by-tile?tile&k&types` | `k` = ring radius (0–5) around `tile`, an H3 resolution-7 cell id |
-| GET | `/v1/speed-cameras/nearby?lat&lng&radiusM&types` | Empty unless `SPEED_CAMERA_NAMESPACE_ENABLED` |
-| GET | `/v1/speed-cameras/by-tile?tile&k&types` | Dynamic camera types only (fixed cameras are globally synced, not tiled) |
+| GET | `/v1/speed-cameras/nearby?lat&lng&radiusM&types` | Empty unless `SPEED_CAMERA_NAMESPACE_ENABLED`. Persistent devices of every kind plus the expiring camera reports — see "Persistent enforcement devices" |
+| GET | `/v1/speed-cameras/by-tile?tile&k&types` | Expiring camera reports, plus persistent red-light and distance devices; never speed cameras (globally synced, not tiled) |
 | GET | `/v1/snapshot?tiles&types&staticData` | See "Sync" below |
 | GET | `/v1/delta?since&tiles&types&limit` | See "Sync" below |
 | GET | `/v1/config` | See "Client config" below |
@@ -501,7 +501,70 @@ Response: { "camera": {...}, "recorded": boolean, "removed": boolean }
 
 One "this camera is gone" vote per reporter. Once distinct votes reach
 `CAMERA_REMOVAL_THRESHOLD`, the camera is marked `removed` and disappears
-from reads. Works regardless of the namespace flag.
+from reads. Works regardless of the namespace flag, and for every kind of
+persistent device (the id is what counts — see the next section).
+
+## Persistent enforcement devices (add-on D)
+
+`fixed_speed_cameras` holds every **permanently installed** enforcement device, not only
+speed cameras: `cameraType` is one of `fixedSpeedCamera`, `redLightCamera`, `distanceControl`
+(the list a server knows is `persistentCameraTypes` in `GET /v1/config`; a server that predates
+the feature has no such key). Such a device never expires and leaves only through removal
+reports (above). Mobile and trailer cameras, and — by default — user reports of red-light and
+distance controls, stay what they were: **expiring** hazard reports. Design and reasons:
+[`persistent-enforcement-devices.md`](persistent-enforcement-devices.md). Everything here is
+gated by `SPEED_CAMERA_NAMESPACE_ENABLED` exactly like the speed cameras: flag off → no device
+of any kind in any read, snapshot, delta or package; writes and imports still work.
+
+**Device item** (in `nearby`, `by-tile`, the snapshot, the packages and event payloads):
+
+```
+{ "id", "type", "cameraType", "position", "status": "active"|"removed", "removedAt", "source",
+  "sourceLicense", "importedAt", "lastConfirmedAt", "removalReportCount" }
+```
+
+`type` equals `cameraType` and is always one of the hazard types above, so a client that decodes
+`type` into the hazard enum handles every device. The item has no `expiresAt` — that is how a
+persistent device is told apart from an expiring report of the same `type` in one list.
+**New field:** `cameraType`; every other field is unchanged, and every row that existed before
+the feature is `fixedSpeedCamera`.
+
+**`GET /v1/speed-cameras/nearby`** — without `types`: every persistent device within the radius
+plus the expiring camera reports. `types` filters as before and now also selects persistent devices:
+`types=fixedSpeedCamera` returns speed cameras only; `types=redLightCamera` returns the persistent
+red-light devices **and** the expiring red-light reports (each item says which it is, see above);
+`types=mobileSpeedCamera` never returns a persistent device.
+
+**`GET /v1/speed-cameras/by-tile`** — as before for the expiring camera reports; additionally the
+persistent devices of the kinds `redLightCamera` and `distanceControl` whose position lies in the
+requested tiles (persistent devices have no region tile of their own; they are found through the
+tiles' bounding boxes and an exact H3 check). Speed cameras are still not returned here — they are
+globally synced, never tiled.
+
+**Snapshot** — `fixedSpeedCameras` keeps its meaning (speed cameras only). New `enforcementDevices`:
+**every** persistent device, speed cameras included, each with `cameraType`. Same gating and the same
+`?staticData=false` rule as `fixedSpeedCameras`.
+
+**Events** — a change to a persistent device is `StaticDataUpdated` / `StaticDataRemoved` with
+`entityType: "fixedSpeedCamera"` for a speed camera (exactly as before) and
+**`entityType: "enforcementDevice"`** for the other kinds (new value; a client that does not know an
+entity type must skip the event — the client library does). The payload is the device item. In
+`/v1/delta` the `types` filter matches the payload's `type` for both entity types.
+
+**Bulk import** — `POST /v1/bulk-import/speed-cameras` rows take an optional `cameraType`
+(`fixedSpeedCamera` by default; an unknown value is a 400). A call without the field behaves exactly
+as before. Import red-light and distance devices only against a server that has this feature: an older
+server ignores the unknown field and stores them as speed cameras.
+
+**Community reports** — `POST /v1/hazard-reports` with `type: "fixedSpeedCamera"` still creates or
+confirms a speed camera; it merges only into another *speed camera* within
+`DUPLICATE_MERGE_RADIUS_METERS`, never into a red-light or distance device at the same junction.
+
+**Packages** — see "Static data packages": `enforcementDevices` appears in a tile's package only when
+the tile has a persistent device.
+
+**Federation** — persistent devices are node-local static data, like speed cameras (never replicated;
+`federation-protocol.md` §7). A device-signed `redLightCamera` report federates as an ordinary expiring report.
 
 ## Speed-limit corrections (add-on K-A)
 
@@ -646,14 +709,18 @@ planner's row estimate, so it costs nothing.
   "speedLimitSegments": [...],
   "staticSigns": [...],
   "hazardReports": [...],
-  "fixedSpeedCameras": [...]
+  "fixedSpeedCameras": [...],
+  "enforcementDevices": [...]
 }
 ```
 
 - `speedLimitSegments` / `staticSigns` are always returned **in full** — they
   sync globally regardless of `tiles` (docs/concept.md section 3.3).
 - `fixedSpeedCameras` likewise, but only populated when
-  `SPEED_CAMERA_NAMESPACE_ENABLED` — empty array otherwise.
+  `SPEED_CAMERA_NAMESPACE_ENABLED` — empty array otherwise. Speed cameras only,
+  as it has always meant.
+- `enforcementDevices` (add-on D): every persistent device, speed cameras included,
+  each with `cameraType` — see "Persistent enforcement devices". Same gating.
 - `hazardReports` is only populated when `tiles` is given (omitting `tiles`
   means "static data only"), filtered by exact tile membership — the client
   is expected to have already expanded its own k-ring via the same H3
@@ -662,7 +729,7 @@ planner's row estimate, so it costs nothing.
   `snapshotSequence` and the returned rows are always mutually consistent —
   no event landing between the two reads can be silently missing from both.
 - `staticData=false` omits `speedLimitSegments`/`staticSigns`/
-  `fixedSpeedCameras` entirely (client-lib P2.0) — for a client that already
+  `fixedSpeedCameras`/`enforcementDevices` entirely (client-lib P2.0) — for a client that already
   has the static dataset via the partition/manifest endpoints below and only
   wants `snapshotSequence` plus tile-filtered hazard reports.
 
@@ -747,8 +814,16 @@ every successful bulk import.
 ### `GET /v1/static-data/partitions/:tile`
 
 ```json
-{ "tile": "<h3 id>", "speedLimitSegments": [...], "staticSigns": [...], "fixedSpeedCameras": [...] }
+{ "tile": "<h3 id>", "speedLimitSegments": [...], "staticSigns": [...], "fixedSpeedCameras": [...],
+  "enforcementDevices": [...] }
 ```
+
+`fixedSpeedCameras` holds the speed cameras of the tile, as it always has. **`enforcementDevices`**
+(add-on D) holds every persistent device of the tile — speed cameras included — each with `cameraType`; the
+key is **omitted when the tile has none**, so a tile without devices keeps exactly the bytes, and therefore
+the hash, it had before the key existed (no re-download). Both arrays are empty/absent while the camera
+namespace flag is off. A client ignoring unknown keys needs no change; a client that wants the new kinds reads
+`enforcementDevices` (absent = none).
 
 404 if `tile` has no data. Streamed from the pre-built file; the content and
 `hash` are what they have always been. `Accept-Encoding: br` / `gzip` gets the
@@ -792,6 +867,10 @@ root public key it already trusts, rather than taking this server's word for
 `speedCameraNamespaceEnabled` above (which already reflects the network
 config's value if one is loaded — see "Signed network configuration" below).
 
+**D addition:** `persistentCameraTypes` — the kinds of permanent enforcement device this server
+knows (`["fixedSpeedCamera","redLightCamera","distanceControl"]`); see "Persistent enforcement
+devices". An older server lacks the key — that is the version hint: treat "absent" as "speed cameras only".
+
 **K-A addition:** `communityCorrections` — `{ enabled, confirmationsRequired,
 valueRange: { kmh: {min,max}, mph: {min,max} }, valueStep, rateLimit: { max,
 windowMinutes } }`. A client hides the whole correction feature when `enabled`
@@ -828,7 +907,7 @@ holding this scope may call these.
 |---|---|
 | POST | `/v1/bulk-import/speed-limit-segments` |
 | POST | `/v1/bulk-import/static-signs` |
-| POST | `/v1/bulk-import/speed-cameras` (fixed cameras only) |
+| POST | `/v1/bulk-import/speed-cameras` (persistent devices; `cameraType` optional, default speed camera) |
 
 ```json
 { "rows": [ { "...": "entity-specific fields, see below" } ] }
@@ -857,8 +936,8 @@ Row shapes:
 // static-signs
 { "lat": 52.5, "lng": 13.4, "signType": "DE:274", "source": "osm", "sourceLicense": "ODbL" }
 
-// speed-cameras
-{ "lat": 52.5, "lng": 13.4, "source": "seed", "sourceLicense": "unclear" }
+// speed-cameras (persistent devices; cameraType optional: fixedSpeedCamera | redLightCamera | distanceControl, default fixedSpeedCamera)
+{ "lat": 52.5, "lng": 13.4, "cameraType": "redLightCamera", "source": "osm", "sourceLicense": "ODbL" }
 ```
 
 ## Real-time push (WebSocket)

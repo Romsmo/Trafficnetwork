@@ -111,7 +111,8 @@ export async function reportCameraRemoval(db: Queryable, env: Env, input: Report
     const removed = await markFixedSpeedCameraRemoved(tx, camera.id);
     const event = await appendEvent(tx, {
       type: "StaticDataRemoved",
-      entityType: "fixedSpeedCamera",
+      // Speed cameras keep the entity type clients have always known; the other kinds must not look like one.
+      entityType: removed.cameraType === "fixedSpeedCamera" ? "fixedSpeedCamera" : "enforcementDevice",
       entityId: removed.id,
       payload: removed,
       source: "community",

@@ -293,6 +293,48 @@ describe("multi-node federation network (F-S5)", () => {
     expect(camerasOnB.json().cameras).toEqual([]);
   });
 
+  it("persistent enforcement devices stay node-local (add-on D): a device-signed redLightCamera report federates as an expiring report, a persistent device does not", async () => {
+    // Fixed cameras have never been federated (federation-protocol.md §7), and the persistent red-light and
+    // distance devices follow the same rule: static data reaches a node by its own import or a dump. What does
+    // federate is the *report* of a red-light camera — an ordinary, expiring hazard report.
+    const bulk = authHeader(await testToken(a.env, { scopes: ["bulk-import"] }));
+    const imported = await a.app.inject({
+      method: "POST",
+      url: "/v1/bulk-import/speed-cameras",
+      headers: bulk,
+      payload: { rows: [{ lat: 41, lng: 41, cameraType: "redLightCamera", source: "osm-test" }] },
+    });
+    expect(imported.statusCode, imported.body).toBe(200);
+
+    const device = generateEd25519KeyPair();
+    const envelope = deviceCreateEnvelope(device, { lat: 42, lng: 42, type: "redLightCamera" });
+    const reported = await a.app.inject({
+      method: "POST",
+      url: "/v1/hazard-reports",
+      headers: authHeader(await testToken(a.env)),
+      payload: { type: "redLightCamera", lat: 42, lng: 42, deviceAssertion: envelope },
+    });
+    expect(reported.statusCode).toBe(201);
+
+    const events = await waitFor(async () => {
+      const pull = await b.app.inject({ method: "GET", url: "/v1/federation/events?after=0&limit=200" });
+      const all = pull.json().events as { envelope: { payload: { lat: number; lng: number; type: string } } }[];
+      return all.some((e) => e.envelope.payload.lat === 42) ? all : undefined;
+    });
+    // Only the report travelled; nothing about the imported device was ever offered to a peer.
+    expect(events.some((e) => e.envelope.payload.lat === 41)).toBe(false);
+
+    const onB = await b.testDb.db.execute<{ type: string; expires_at: string } & Record<string, unknown>>(
+      sql`select type, expires_at from hazard_reports where type = 'redLightCamera'`,
+    );
+    expect(onB).toHaveLength(1);
+    expect(new Date(onB[0]!.expires_at).getTime()).toBeGreaterThan(Date.now());
+    const devicesOnB = await b.testDb.db.execute<{ n: number } & Record<string, unknown>>(sql`select count(*)::int as n from fixed_speed_cameras`);
+    expect(devicesOnB[0]!.n).toBe(0);
+    const devicesOnA = await a.testDb.db.execute<{ camera_type: string } & Record<string, unknown>>(sql`select camera_type from fixed_speed_cameras`);
+    expect(devicesOnA.map((d) => d.camera_type)).toEqual(["redLightCamera"]);
+  });
+
   it("a device rate-limited on one server can still reach the network via another (per-server, not network-wide, rate limiting — a known, accepted characteristic, not a bug)", async () => {
     const sharedAuth = authHeader(await testToken(a.env, { sub: "rate-limit-probe" }));
     let last;

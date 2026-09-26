@@ -42,13 +42,21 @@ export interface PartitionContent {
   tile: string;
   speedLimitSegments: SpeedLimitSegmentApi[];
   staticSigns: StaticSignApi[];
+  /** The classic speed cameras only — what this key has always meant. */
   fixedSpeedCameras: FixedSpeedCameraApi[];
+  /**
+   * Add-on D: every persistent enforcement device of the tile, speed cameras included, each with
+   * `cameraType`. Present only when the tile has at least one — a tile without keeps the bytes (and so
+   * the hash) it had before the key existed, so clients do not re-download it for nothing.
+   */
+  enforcementDevices?: FixedSpeedCameraApi[];
 }
 
 export interface StaticDataForPartitioning {
   speedLimitSegments: SpeedLimitSegmentApi[];
   staticSigns: StaticSignApi[];
   fixedSpeedCameras: FixedSpeedCameraApi[];
+  enforcementDevices?: FixedSpeedCameraApi[];
 }
 
 /**
@@ -79,6 +87,10 @@ export function buildPartitions(data: StaticDataForPartitioning, resolution: num
   }
   for (const camera of data.fixedSpeedCameras) {
     partitionFor(pointTile(camera.position, resolution)).fixedSpeedCameras.push(camera);
+  }
+  for (const device of data.enforcementDevices ?? []) {
+    const partition = partitionFor(pointTile(device.position, resolution));
+    (partition.enforcementDevices ??= []).push(device);
   }
   return partitions;
 }

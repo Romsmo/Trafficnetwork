@@ -30,6 +30,13 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+    # Every variable in .env (see .env.example) reaches the server, including the ones
+    # not listed below — federation, network config, reputation, online counter, package
+    # tuning. The entries below win over the file and add defaults. Needs Docker Compose
+    # 2.24 or newer for `required: false`; without a .env the defaults apply.
+    env_file:
+      - path: .env
+        required: false
     environment:
       # DATABASE_URL is composed from the same POSTGRES_* vars as the postgres
       # service above, so the two can never drift apart — override DATABASE_URL

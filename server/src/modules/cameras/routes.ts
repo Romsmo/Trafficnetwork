@@ -1,21 +1,49 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
-import { findFixedSpeedCamerasNearby } from "../../db/queries/fixed-speed-cameras.js";
+import {
+  findEnforcementDeviceCandidatesInEnvelopes,
+  findEnforcementDevicesNearby,
+} from "../../db/queries/fixed-speed-cameras.js";
 import { findHazardReportsByTiles, findHazardReportsNearby } from "../../db/queries/hazard-reports.js";
-import { DYNAMIC_CAMERA_TYPES, type HazardType } from "../../config/constants.js";
+import {
+  ADDITIONAL_PERSISTENT_CAMERA_TYPES,
+  DYNAMIC_CAMERA_TYPES,
+  PERSISTENT_CAMERA_TYPES,
+  isPersistentCameraType,
+  type HazardType,
+  type PersistentCameraType,
+} from "../../config/constants.js";
+import { getResolution } from "h3-js";
 import { expandTile } from "../../lib/h3.js";
 import { parseHazardTypes, parseLatLng, parseRadiusM } from "../../lib/query-params.js";
 import { badRequest } from "../../lib/errors.js";
 import { reportCameraRemoval } from "./service.js";
 import { publishEvent } from "../realtime/publisher.js";
+import { pointTileOf, tileEnvelopes } from "../static-data/tiles.js";
 
-/** Splits a requested types filter into "include fixed cameras?" + "which dynamic camera types". */
-function resolveCameraFilter(requested: HazardType[] | undefined): { includeFixed: boolean; dynamicTypes: HazardType[] } {
-  if (!requested) return { includeFixed: true, dynamicTypes: [...DYNAMIC_CAMERA_TYPES] };
+/**
+ * Splits a requested types filter into "which persistent device kinds" + "which dynamic camera types".
+ * `redLightCamera` and `distanceControl` exist in both worlds (a persistent device and an expiring report),
+ * so asking for one of them returns both; nothing asked for = everything.
+ */
+function resolveCameraFilter(requested: HazardType[] | undefined): { persistentTypes: PersistentCameraType[]; dynamicTypes: HazardType[] } {
+  if (!requested) return { persistentTypes: [...PERSISTENT_CAMERA_TYPES], dynamicTypes: [...DYNAMIC_CAMERA_TYPES] };
   return {
-    includeFixed: requested.includes("fixedSpeedCamera"),
+    persistentTypes: requested.filter(isPersistentCameraType),
     dynamicTypes: requested.filter((t) => (DYNAMIC_CAMERA_TYPES as readonly HazardType[]).includes(t)),
   };
+}
+
+/** Persistent devices of the given kinds that really lie in one of the tiles: the bounding boxes find candidates through the index, an exact H3 check decides. */
+async function devicesInTiles(app: FastifyInstance, tiles: string[], types: PersistentCameraType[]) {
+  const wanted = new Set(tiles);
+  const resolution = getResolution(tiles[0]!);
+  const candidates = await findEnforcementDeviceCandidatesInEnvelopes(
+    app.deps.db,
+    tiles.flatMap((tile) => tileEnvelopes(tile)),
+    types,
+  );
+  return candidates.filter((device) => wanted.has(pointTileOf(device.position, resolution)));
 }
 
 export async function registerCameraRoutes(app: FastifyInstance) {
@@ -25,18 +53,19 @@ export async function registerCameraRoutes(app: FastifyInstance) {
     const query = req.query as Record<string, unknown>;
     const { lat, lng } = parseLatLng(query);
     const radiusM = parseRadiusM(query.radiusM);
-    const { includeFixed, dynamicTypes } = resolveCameraFilter(parseHazardTypes(query.types));
+    const { persistentTypes, dynamicTypes } = resolveCameraFilter(parseHazardTypes(query.types));
 
-    const [fixed, dynamic] = await Promise.all([
-      includeFixed ? findFixedSpeedCamerasNearby(app.deps.db, lat, lng, radiusM) : [],
+    const [persistent, dynamic] = await Promise.all([
+      findEnforcementDevicesNearby(app.deps.db, lat, lng, radiusM, persistentTypes),
       dynamicTypes.length > 0 ? findHazardReportsNearby(app.deps.db, lat, lng, radiusM, dynamicTypes) : [],
     ]);
-    return { cameras: [...fixed, ...dynamic] };
+    return { cameras: [...persistent, ...dynamic] };
   });
 
-  // No fixed cameras here — they're globally synced (like static_signs), not
-  // region-tiled, so a "by tile" query doesn't apply to them. Only the four
-  // dynamic camera-adjacent hazard_reports types are tile-partitioned.
+  // Speed cameras are not here — they're globally synced (like static_signs), not region-tiled,
+  // so a "by tile" query never applied to them and still doesn't. The dynamic camera-adjacent
+  // hazard_reports types are tile-partitioned; the persistent red-light and distance devices (add-on D)
+  // have no region tile of their own and are found through the tiles' bounding boxes instead.
   app.get("/v1/speed-cameras/by-tile", async (req) => {
     if (!app.deps.env.SPEED_CAMERA_NAMESPACE_ENABLED) return { cameras: [] };
 
@@ -46,12 +75,16 @@ export async function registerCameraRoutes(app: FastifyInstance) {
     }
     const kResult = z.coerce.number().int().min(0).max(5).safeParse(query.k ?? 0);
     if (!kResult.success) throw badRequest("k must be an integer between 0 and 5");
-    const { dynamicTypes } = resolveCameraFilter(parseHazardTypes(query.types));
-    if (dynamicTypes.length === 0) return { cameras: [] };
+    const { persistentTypes, dynamicTypes } = resolveCameraFilter(parseHazardTypes(query.types));
+    const additionalTypes = persistentTypes.filter((t) => (ADDITIONAL_PERSISTENT_CAMERA_TYPES as readonly PersistentCameraType[]).includes(t));
+    if (dynamicTypes.length === 0 && additionalTypes.length === 0) return { cameras: [] };
 
     const tiles = expandTile(query.tile, kResult.data);
-    const cameras = await findHazardReportsByTiles(app.deps.db, tiles, dynamicTypes);
-    return { cameras };
+    const [devices, reports] = await Promise.all([
+      additionalTypes.length > 0 ? devicesInTiles(app, tiles, additionalTypes) : [],
+      dynamicTypes.length > 0 ? findHazardReportsByTiles(app.deps.db, tiles, dynamicTypes) : [],
+    ]);
+    return { cameras: [...devices, ...reports] };
   });
 
   // Writes are always accepted regardless of the flag — see modules/cameras/service.ts.

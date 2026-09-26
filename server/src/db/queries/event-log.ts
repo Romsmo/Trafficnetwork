@@ -83,7 +83,7 @@ export async function getDeltaPage(
   const tiles = opts.tiles ?? [];
   const typeFilter =
     opts.types && opts.types.length > 0
-      ? sql`and (entity_type not in ('hazardReport', 'fixedSpeedCamera') or payload ->> 'type' = any(${pgArray(opts.types)}))`
+      ? sql`and (entity_type not in ('hazardReport', 'fixedSpeedCamera', 'enforcementDevice') or payload ->> 'type' = any(${pgArray(opts.types)}))`
       : sql``;
 
   const rows = await db.execute<Row>(sql`

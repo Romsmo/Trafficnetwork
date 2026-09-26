@@ -87,6 +87,26 @@ export function hazardExpiryMs(type: Exclude<HazardType, "fixedSpeedCamera">, en
 /** construction is the only band with no automatic-expiry test expectation beyond its long default. */
 export const AUTO_EXPIRING_BANDS: readonly ExpiryBand[] = ["short", "medium", "construction"];
 
+/**
+ * Device kinds stored in fixed_speed_cameras (add-on D, docs/persistent-enforcement-devices.md):
+ * permanently installed enforcement devices that never expire and leave only through
+ * accumulated "gone" reports. Every value is also a HazardType, so a client that decodes
+ * `type` into the hazard enum handles them. Append only, like HAZARD_TYPES — a new value
+ * must not reach a field an existing client decodes before that client tolerates unknown
+ * values (client-lib decodes `type` into a closed enum).
+ */
+export const PERSISTENT_CAMERA_TYPES = ["fixedSpeedCamera", "redLightCamera", "distanceControl"] as const;
+export type PersistentCameraType = (typeof PERSISTENT_CAMERA_TYPES)[number];
+
+/** The persistent kinds that are not classic speed cameras: announced as `enforcementDevice`, never as `fixedSpeedCamera`. */
+export const ADDITIONAL_PERSISTENT_CAMERA_TYPES = PERSISTENT_CAMERA_TYPES.filter(
+  (t): t is Exclude<PersistentCameraType, "fixedSpeedCamera"> => t !== "fixedSpeedCamera",
+);
+
+export function isPersistentCameraType(type: string): type is PersistentCameraType {
+  return (PERSISTENT_CAMERA_TYPES as readonly string[]).includes(type);
+}
+
 export const EVENT_TYPES = [
   "ReportCreated",
   "ReportConfirmed",
@@ -102,6 +122,9 @@ export const ENTITY_TYPES = [
   "fixedSpeedCamera",
   "speedLimitSegment",
   "staticSign",
+  // Add-on D: events about persistent red-light / distance devices. Kept apart from
+  // `fixedSpeedCamera` because clients treat that entity type as a classic speed camera.
+  "enforcementDevice",
 ] as const;
 export type EntityType = (typeof ENTITY_TYPES)[number];
 

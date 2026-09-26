@@ -4,7 +4,7 @@ import type { Database, Transaction } from "../../db/client.js";
 import type { Env } from "../../config/env.js";
 import { tileSpeedLimitSegmentsQuery } from "../../db/queries/speed-limit-segments.js";
 import { tileStaticSignsQuery } from "../../db/queries/static-signs.js";
-import { tileFixedSpeedCamerasQuery } from "../../db/queries/fixed-speed-cameras.js";
+import { tileEnforcementDevicesQuery, tileFixedSpeedCamerasQuery } from "../../db/queries/fixed-speed-cameras.js";
 import {
   acquireBuildLease,
   countDirtyTiles,
@@ -49,7 +49,8 @@ export interface BuilderDeps {
 /** Anything that changes *what a package contains* is part of the fingerprint; a different fingerprint makes every package stale. */
 export function packageFingerprint(env: Env): string {
   return [
-    "v1",
+    // v2: add-on D — camera entries carry `cameraType`, tiles with persistent devices an `enforcementDevices` array.
+    "v2",
     `res=${env.STATIC_DATA_PARTITION_H3_RESOLUTION}`,
     `cameras=${env.SPEED_CAMERA_NAMESPACE_ENABLED}`,
     `overlay=${env.COMMUNITY_CORRECTIONS_ENABLED}`,
@@ -67,13 +68,18 @@ interface TileResult {
 
 let cursorCounter = 0;
 
-/** Streams one entity kind of a tile into the writer as a JSON array body; returns how many rows were kept. */
+/**
+ * Streams one entity kind of a tile into the writer as a JSON array body; returns how many rows were kept.
+ * With `wrap`, nothing at all is written for zero rows, and otherwise `open`/`close` surround the body — the
+ * way an optional key is emitted only when it has content.
+ */
 async function streamEntities<T>(
   tx: Transaction,
   source: { query: SQL; map: (row: Record<string, unknown>) => T },
   keep: (item: T) => boolean,
   write: (text: string) => Promise<void>,
   pageRows: number,
+  wrap?: { open: string; close: string },
 ): Promise<number> {
   const cursor = `pkg_cur_${++cursorCounter}`;
   await tx.execute(sql`declare ${sql.raw(cursor)} no scroll cursor for ${source.query}`);
@@ -83,7 +89,7 @@ async function streamEntities<T>(
   let first = true;
   const flush = async () => {
     if (buffer.length === 0) return;
-    await write((first ? "" : ",") + buffer.join(","));
+    await write((first ? (wrap?.open ?? "") : ",") + buffer.join(","));
     first = false;
     buffer = [];
     bufferBytes = 0;
@@ -102,6 +108,7 @@ async function streamEntities<T>(
     if (bufferBytes >= FLUSH_BYTES) await flush();
   }
   await flush();
+  if (wrap && kept > 0) await write(wrap.close);
   await tx.execute(sql`close ${sql.raw(cursor)}`);
   return kept;
 }
@@ -136,16 +143,28 @@ export async function buildTile(deps: BuilderDeps, tile: string): Promise<TileRe
           pageRows,
         );
         await writer.write(`],"fixedSpeedCameras":[`);
-        counts.cameras = env.SPEED_CAMERA_NAMESPACE_ENABLED
-          ? await streamEntities(
-              tx,
-              tileFixedSpeedCamerasQuery(envelopes),
-              (camera) => pointTileOf(camera.position, resolution) === tile,
-              (text) => writer.write(text),
-              pageRows,
-            )
-          : 0;
-        await writer.write("]}");
+        if (env.SPEED_CAMERA_NAMESPACE_ENABLED) {
+          await streamEntities(
+            tx,
+            tileFixedSpeedCamerasQuery(envelopes),
+            (camera) => pointTileOf(camera.position, resolution) === tile,
+            (text) => writer.write(text),
+            pageRows,
+          );
+        }
+        await writer.write("]");
+        if (env.SPEED_CAMERA_NAMESPACE_ENABLED) {
+          // Every persistent device of every kind (speed cameras included) — the count that decides whether the tile is empty.
+          counts.cameras = await streamEntities(
+            tx,
+            tileEnforcementDevicesQuery(envelopes),
+            (device) => pointTileOf(device.position, resolution) === tile,
+            (text) => writer.write(text),
+            pageRows,
+            { open: `,"enforcementDevices":[`, close: "]" },
+          );
+        }
+        await writer.write("}");
 
         if (counts.segments + counts.signs + counts.cameras === 0) {
           await writer.abort();
