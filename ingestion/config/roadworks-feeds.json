@@ -36,7 +36,7 @@
       "minIntervalMinutes": 30,
       "ttlHours": 48,
       "requestDelayMs": 250,
-      "notes": "OFF by default: the API publishes no license or terms of use (docs/sources.md, checked 2026-09-26). Chosen by the operator as the German source; rows are marked sourceLicense=ungeklärt. Turn on deliberately with AUTOBAHN_API_ENABLED=true or ROADWORKS_FEEDS_ON=de-autobahn. ~55 requests per pass."
+      "notes": "OFF by default: the API publishes no license or terms of use (docs/sources.md, checked 2026-09-26). Chosen by the operator as the German source; rows are marked sourceLicense=ungeklärt. Turn on deliberately with AUTOBAHN_API_ENABLED=true or ROADWORKS_FEEDS_ON=de-autobahn. ~110 requests per pass (one for the road list, one per road; 108 roads on 2026-09-26)."
     }
   }
 }

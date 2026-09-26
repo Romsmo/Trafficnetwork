@@ -9,6 +9,12 @@ Optional bulk-import client that seeds a Trafficnetwork server's database from O
 
 **Europe (add-on A, branch `phase3/europe-basemap`)**: the same tool imports the whole continent from one pinned Geofabrik extract — resumable Range download, a narrow tag filter, geographic sections with their own progress markers, streaming state with a compact dedup set, client-side validation with bisect-and-quarantine of rejected rows, and a "target must be empty" guard. Feasibility, measurements and decisions: [`docs/europe-feasibility.md`](docs/europe-feasibility.md); procedure: [`docs/europe-runbook.md`](docs/europe-runbook.md); a ready-made runner image is the [`Dockerfile`](Dockerfile).
 
+**Source catalogue (add-on Q, branch `phase3/source-catalogue`)**: three more kinds of data, each behind its own switch and each with its license evidence in [`docs/sources.md`](docs/sources.md):
+- **Roadworks** — time-limited `construction` reports from a generic DATEX II reader (v2/v3) and the Autobahn GmbH JSON API, run *periodically* (one poll pass per invocation; `npm run ingest -- --roadworks`). France is on, the Netherlands and Germany ship off (`ungeklärt`). Operation, cost of a permanent run and safety rules: [`docs/roadworks.md`](docs/roadworks.md).
+- **Official traffic signs** — NVDB Norway (`--region norway`, license NLOD), with the national sign codes kept verbatim behind a country prefix and a per-country mapping table in [`config/sign-mappings/`](config/sign-mappings/).
+- **Speed cameras and signs from OSM** are part of the Europe import above; the camera namespace stays closed.
+`npm run report:quality` prints, per source, what was taken over, discarded (with the reasons) and merged; what each license makes us credit is in [`docs/attribution.md`](docs/attribution.md).
+
 See [`docs/concept.md`](../docs/concept.md) section 7 and [`docs/prompt-phase3-ingestion.md`](../docs/prompt-phase3-ingestion.md) for the full design brief, and [`docs/sources.md`](docs/sources.md) for the evidenced source catalog (licenses, pricing, what's implemented vs. catalog-only).
 
 ## Setup
@@ -36,9 +42,12 @@ npm run ingest -- --region bayern --fresh     # wipes local progress state and s
 npm run ingest -- --region bayern --batch-size 500
 npm run ingest -- --region europe --section x10_y40   # only some sections (regions with "sections"); the run is then not marked complete
 npm run ingest -- --region bayern --allow-non-empty   # deliberately import into a server that already holds data (see below)
+npm run ingest -- --roadworks [--feed fr-tipi-rrn] [--dry-run]   # one roadworks poll pass, then exit — schedule it (docs/roadworks.md)
+npm run ingest -- --region norway --allow-non-empty   # NVDB sign plates; set OSM_ENABLED=false NVDB_NO_ENABLED=true (docs/sources.md)
+npm run report:quality                        # per-source report: taken over / discarded / merged
 ```
 
-Valid `--region` values are the keys in [`config/regions.json`](config/regions.json) — currently `bayern` (the project's chosen first region, ~812MB Geofabrik extract), `germany`, and `europe` (the whole continent; **pinned to one dated Geofabrik edition** so a resume never mixes two editions — bump it deliberately). The same code handles all of them, per the project's requirement that going bigger never needs a code change — just more time and disk.
+Valid `--region` values are the keys in [`config/regions.json`](config/regions.json) — currently `bayern` (the project's chosen first region, ~812MB Geofabrik extract), `germany`, and `europe` (the whole continent; **pinned to one dated Geofabrik edition** so a resume never mixes two editions — bump it deliberately), and `norway` (official sign plates from NVDB, not from OSM: it has no Geofabrik extract and lists `officialSources` instead — a source that cannot import a region is skipped with the reason). The same code handles all of them, per the project's requirement that going bigger never needs a code change — just more time and disk.
 
 **Empty-target guard.** The server has no dedup. A *fresh* run (no local progress for the region) therefore refuses to start against a server that already holds any static data, because importing a region it already contains would silently double it. `--allow-non-empty` overrides this on purpose (e.g. a different region into a populated server). A resume is never affected.
 
@@ -55,10 +64,17 @@ After every real run (not `--dry-run`), the program checks what actually landed 
 
 ```bash
 npm run test:unit          # no external dependencies
-npm run test:integration   # needs osmium-tool on PATH, Docker (Testcontainers), and server/ already built (npm run build in ../server)
+npm run test:integration   # needs Docker (Testcontainers) and server/ already built (npm run build in ../server); osmium-tool on PATH for full-cycle
 ```
 
-`tests/integration/full-cycle.test.ts` either talks to a CI-provisioned server (`INGESTION_TEST_SERVER_URL`/`_CLIENT_ID`/`_CLIENT_SECRET`, set by [`.github/workflows/ingestion-ci.yml`](../.github/workflows/ingestion-ci.yml)) or, locally, boots its own via Testcontainers + the already-built `server/dist/server.js`. Either way it's the real CLI (spawned as an OS process), the real `osmium-tool`, and the tiny checked-in fixtures in `tests/fixtures/` — not mocks.
+Every integration test file gets **its own database and server process** (`tests/integration/setup.ts`), because the importer refuses a fresh start on a server that already holds static data and several files import static data. Locally that database is a Testcontainers Postgres/PostGIS; in CI ([`.github/workflows/ingestion-ci.yml`](../.github/workflows/ingestion-ci.yml)) it is a fresh database on the workflow's postgres service (`INGESTION_TEST_PG_ADMIN_URL`). In both cases the real CLI runs as an OS process against the built `server/dist`, with tiny checked-in fixtures — not mocks:
+
+- `full-cycle.test.ts` — OSM: the real `osmium-tool` and `tests/fixtures/*.osm.pbf`;
+- `roadworks-cycle.test.ts` — roadworks: the CLI against two local feed servers (DATEX II and Autobahn JSON) whose content the test changes between passes;
+- `nvdb-cycle.test.ts` — NVDB Norway: the CLI against a stand-in that serves **real API responses** (`tests/fixtures/nvdb-no/`: a whole municipality and two pages of Oslo); half-way abort, resume, no duplicates;
+- `camera-namespace.test.ts` — imported speed cameras are not delivered while the server's flag is off.
+
+The DATEX II and Autobahn fixtures (`tests/fixtures/roadworks/`) are verbatim excerpts of the live feeds, fetched 2026-09-26.
 
 ## Resuming and duplicates
 
@@ -66,13 +82,17 @@ The server's bulk-import endpoints have **no deduplication of their own** — PO
 
 A run that's killed mid-way can always be resumed by just running the same command again — it replays its own progress log and skips whatever it already confirmed the server accepted. One known, accepted limitation: a hard kill in the narrow window between a batch being accepted by the server and that fact being durably written to disk can duplicate at most one batch's worth of rows (bounded by `BATCH_SIZE`) on resume. This is a real constraint of the server's design (no natural key to reconcile against after the fact), not something this program can fully close from the outside — smaller `BATCH_SIZE` shrinks the window at the cost of more HTTP calls.
 
-## Attribution and provenance (ODbL)
+## Attribution and provenance
 
-The imported data is derived from OpenStreetMap: **© OpenStreetMap contributors**, licensed under the [Open Database License 1.0](https://opendatacommons.org/licenses/odbl/) — <https://www.openstreetmap.org/copyright>. Every row is stored with `source=osm` and `sourceLicense=ODbL`, and the tool never alters those fields. Anything that displays or redistributes the data (the server's web UI, client apps, dumps) must show that credit. Speed limits resolved from `maxspeed:type` use the OSM wiki's *Default speed limits* table (CC BY-SA 2.0, via `westnordost/osm-legal-default-speeds`, BSD-3 code) — credited in the generated `src/pipeline/osm/implicit-speeds.generated.ts`. The exact edition of an import (file, size, md5, Last-Modified, replication sequence/timestamp, osmium version, tag filter) is written to `extract-meta.json` in the state directory.
+Every source's credit line and what its license requires is collected in [`docs/attribution.md`](docs/attribution.md).
+
+### ODbL (OpenStreetMap)
+
+The OSM-derived data comes from OpenStreetMap: **© OpenStreetMap contributors**, licensed under the [Open Database License 1.0](https://opendatacommons.org/licenses/odbl/) — <https://www.openstreetmap.org/copyright>. Every row is stored with `source=osm` and `sourceLicense=ODbL`, and the tool never alters those fields. Anything that displays or redistributes the data (the server's web UI, client apps, dumps) must show that credit. Speed limits resolved from `maxspeed:type` use the OSM wiki's *Default speed limits* table (CC BY-SA 2.0, via `westnordost/osm-legal-default-speeds`, BSD-3 code) — credited in the generated `src/pipeline/osm/implicit-speeds.generated.ts`. The exact edition of an import (file, size, md5, Last-Modified, replication sequence/timestamp, osmium version, tag filter) is written to `extract-meta.json` in the state directory.
 
 ## Cost/license warnings
 
 - Only OpenStreetMap is enabled by default. It's ODbL-licensed and unproblematic to redistribute (see `docs/sources.md`).
 - HERE and TomTom are pay-per-use beyond a free tier and are **not implemented** in this round — no verified current pricing exists to size a safe kill-switch against (see `docs/sources.md`), and enabling either requires you to supply your own account's actual call limit.
-- Mobilithek and Autobahn-API are catalog-only (documented, off, no worker) — Mobilithek because its license varies per dataset and none has been chosen yet, Autobahn-API because it genuinely has no stated license (`"ungeklärt"`).
+- Mobilithek is catalog-only (documented, off, no worker) — its license varies per dataset and it needs an organisation account. The Autobahn GmbH API has a roadworks reader now but **ships off**: it genuinely has no stated license (`"ungeklärt"`), every row it writes says so, and it needs a deliberate switch (`AUTOBAHN_API_ENABLED=true` or `ROADWORKS_FEEDS_ON=de-autobahn`). The NDW feed ships off for the same kind of reason (no license text of its own found).
 - Speed-camera (Blitzer) data: imported like any other static entity, but the server's speed-camera namespace stays disabled regardless (`SPEED_CAMERA_NAMESPACE_ENABLED`) — this program never bypasses that flag. `docs/todo.md` still lists a legal review of Blitzer operator risk as outstanding before that namespace is ever turned on for real.
