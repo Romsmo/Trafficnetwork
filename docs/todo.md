@@ -135,6 +135,15 @@ _Zuletzt aktualisiert: 2026-09-17 von der F-C-Session._
 - [ ] E-D Web: Startansicht Europa, nur sichtbaren Ausschnitt laden, Cluster bei kleiner Zoomstufe
 - [ ] Nach den Messungen entscheiden, ob „alles auf jedem Gerät" so bleibt
 
+## Zusatz D — Dauerhafte Überwachungsanlagen (Rotlicht, Abstand)
+- [x] Entschieden: bestehende Tabelle `fixed_speed_cameras` verallgemeinern (Spalte `camera_type`), keine neue Tabelle je Bauart; Altbestand muss unversehrt bleiben
+- [x] Zusatz-Prompt erstellt (`docs/prompt-addon-persistent-cameras.md`) — für den Server-Chat
+- [ ] D1 Migration + Migrationstest mit Altbestand (Zeilenzahl vorher/nachher, Rückrollen)
+- [ ] D2 API additiv (`cameraType`, neues Snapshot-Feld, Bulk-Import-Feld)
+- [ ] D3 Föderation und statische Pakete, Mehrknoten-Test
+- [ ] Offen: Abschnittskontrolle (`enforcement=average_speed`) — Vorschlag abwarten, noch nicht bauen
+- [ ] Offen: Soll es „dauerhaft gemeldet" durch Nutzer geben (Schwelle), oder bleiben Nutzermeldungen immer verfallend?
+
 ## Zusatz Q — Quellenkatalog (Blitzer, Baustellen, Verkehrsschilder)
 - [x] Recherche des Betreibers liegt vor (Rechtslage, OSM, DATEX II/NAPCORE, nordische Behördenquellen)
 - [x] Zusatz-Prompt erstellt (`docs/prompt-addon-source-catalogue.md`) — für den Ingestion-Chat
