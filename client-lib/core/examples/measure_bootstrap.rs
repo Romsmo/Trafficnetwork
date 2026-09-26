@@ -47,12 +47,13 @@ struct Args {
     label: String,
     keep_db: bool,
     estimate_gzip: bool,
+    cache_mb: Option<u32>,
 }
 
 fn usage() -> ! {
     eprintln!(
         "usage: measure_bootstrap (--server URL --client-id ID --client-secret SECRET | --synthetic-segments N)\n\
-         \x20      [--partition-segments N] [--db PATH] [--keep-db] [--queries N] [--label TEXT] [--no-gzip-estimate]"
+         \x20      [--partition-segments N] [--db PATH] [--keep-db] [--queries N] [--label TEXT] [--no-gzip-estimate] [--cache-mb N]"
     );
     std::process::exit(2);
 }
@@ -69,6 +70,7 @@ fn parse_args() -> Args {
         label: String::new(),
         keep_db: false,
         estimate_gzip: true,
+        cache_mb: None,
     };
     let mut it = std::env::args().skip(1);
     while let Some(flag) = it.next() {
@@ -88,6 +90,7 @@ fn parse_args() -> Args {
             "--label" => args.label = value(),
             "--keep-db" => args.keep_db = true,
             "--no-gzip-estimate" => args.estimate_gzip = false,
+            "--cache-mb" => args.cache_mb = Some(value().parse().unwrap_or_else(|_| usage())),
             _ => usage(),
         }
     }
@@ -437,6 +440,11 @@ async fn main() {
     };
 
     let store = Arc::new(SqliteStore::open(&db_path).expect("could not open the database"));
+    if let Some(mb) = args.cache_mb {
+        store
+            .set_cache_size_kib(mb * 1024)
+            .expect("could not set the page cache size");
+    }
     let engine = SyncEngine::new(discovery, store.clone(), Arc::new(SystemClock)).with_observer(
         Arc::new(ProgressPrinter {
             started: Instant::now(),

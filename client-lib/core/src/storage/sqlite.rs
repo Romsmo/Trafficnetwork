@@ -128,6 +128,13 @@ impl SqliteStore {
         self.with_conn(|conn| conn.query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |_| Ok(())))
     }
 
+    /// Sets the size of SQLite's page cache for this connection, in KiB
+    /// (SQLite's own default is about 2 MiB). A bigger cache makes bulk
+    /// inserts into large indexes faster, at the price of that much memory.
+    pub fn set_cache_size_kib(&self, kib: u32) -> Result<(), StoreError> {
+        self.with_conn(|conn| conn.pragma_update(None, "cache_size", -i64::from(kib)))
+    }
+
     /// `(segments, signs, cameras)` currently stored — without loading them.
     pub fn entity_counts(&self) -> Result<(u64, u64, u64), StoreError> {
         self.with_conn(|conn| {
