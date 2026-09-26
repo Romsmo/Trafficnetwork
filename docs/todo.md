@@ -113,17 +113,50 @@ _Zuletzt aktualisiert: 2026-09-17 von der F-C-Session._
 
 ## Zusatz O — Anzeige „aktuell online" (Server + Web + Client-Bibliothek)
 - [x] Zusatz-Prompts erstellt (`docs/prompt-addon-online-counter.md`)
-- [ ] O-A Server: `GET /v1/stats/online`, eigene Zahl im Heartbeat, Schwellenwert gegen Rückschlüsse
-- [x] O-B Web: Anzeige unten rechts, Aktualisierung, Textfall unter dem Schwellenwert — **gegen einen Mock des vorgeschlagenen Vertrags gebaut** (Branch `feature/server-web-ui`); gegen den echten Endpunkt zu prüfen, sobald O-A gemergt ist (`server/docs/web-ui.md`, Abschnitt "N online")
-- [ ] O-C Client-Bibliothek: Felder in `getNetworkStatus()` (optional)
+- [x] O-A Server: `GET /v1/stats/online`, eigene Zahl im Heartbeat (`onlineCount`), Schwellenwert gegen Rückschlüsse (Branch `feature/online-counter`, lokal 295/295, PR wartet auf Freigabe; Antwortformat entspricht dem von O-B/O-C erwarteten)
+- [x] O-B Web: Anzeige unten rechts, Aktualisierung, Textfall unter dem Schwellenwert — gebaut und getestet (Branch `feature/server-web-ui`, Unit + Playwright), gegen einen **Mock** des vorgeschlagenen Vertrags; Format entspricht laut O-A dem echten Endpunkt (Trial-Merge-Prüfung siehe `docs/status.md`, Abschnitt "Server-Weboberfläche (W)")
+- [x] O-C Client-Bibliothek: `NetworkStatus`-Felder `onlineNode`/`onlineNetwork`/`onlineEstimated`/`onlineAsOf` + `OnlineStatusService` (Branch `rework/client-lib-online-counter`, CI grün; gegen das vorgeschlagene Format gebaut, O-A steht noch aus; `getNetworkStatus()` als Fassade folgt mit F-C4/F-C5)
 
 ## Zusatz K — Falsche Tempolimits melden und korrigieren
 - [x] Zusatz-Prompts erstellt (`docs/prompt-addon-speed-limit-corrections.md`)
-- [ ] K-A Server: Korrektur als überlagernder Datensatz (Import bleibt erhalten), Schwellenwert, Widerspruch, Verteilung über Pakete/Events, Betreiber kann zurücksetzen
-- [ ] K-B Web: „Stimmt nicht?"-Formular, Herkunft des Werts sichtbar
-- [ ] K-C Client-Bibliothek: `reportWrongSpeedLimit()` über den Offline-Puffer, Herkunft in `getSpeedLimitAt()`
+- [x] K-A Server: Korrektur als überlagernder Datensatz (Import bleibt erhalten), Schwellenwert, Widerspruch, Verteilung über Pakete/Events und Föderation, Betreiber kann zurücksetzen (Branch `feature/speed-limit-corrections`, lokal 339 Tests grün (Gesamtlauf 338/339, der eine Fehler war eine veraltete Testerwartung, behoben und nachgelaufen), PR wartet auf Freigabe; Plan: `server/docs/speed-limit-corrections.md`; **Migration 0007 schreibt `speed_limit_segments` einmalig um, ~20 s pro Mio. Segmente** — Backup + Wartungsfenster einplanen)
+- [ ] K-B Web: „Stimmt nicht?"-Formular, Herkunft des Werts sichtbar (Allowlist der Web-Sitzungen um die vier Korrektur-Pfade erweitern; Hinweise im Status-Abschnitt "Zusatz K-A")
+- [x] K-C Client-Bibliothek: `report_wrong_speed_limit`/`confirm_speed_limit_correction` über den Offline-Puffer (beim Senden signiert), Überlagerung statt Überschreiben, Herkunft in `speed_limit_at()` (Branch `rework/client-lib-speed-corrections`, CI grün; gegen den dokumentierten Server-Vertrag gebaut; öffentliche Fassade `getSpeedLimitAt()`/`reportWrongSpeedLimit()` folgt mit F-C4/F-C5)
 - [x] Schwellenwert entschieden: **3 verschiedene Geräte** (Konfigurationswert, Standard 3)
-- [ ] Wertebereich für Korrekturen festlegen (Plausibilitätsgrenzen)
+- [x] Wertebereich für Korrekturen festgelegt: ganzzahlig, **5–150 km/h bzw. 5–85 mph**, nur Vielfache von **5**, in der Einheit des Segments (alles per Umgebungsvariable änderbar); Gleichstand ⇒ kein Gewinner; Importänderung ⇒ Korrektur bleibt, Markierung „zu prüfen"
+- [ ] Folgeaufgaben K-A (nicht Teil des Auftrags): temporäre Korrekturen (Baustelle) automatisch auslaufen lassen; `deviceAssertion` bei Meldungen an den gebundenen Schlüssel knüpfen (siehe Nebenbefund im Status); Stimmen nach Ruf des weiterleitenden Knotens gewichten
+
+## Zusatz E — Grundstock ganz Europa (einmalig, aktueller Stand)
+- [x] Entschieden: ganz Europa, **einmaliger** Import des aktuellsten Stands; kein wiederkehrender Update-Lauf vorerst
+- [x] Entschieden: statische Daten weiterhin **vollständig an jedes Gerät** — Machbarkeit wird nach dem Import gemessen, nicht geraten
+- [x] Zusatz-Prompts erstellt (`docs/prompt-addon-europe-basemap.md`)
+- [ ] E-A Ingestion: Machbarkeitsbericht (Platz, RAM, Dauer), dann Europa-Import in Abschnitten, Update-Weg nur dokumentiert
+- [~] E-B Server: Code fertig (Branch `feature/europe-scale`, gestapelt auf K-A + Perf-Fix, gepusht, PR wartet; vorgebaute, streamende, zwischenspeicherbare Pakete, Batch-Import, Snapshot-Schutz, `?since=`, Range). **Entschieden 2026-09-25:** Auflösung 4 ist Code-Standard, `partitionResolution` steht im Manifest (Client-Instanz: bei Abweichung neu bootstrappen); Migration 0007 bleibt als dokumentiertes Wartungsfenster (Migrations-Regel + Warnung eingeführt). **Offen:** Vollsuite mit Docker laufen lassen (erst nach dem Europa-Import), Integrationstest `europe-scale` nach der Auflösungs-Änderung wiederholen, vollständige Messung (Bau-Dauer, Spitzen-RSS, Kachelgrößen, Manifest, Migration 0007+0008) **auf einer Kopie des echten Bestands**, danach Migration + Paketbau auf `tn-europe` selbst
+- [ ] E-C Client-Bibliothek: vollständigen Bootstrap messen und berichten (Datenmenge, Dauer, Speicher)
+- [ ] E-D Web: Startansicht Europa, nur sichtbaren Ausschnitt laden, Cluster bei kleiner Zoomstufe
+- [ ] Nach den Messungen entscheiden, ob „alles auf jedem Gerät" so bleibt
+
+## Zusatz D — Dauerhafte Überwachungsanlagen (Rotlicht, Abstand)
+- [x] Entschieden: bestehende Tabelle `fixed_speed_cameras` verallgemeinern (Spalte `camera_type`), keine neue Tabelle je Bauart; Altbestand muss unversehrt bleiben
+- [x] Zusatz-Prompt erstellt (`docs/prompt-addon-persistent-cameras.md`) — für den Server-Chat
+- [x] D0 Plan (Server, `server/docs/persistent-enforcement-devices.md`, Branch `feature/persistent-enforcement-devices`): Migration gemessen (5 ms bei 1 Mio. Zeilen, kein Fenster), Schema/Rückrollen, API-Auswirkung belegt, Befund „feste Blitzer werden nicht föderiert", Abschnittskontrolle-Vorschlag; **wartet auf Antworten zu acht offenen Fragen**
+- [ ] D1 Migration + Migrationstest mit Altbestand (Zeilenzahl vorher/nachher, Rückrollen)
+- [ ] D2 API additiv (`cameraType`, neues Snapshot-Feld, Bulk-Import-Feld)
+- [ ] D3 Föderation und statische Pakete, Mehrknoten-Test
+- [ ] Offen: Abschnittskontrolle (`enforcement=average_speed`) — Vorschlag abwarten, noch nicht bauen
+- [ ] Offen: Soll es „dauerhaft gemeldet" durch Nutzer geben (Schwelle), oder bleiben Nutzermeldungen immer verfallend?
+
+## Zusatz Q — Quellenkatalog (Blitzer, Baustellen, Verkehrsschilder)
+- [x] Recherche des Betreibers liegt vor (Rechtslage, OSM, DATEX II/NAPCORE, nordische Behördenquellen)
+- [x] Zusatz-Prompt erstellt (`docs/prompt-addon-source-catalogue.md`) — für den Ingestion-Chat
+- [ ] Q0 Quellenkatalog mit belegten Lizenzen + Ampel je Quelle (`ingestion/docs/sources.md`)
+- [ ] Q1 Blitzer aus OSM (Namensraum bleibt deaktiviert)
+- [ ] Q2 Verkehrsschilder aus OSM, Codes länderoffen
+- [ ] Q3 Baustellen: DATEX-II-Leser + Autobahn GmbH, periodisch lauffähig
+- [ ] Q4 Eine amtliche Schildquelle (Digiroad oder NVDB) inkl. Koordinatenumrechnung
+- [ ] Entscheiden: läuft der Baustellen-Anbinder dauerhaft, und welche Länder zuerst?
+- [ ] Entscheiden: Mapillary/KartaView einbinden? (erst nach belegter Lizenzprüfung, standardmäßig aus)
+- [ ] Attribution aus `ingestion/docs/attribution.md` in die Weboberfläche übernehmen
 
 ## Launch P — Öffentlicher Betrieb (gemieteter Server + Domain)
 - [x] Claude-Code-Prompt erstellt (`docs/prompt-launch-public-server.md`)
