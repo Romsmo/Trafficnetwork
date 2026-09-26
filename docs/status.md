@@ -282,18 +282,29 @@ BESTÄTIGUNG:    Ich bestätige, dass in meinem Bereich alle Tests in CI grün s
                 die Doku dem Code entspricht und keine Geheimnisse im Repo liegen.
 ```
 
-## Abschluss Server-Instanz (Stand 2026-09-26, Usage-Limit erreicht — **offen**, siehe unten)
+## Abschluss Server-Instanz (Stand 2026-09-27) — Server-Stapel abgeschlossen, drei Punkte bewusst offen
 
 ```
 BEREICH:        server
-BRANCHES:       fix/spatial-index-prefilter → feature/online-counter → feature/speed-limit-corrections → feature/europe-scale → feature/persistent-enforcement-devices (linearer Stapel, jeweils Merge-Commit des Vorgängers; PR-Basis = Vorgänger-Branch)
-LETZTE COMMITS: a86119b / 023217c / c46984a / 1bbda22 / 5b5314d
-CI:             PR #4, #5, #6, #7 grün (test, docker-build, install-smoke). PR #9 (D): erster Lauf rot (1 Test, K-A-Migrationstest zählte die Version über alle Migrationen), Fix 5b5314d gepusht — Neulauf NICHT abgewartet
-PULL REQUESTS:  #4 (perf), #5 (O-A), #6 (K-A), #7 (E-B), #9 (D) — Merge in dieser Reihenfolge, mit Merge-Commit (kein Squash); nichts gemergt
-FERTIG:         Stapel neu geordnet und Konflikte zwischen den Add-ons gelöst; O-A, K-A, E-B, D im Code fertig; D: Migration 0009 (5 ms bei 1 Mio. Zeilen, gemessen), Rückroll-Skript, Test mit Altbestand, API/Doku; .env.example vollständig (10 fehlende Variablen), docker-compose reicht .env durch (Föderation & Co. waren unter Docker nicht einstellbar)
-OFFEN:          (1) E-B-Messung auf einer Kopie des echten Europa-Bestands: Migration 0007+0008 gemessen (373,6 s bei 12,08 Mio. Segmenten), Größen (434 B/Segment) und Lesezeiten (Lookup ~2 ms) gemessen — der vollständige Paketbau läuft noch detached (Skript E:	n-eb-measureun-measure.ps1, Container tn-eb-pg auf Volume tn-eb-copy, Cache-Dropper) und ist I/O-bound; Ergebnisse gehören noch in server/docs/europe-scale.md + operating.md. (2) Vollsuite lokal auf dem D-Stand (nur CI-Lauf von PR #9 nach Fix). (3) Migration auf tn-europe selbst nicht ausgeführt. (4) Acht offene Fragen aus server/docs/persistent-enforcement-devices.md §10 (mit Standardwerten gebaut). (5) Abschnittskontrolle nicht gebaut (Client-Bibliothek dekodiert HazardType geschlossen).
-RISIKEN:        feature/server-web-ui (Web-Instanz) kollidiert mit dem Stapel in .env.example, docker-compose.yml, docs/api.md, app.ts, env.ts, auth/hook.ts, realtime/plugin.ts, auth-public-paths-Test; phase3/source-catalogue (Ingestion) in migrations/meta (0007_snapshot, _journal) und bulk-import/routes.ts (Migrationsnummer 0007 doppelt). Migration 0007 = Wartungsfenster (~6 min bei 12 M Zeilen). Scratch-Reste: Container tn-eb-pg, Volume tn-eb-copy, E:	n-eb-measure, Cache-Dropper (Stop-Datei E:	n-eb-measure\stop-cache-dropper).
-BESTÄTIGUNG:    Eingeschränkt: CI grün nur für #4–#7; #9 nach Testfix noch nicht bestätigt; E-B-Messung auf echten Daten unvollständig; Doku entspricht dem Code bis auf die fehlenden Messwerte.
+BRANCHES:       fix/spatial-index-prefilter → feature/online-counter → feature/speed-limit-corrections → feature/europe-scale → feature/persistent-enforcement-devices
+                (linearer Stapel; jeder Branch enthält den Vorgänger per Merge-Commit, PR-Basis = Vorgänger-Branch)
+LETZTE COMMITS: a86119b / 023217c / c46984a / f8767fd / e844419
+CI:             grün auf allen fünf PRs (test, docker-build, install-smoke); lokal auf dem Stand e844419: typecheck, lint, 46 Testdateien / 501 Tests grün
+PULL REQUESTS:  #4 (Perf-Fix), #5 (O-A), #6 (K-A), #7 (E-B), #9 (D) — in dieser Reihenfolge mit Merge-Commit mergen (kein Squash); nichts gemergt
+FERTIG:         - Stapel neu geordnet, Konflikte zwischen O-A/K-A/E-B gelöst (einmal, hier)
+                - E-B auf dem echten Europa-Bestand (Kopie von tn-europe) gemessen: Migration 0007+0008 373,6 s bei 12,08 Mio. Segmenten, 434 B/Segment,
+                  vollständiger Paketbau 7 h 4 min (datenbankgebunden), Spitze 315 MB, 5.825 Kacheln, je Gerät 1,49 GB gzip / 1,44 GB brotli, größte Kachel 9,4 MB gzip,
+                  Batch-Import 1.411 vs. 462 Zeilen/s, Einzelkachel-Neubau 3 s; Online-Backfill vs. Rewrite gemessen (+28 % Zeit, +57 % WAL, ~2× Tabelle) — alles in server/docs/europe-scale.md + operating.md
+                - D (dauerhafte Rotlicht-/Abstandsanlagen) komplett: Migration 0009 (5 ms bei 1 Mio. Zeilen; 2,1 s auf der Kopie des echten Bestands), Rückroll-Skript, Test mit Altbestand, API additiv, Pakete, Doku
+                - .env.example vollständig (10 fehlende Variablen ergänzt); docker-compose reicht .env an den Server durch (Föderation/Reputation/Online-Zähler/Paket-Tuning waren unter Docker nicht einstellbar)
+OFFEN:          1. Migration auf dem Knoten tn-europe selbst: NICHT ausgeführt (bewusst — der Betreiber muss dort noch die 2.000 doppelten Segmente löschen und den Grundstock-pg_dump ziehen; das gemergte Image migriert beim Start, ~6 min Sperre laut Messung)
+                2. Acht offene Fragen aus server/docs/persistent-enforcement-devices.md §10 (mit den dort genannten Standardwerten gebaut; jede ist eine kleine Änderung)
+                3. Abschnittskontrolle nicht gebaut (Client-Bibliothek dekodiert HazardType geschlossen → erst dort tolerant dekodieren); CLUSTER der Segmenttabelle (Heilmittel für den 7-h-Erstbau) ungemessen
+RISIKEN:        - feature/server-web-ui (PR #8, Web-Instanz) kollidiert mit dem Stapel in .env.example, docker-compose.yml, docs/api.md, app.ts, env.ts, auth/hook.ts, realtime/plugin.ts, auth-public-paths-Test → nach dem Stapel aktualisieren; die Web-UI zeigt Bestätigen/Ablehnen-Knöpfe für jeden Eintrag ≠ fixedSpeedCamera (Dreizeiler: bei Einträgen mit cameraType weglassen)
+                - phase3/source-catalogue (Ingestion, PR #3-Stapel): Migrationsnummer 0007 doppelt (K-A vs. seed-reports), Konflikte in migrations/meta und bulk-import/routes.ts → umnummerieren; Rotlicht/Abstand erst importieren, wenn D auf dem Zielserver läuft
+                - Migration 0007 ist ein Wartungsfenster (~6 min bei 12 Mio. Zeilen), nur für Knoten mit Nutzern und großem Bestand
+BESTÄTIGUNG:    Ich bestätige, dass in meinem Bereich alle Tests in CI grün sind (PR #4–#7, #9), die Doku dem Code entspricht und keine Geheimnisse im Repo liegen
+                (Suche nach Schlüssel-/Token-Mustern und TODO/FIXME ohne Fund). Einschränkung: Migration auf tn-europe und die Betreiber-Antworten zu D stehen aus (siehe OFFEN).
 ```
 
 ## Wie diese Datei genutzt wird
