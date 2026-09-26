@@ -138,6 +138,7 @@ _Zuletzt aktualisiert: 2026-09-17 von der F-C-Session._
 ## Zusatz D — Dauerhafte Überwachungsanlagen (Rotlicht, Abstand)
 - [x] Entschieden: bestehende Tabelle `fixed_speed_cameras` verallgemeinern (Spalte `camera_type`), keine neue Tabelle je Bauart; Altbestand muss unversehrt bleiben
 - [x] Zusatz-Prompt erstellt (`docs/prompt-addon-persistent-cameras.md`) — für den Server-Chat
+- [x] D0 Plan (Server, `server/docs/persistent-enforcement-devices.md`, Branch `feature/persistent-enforcement-devices`): Migration gemessen (5 ms bei 1 Mio. Zeilen, kein Fenster), Schema/Rückrollen, API-Auswirkung belegt, Befund „feste Blitzer werden nicht föderiert", Abschnittskontrolle-Vorschlag; **wartet auf Antworten zu acht offenen Fragen**
 - [ ] D1 Migration + Migrationstest mit Altbestand (Zeilenzahl vorher/nachher, Rückrollen)
 - [ ] D2 API additiv (`cameraType`, neues Snapshot-Feld, Bulk-Import-Feld)
 - [ ] D3 Föderation und statische Pakete, Mehrknoten-Test
