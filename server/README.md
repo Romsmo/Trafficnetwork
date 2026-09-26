@@ -102,6 +102,11 @@ Vollständige Referenz: [`docs/api.md`](docs/api.md). Kurzfassung:
 - **Geräteregistrierung** (Scope `device-registration`, client-lib P2.0): `POST /v1/devices/register` — App-Schlüssel → frisches, pseudonymes Geräte-Credential. Additiv seit F-S2: `POST /v1/devices/bind-key` bindet einen selbst erzeugten Ed25519-Schlüssel an die eigene, bestehende Identität (jeder Client, nicht nur `device-registration`).
 - **Föderation** (F-S3, nur bei `FEDERATION_ENABLED=true`): `POST /v1/federation/join`, `GET /v1/federation/peers`, `POST /v1/federation/heartbeat`, `POST`/`GET /v1/federation/events` — siehe "Föderation" oben und `docs/api.md`.
 - **Realtime**: `GET /v1/ws` (WebSocket) — Auth per erster Nachricht (nicht per Query-String-Token), danach `subscribe`/`unsubscribe` auf H3-Tiles.
+- **Web-Sitzungen** (nur mit eingebauter Weboberfläche, `WEB_UI_ENABLED=true`): `POST /v1/web/session` (öffentlich) — anonymes, kurzlebiges Token für die eigene Webseite des Knotens; was es darf, regelt eine feste Allowlist (siehe "Weboberfläche" unten und `docs/api.md`, Abschnitt "Web sessions").
+
+## Weboberfläche
+
+Jeder Knoten liefert unter `/` eine kleine eigene Webseite aus (Quellen in `web/`, Modul `src/modules/web/`): Karte mit aktuellen Meldungen (live), Tempolimit per Klick bzw. als Straßenfarben, Melden und Bestätigen, die Seiten „Verbinden" (App, eigener Knoten, API) und „Über das Projekt" — Deutsch/Englisch, mobil, ohne externe Skripte (nur Kartenkacheln). Sie ist eine reine Ergänzung: `WEB_UI_ENABLED=false` schaltet sie samt `POST /v1/web/session` ab, die `/v1`-API bleibt sonst unverändert. Konfiguration (`WEB_*`, `MAP_TILE_*`, `TRUST_PROXY`, `LOG_PRIVACY_MODE`, `PROJECT_REPO_URL`), Vertrauensmodell, Kartenkacheln, Reverse-Proxy und Datenschutz: [`docs/web-ui.md`](docs/web-ui.md); Datenschutzhinweis (Entwurf, keine Rechtsberatung): [`../docs/privacy.md`](../docs/privacy.md).
 
 ## Datenbank / Migrations
 
@@ -146,6 +151,7 @@ Beide starten automatisch mit dem Server (`src/server.ts`), sauberer Shutdown ü
 npm run test:unit          # keine Infrastruktur nötig
 npm run test:integration   # startet einen postgis/postgis-Container über Testcontainers — braucht lokal Docker
 npm test                   # beides
+npm run e2e                # Weboberfläche im echten Browser (Playwright/Chromium) gegen echte Knoten + PostGIS — einmalig: npx playwright install chromium
 ```
 
 Integrationstests laufen automatisch in CI (`.github/workflows/server-ci.yml`, GitHub-Actions-Runner bringt Docker mit). Lokal ohne Docker Desktop lassen sich nur die Unit-Tests ausführen. WebSocket-Tests starten einen echten horchenden Server plus einen echten `ws`-Client (Fastifys `app.inject()` unterstützt kein WS-Upgrade). `tests/integration/federation-multi-node.test.ts` (F-S5) ist die einzige Suite, die mehrere echte, horchende Server-Instanzen (je mit eigenem Postgres-Container) tatsächlich über echtes HTTP miteinander reden lässt, statt jeden Server isoliert über `app.inject()` zu prüfen — Beitritt+Gossip, Replikation, Partition+Wiedervereinigung, ein böswillig signierender Peer und pro-Server-Rate-Limiting werden dort end-to-end durchgespielt.
@@ -167,3 +173,5 @@ Integrationstests laufen automatisch in CI (`.github/workflows/server-ci.yml`, G
 | F-S3 | Föderation: Beitritt über Seeds, Peer-Verzeichnis + Gossip, signierte Heartbeats, Push/Pull-Replikation geräteseitig signierter Meldungserstellungen | ✅ |
 | F-S4 | Reputationsstufen (probation/active/trusted), Verzeichnisdienst (`GET /v1/network/directory`) + Export-Skript, Überlast-Signal (503+Retry-After) | ✅ |
 | F-S5 | Mehrknoten-Testnetz (3 echte Server über Testcontainers), Betreiber-Doku (`docs/operating.md`), finale Föderations-Protokollspezifikation (`docs/federation-protocol.md`) — **Abschluss, Pull Request** | ✅ |
+| W0–W5 | Weboberfläche des Knotens (Karte, Melden, „Verbinden", „Über das Projekt"), Web-Sitzungen mit Allowlist und Limits, Playwright-E2E-Tests, `docs/web-ui.md` | ✅ |
+| O-B | Anzeige „N online" unten rechts (gegen den echten O-A-Endpunkt zu prüfen, sobald beide Branches zusammengeführt sind, siehe `../docs/status.md`) | ✅ |
