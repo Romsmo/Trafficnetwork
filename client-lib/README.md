@@ -57,6 +57,17 @@ Server-Discovery über `GET /v1/network/directory` (eingebaute Seed-Liste als St
 - `correction_id()` leitet die deterministische Korrektur-ID exakt wie der Server ab (Testvektoren unabhängig mit einer zweiten SHA-256-Implementierung berechnet), sodass ein Vorschlag seine ID schon vor dem Senden kennt. `fetch_corrections()` (`GET /v1/speed-limit-corrections?tiles=…`) liefert offene Vorschläge für „stimmt das noch?"; ein alter Server liefert `404` = leere Liste, kein Fehler.
 - Widerspruch gegen den **eigenen** Vorschlag nimmt ihn sofort zurück (der Server entzieht einem Gerät bei Widerspruch die Zustimmung); war er noch nicht gesendet, wird er einfach verworfen und nichts gesendet.
 
+## Online-Anzeige (Zusatz O, Teil C)
+
+`core/src/status.rs` macht die Zahl „aktuell online" aus dem öffentlichen `GET /v1/stats/online` für Host-Apps verfügbar: `NetworkStatus { online_node, online_network, online_estimated, online_as_of }` (JSON: `onlineNode`, `onlineNetwork`, `onlineEstimated`, `onlineAsOf`). Rein additiv, alle Felder optional.
+
+- **Nie blockierend:** `OnlineStatusService::network_status()` liest nur den Zwischenspeicher (30 s) und fasst das Netz nie an; `refresh()` ist, was der Takt der Host-App aufruft, und tut innerhalb des Zwischenspeicher-Fensters nichts — die Bibliothek plant nichts selbst (siehe `platform`-Modul).
+- **Ältere Server** ohne den Endpunkt (404/405/410, 401/403) oder mit abgeschalteter Funktion (`{"enabled": false}`) lassen die Felder leer, ohne Fehler, und werden fünf Minuten lang nicht erneut gefragt. Ein kurzer Ausfall behält die zuletzt bekannten Werte.
+- **Zwei Zusicherungen, die nicht vom Server abhängen:** Eine exakte Zahl unter `minDisplayThreshold` wird als `Below(N)` („weniger als N") weitergegeben, nie als Zahl; die netzweite Zahl ist immer `estimated`, was der Knoten auch behauptet (fremde Zahlen sind Behauptungen).
+- Die Bibliothek sendet dafür nichts Zusätzliches — die Zählung passiert serverseitig anhand bestehender Verbindungen/Anfragen.
+- `getNetworkStatus()` als öffentliche Fassade gibt es noch nicht (F-C4/F-C5); `NetworkStatus` ist dessen erste Heimat, die übrigen Felder aus dem F-C0-Plan (bekannte/aktive Knoten, Verzeichnis-/Config-Version) kommen dort dazu.
+- Gebaut gegen das im Auftrag vorgeschlagene Antwortformat `{ node: { online, windowSeconds }, network?: { online, nodes, estimated, asOf }, minDisplayThreshold }` mit `online: null` + `below: N` unter dem Schwellenwert; **der Server-Teil (A) steht noch aus** — weicht er ab, genügt eine Anpassung von `parse_online_stats` samt Tests.
+
 ## Grundstock in großem Maßstab (Zusatz E, Teil C)
 
 Vorbereitung und Messung für den Europa-Grundstock ("alles auf jedem Gerät"). **Rein additiv** — keine bestehende API ändert sich; die Entscheidung "alles auf jedem Gerät" bleibt, bis der Nutzer sie ändert. Messwerte und Bewertung: [`docs/bootstrap-measurements.md`](docs/bootstrap-measurements.md).
