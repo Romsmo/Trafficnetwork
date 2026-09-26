@@ -201,7 +201,9 @@ impl DiscoveryService {
     /// status display, not for choosing a server (that is `current_pool`).
     pub fn known_servers(&self) -> Vec<KnownServer> {
         let pool = self.pool.lock().unwrap();
-        pool.node_ids().filter_map(|id| pool.get(id).cloned()).collect()
+        pool.node_ids()
+            .filter_map(|id| pool.get(id).cloned())
+            .collect()
     }
 
     /// The `generatedAt` of the newest directory fetched, if any.

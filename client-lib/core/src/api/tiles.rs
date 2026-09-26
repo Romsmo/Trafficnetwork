@@ -59,22 +59,82 @@ mod tests {
     /// `(lat, lng, resolution 7, resolution 4, resolution 2)`, all made with
     /// `h3-js`' `latLngToCell` (version 4, the one the server uses).
     const VECTORS: &[(f64, f64, &str, &str, &str)] = &[
-        (52.52, 13.405, "871f1d489ffffff", "841f1d5ffffffff", "821f1ffffffffff"),
-        (48.137, 11.575, "871f8d7a4ffffff", "841f8d7ffffffff", "821f8ffffffffff"),
-        (0.0, 0.0, "87754e64dffffff", "84754a9ffffffff", "82754ffffffffff"),
-        (-33.8688, 151.2093, "87be0e35cffffff", "84be0e3ffffffff", "82be0ffffffffff"),
-        (64.1466, -21.9426, "87075dd4bffffff", "84075ddffffffff", "82075ffffffffff"),
-        (35.6762, 139.6503, "872f5a363ffffff", "842f5a3ffffffff", "822f5ffffffffff"),
-        (51.5074, -0.1278, "87195da49ffffff", "84194adffffffff", "82194ffffffffff"),
-        (-54.8, -68.3, "87df45175ffffff", "84df451ffffffff", "82df47fffffffff"),
+        (
+            52.52,
+            13.405,
+            "871f1d489ffffff",
+            "841f1d5ffffffff",
+            "821f1ffffffffff",
+        ),
+        (
+            48.137,
+            11.575,
+            "871f8d7a4ffffff",
+            "841f8d7ffffffff",
+            "821f8ffffffffff",
+        ),
+        (
+            0.0,
+            0.0,
+            "87754e64dffffff",
+            "84754a9ffffffff",
+            "82754ffffffffff",
+        ),
+        (
+            -33.8688,
+            151.2093,
+            "87be0e35cffffff",
+            "84be0e3ffffffff",
+            "82be0ffffffffff",
+        ),
+        (
+            64.1466,
+            -21.9426,
+            "87075dd4bffffff",
+            "84075ddffffffff",
+            "82075ffffffffff",
+        ),
+        (
+            35.6762,
+            139.6503,
+            "872f5a363ffffff",
+            "842f5a3ffffffff",
+            "822f5ffffffffff",
+        ),
+        (
+            51.5074,
+            -0.1278,
+            "87195da49ffffff",
+            "84194adffffffff",
+            "82194ffffffffff",
+        ),
+        (
+            -54.8,
+            -68.3,
+            "87df45175ffffff",
+            "84df451ffffffff",
+            "82df47fffffffff",
+        ),
     ];
 
     #[test]
     fn tiles_match_h3_js_at_every_resolution_the_server_uses() {
         for (lat, lng, res7, res4, res2) in VECTORS {
-            assert_eq!(tile_at(*lat, *lng, 7).as_deref(), Some(*res7), "{lat},{lng} at 7");
-            assert_eq!(tile_at(*lat, *lng, 4).as_deref(), Some(*res4), "{lat},{lng} at 4");
-            assert_eq!(tile_at(*lat, *lng, 2).as_deref(), Some(*res2), "{lat},{lng} at 2");
+            assert_eq!(
+                tile_at(*lat, *lng, 7).as_deref(),
+                Some(*res7),
+                "{lat},{lng} at 7"
+            );
+            assert_eq!(
+                tile_at(*lat, *lng, 4).as_deref(),
+                Some(*res4),
+                "{lat},{lng} at 4"
+            );
+            assert_eq!(
+                tile_at(*lat, *lng, 2).as_deref(),
+                Some(*res2),
+                "{lat},{lng} at 2"
+            );
         }
     }
 

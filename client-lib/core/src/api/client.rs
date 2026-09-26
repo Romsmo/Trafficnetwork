@@ -29,8 +29,8 @@ use crate::sync::{
     effective_camera_namespace_enabled, exchange_client_secret, fetch_corrections, flush_pending,
     haversine_distance_meters, nearby_hazard_reports, register_device, report_camera_removed,
     report_wrong_speed_limit, speed_limit_at, submit_report, ClientConfig, Correction,
-    CorrectionTarget, FlushOutcome, HazardType, NetworkConfigPayload, ReportSubmission,
-    SegmentRef, SyncEngine, WrongSpeedLimitReport,
+    CorrectionTarget, FlushOutcome, HazardType, NetworkConfigPayload, ReportSubmission, SegmentRef,
+    SyncEngine, WrongSpeedLimitReport,
 };
 
 use super::error::{code, ApiError};
@@ -70,8 +70,9 @@ impl Platform {
     /// not), `reqwest` for the network and the system clock.
     pub fn native(directory: impl AsRef<std::path::Path>) -> Result<Self, ApiError> {
         let directory = directory.as_ref();
-        std::fs::create_dir_all(directory)
-            .map_err(|e| ApiError::new(code::STORAGE, format!("cannot create {directory:?}: {e}")))?;
+        std::fs::create_dir_all(directory).map_err(|e| {
+            ApiError::new(code::STORAGE, format!("cannot create {directory:?}: {e}"))
+        })?;
         let store = crate::storage::SqliteStore::open(directory.join("trafficnetwork.db"))?;
         Ok(Self {
             store: Arc::new(store),
@@ -164,8 +165,12 @@ impl TrafficNetworkClient {
             ));
         }
         let events = Arc::new(EventHub::new());
-        let engine = SyncEngine::new(discovery.clone(), platform.store.clone(), platform.clock.clone())
-            .with_observer(Arc::new(HubObserver(events.clone())));
+        let engine = SyncEngine::new(
+            discovery.clone(),
+            platform.store.clone(),
+            platform.clock.clone(),
+        )
+        .with_observer(Arc::new(HubObserver(events.clone())));
         let online = OnlineStatusService::new(discovery.clone(), platform.clock.clone());
         Ok(Self {
             options,
@@ -237,7 +242,10 @@ impl TrafficNetworkClient {
             }
         }
         let credentials = self.options.credentials.clone().ok_or_else(|| {
-            ApiError::new(code::NOT_CONFIGURED, "no credentials were given to the client")
+            ApiError::new(
+                code::NOT_CONFIGURED,
+                "no credentials were given to the client",
+            )
         })?;
         let (client_id, client_secret) = self.client_credentials(&credentials).await?;
         let response = exchange_client_secret(&self.discovery, &client_id, &client_secret).await?;
@@ -304,8 +312,14 @@ impl TrafficNetworkClient {
                 let Ok(key) = generate_ed25519_keypair() else {
                     return;
                 };
-                if self.secure.set(KEY_PUBLIC_KEY, &key.public_key_raw).is_err()
-                    || self.secure.set(KEY_PRIVATE_KEY, &key.private_key_raw).is_err()
+                if self
+                    .secure
+                    .set(KEY_PUBLIC_KEY, &key.public_key_raw)
+                    .is_err()
+                    || self
+                        .secure
+                        .set(KEY_PRIVATE_KEY, &key.private_key_raw)
+                        .is_err()
                 {
                     return;
                 }
@@ -393,9 +407,12 @@ impl TrafficNetworkClient {
         self.check_open()?;
         check_position(lat, lng)?;
         if !(radius_meters.is_finite() && radius_meters > 0.0 && radius_meters <= 50_000.0) {
-            return Err(ApiError::invalid("radiusMeters must be between 0 and 50000"));
+            return Err(ApiError::invalid(
+                "radiusMeters must be between 0 and 50000",
+            ));
         }
-        let wanted = |category: NearbyCategory| categories.is_empty() || categories.contains(&category);
+        let wanted =
+            |category: NearbyCategory| categories.is_empty() || categories.contains(&category);
         let namespace_on = self.camera_namespace_enabled();
         let config = self.cached_config();
         let now = self.now();
@@ -433,7 +450,8 @@ impl TrafficNetworkClient {
                 if !matches!(write.kind, WriteKind::HazardReport) {
                     continue;
                 }
-                if let Some(item) = pending_hazard(&write.id, &write.request_body, lat, lng, radius_meters)
+                if let Some(item) =
+                    pending_hazard(&write.id, &write.request_body, lat, lng, radius_meters)
                 {
                     items.push(item);
                 }
@@ -531,7 +549,11 @@ impl TrafficNetworkClient {
     /// "This camera is gone."
     pub fn report_camera_removed(&self, camera_id: &str) -> Result<String, ApiError> {
         self.check_open()?;
-        Ok(report_camera_removed(&*self.store, &*self.clock, camera_id)?)
+        Ok(report_camera_removed(
+            &*self.store,
+            &*self.clock,
+            camera_id,
+        )?)
     }
 
     fn corrections_config(&self) -> Result<ClientConfig, ApiError> {
@@ -613,7 +635,12 @@ impl TrafficNetworkClient {
     ) -> Result<PositionUpdate, ApiError> {
         self.check_open()?;
         check_position(lat, lng)?;
-        let tiles = tiles_around(lat, lng, self.region_resolution(), ring_for_speed(speed_kmh));
+        let tiles = tiles_around(
+            lat,
+            lng,
+            self.region_resolution(),
+            ring_for_speed(speed_kmh),
+        );
         let mut state = self.state();
         let changed = state.tiles != tiles;
         if changed {
@@ -716,8 +743,14 @@ impl TrafficNetworkClient {
         }
 
         let device_key = self.state().device_key.clone();
-        match flush_pending(&*self.store, &self.discovery, &*self.clock, &token, device_key.as_ref())
-            .await
+        match flush_pending(
+            &*self.store,
+            &self.discovery,
+            &*self.clock,
+            &token,
+            device_key.as_ref(),
+        )
+        .await
         {
             Ok(outcomes) => {
                 for outcome in outcomes {
@@ -874,7 +907,10 @@ impl TrafficNetworkClient {
 // ------------------------------------------------------------------ helpers
 
 fn check_position(lat: f64, lng: f64) -> Result<(), ApiError> {
-    if lat.is_finite() && lng.is_finite() && (-90.0..=90.0).contains(&lat) && (-180.0..=180.0).contains(&lng)
+    if lat.is_finite()
+        && lng.is_finite()
+        && (-90.0..=90.0).contains(&lat)
+        && (-180.0..=180.0).contains(&lng)
     {
         Ok(())
     } else {
@@ -971,7 +1007,10 @@ fn merge_duplicate_hazards(items: Vec<NearbyItem>, merge_radius_meters: f64) -> 
                         pending: other_pending,
                         confirm_count: other_confirms,
                         ..
-                    } => (*other_pending && !*pending) || (*other_pending == *pending && confirm_count > other_confirms),
+                    } => {
+                        (*other_pending && !*pending)
+                            || (*other_pending == *pending && confirm_count > other_confirms)
+                    }
                     _ => false,
                 };
                 if replace {
@@ -985,10 +1024,15 @@ fn merge_duplicate_hazards(items: Vec<NearbyItem>, merge_radius_meters: f64) -> 
 
 /// A wrongly-typed helper kept private: the sync module's public segment
 /// reference, re-exported for the dispatcher.
-pub(crate) fn segment_ref(id: Option<String>, position: Option<(f64, f64)>) -> Result<SegmentRef, ApiError> {
+pub(crate) fn segment_ref(
+    id: Option<String>,
+    position: Option<(f64, f64)>,
+) -> Result<SegmentRef, ApiError> {
     match (id, position) {
         (Some(id), _) => Ok(SegmentRef::Id(id)),
         (None, Some((lat, lng))) => Ok(SegmentRef::Position { lat, lng }),
-        (None, None) => Err(ApiError::invalid("name the segment by segmentId or by lat/lng")),
+        (None, None) => Err(ApiError::invalid(
+            "name the segment by segmentId or by lat/lng",
+        )),
     }
 }

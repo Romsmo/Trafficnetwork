@@ -29,7 +29,9 @@ pub struct SpeedLimitAnswer {
 pub enum OriginView {
     Imported,
     /// This device's own proposal, not confirmed by anyone else yet.
-    LocallyProposed { confirmations: u32 },
+    LocallyProposed {
+        confirmations: u32,
+    },
     CommunityCorrected {
         confirmations: u32,
         #[serde(rename = "needsReview")]

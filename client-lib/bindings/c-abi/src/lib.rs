@@ -1,16 +1,22 @@
-//! Thin C-ABI surface over `trafficnetwork-core` (F-C1 skeleton — only the
-//! crypto module exists yet, so only crypto is exposed so far). Every
-//! function that hands a string back to the caller allocates it with
+//! Thin C-ABI surface over `trafficnetwork-core`.
+//!
+//! * [`client`]: the client API — `tn_client_new`, `tn_client_call`, ... — the
+//!   one every language binding wraps (see there).
+//! * this file: the crypto helpers (F-C1) — key generation, signing and
+//!   verifying a signed envelope — kept for tools that need them on their own.
+//!
+//! Every function that hands a string back to the caller allocates it with
 //! `CString::into_raw`; the caller must free it with `tn_free_string` — never
 //! with the host language's own `free()`, since Rust's global allocator
 //! isn't guaranteed to be the same one. JSON-in/JSON-out at the boundary
-//! (rather than hand-marshaled structs) keeps this skeleton simple and lets
+//! (rather than hand-marshaled structs) keeps the surface small and lets
 //! every binding reuse the same `serde`-derived shapes `core` already
-//! defines; a later milestone can replace hot paths with real structs if
-//! JSON overhead ever matters.
+//! defines.
 //!
 //! Header generation: `cbindgen --config cbindgen.toml --output trafficnetwork.h`
 //! (see `cbindgen.toml` in this directory), wired into CI.
+
+mod client;
 
 use std::ffi::{c_char, CStr, CString};
 

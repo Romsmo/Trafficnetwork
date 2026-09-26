@@ -56,7 +56,12 @@ impl ScriptedServer {
 
     fn count(&self, method: &str, path: &str) -> usize {
         let key = format!("{method} {path}");
-        self.log.lock().unwrap().iter().filter(|(k, _)| *k == key).count()
+        self.log
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|(k, _)| *k == key)
+            .count()
     }
 }
 
@@ -236,7 +241,10 @@ async fn a_first_sync_fills_the_store_and_the_reads_answer_from_it() {
     let report = client.sync().await.unwrap();
 
     assert!(report.ok, "{report:?}");
-    let limit = client.get_speed_limit_at(52.0, 13.005, None).unwrap().unwrap();
+    let limit = client
+        .get_speed_limit_at(52.0, 13.005, None)
+        .unwrap()
+        .unwrap();
     assert_eq!(limit.value, 50.0);
     assert_eq!(limit.unit, "kmh");
     assert_eq!(limit.origin, OriginView::Imported);
@@ -260,7 +268,10 @@ async fn a_second_client_on_the_same_store_needs_no_network_for_the_reads() {
 
     // A new client, a dead network, the same store: the data is all there.
     let offline = client_on(Arc::new(ScriptedServer::default()), store, options());
-    assert!(offline.get_speed_limit_at(52.0, 13.005, None).unwrap().is_some());
+    assert!(offline
+        .get_speed_limit_at(52.0, 13.005, None)
+        .unwrap()
+        .is_some());
 }
 
 #[tokio::test]
@@ -305,7 +316,12 @@ async fn a_report_survives_a_server_that_is_down_and_goes_out_later() {
     assert_eq!(report.pending_writes, 1);
     assert_eq!(report.submitted, 0);
 
-    server.route("POST", "/v1/hazard-reports", 201, json!({ "merged": false }));
+    server.route(
+        "POST",
+        "/v1/hazard-reports",
+        201,
+        json!({ "merged": false }),
+    );
     let report = client.sync().await.unwrap();
     assert_eq!(report.submitted, 1);
     assert_eq!(report.pending_writes, 0);
@@ -357,7 +373,8 @@ async fn cameras_need_the_server_the_host_app_and_a_valid_network_configuration(
         issued_at: "2027-01-01T00:00:00Z".to_string(),
     };
     let mut config = config_json(true);
-    config["networkConfig"] = serde_json::to_value(sign_envelope(payload(false), &root).unwrap()).unwrap();
+    config["networkConfig"] =
+        serde_json::to_value(sign_envelope(payload(false), &root).unwrap()).unwrap();
     let server = working_server(true);
     server.route("GET", "/v1/config", 200, config);
     let mut with_root = host_on.clone();
@@ -416,7 +433,9 @@ fn moving_to_other_tiles_makes_the_next_tick_sync() {
     let first = client.update_position(52.52, 13.405, Some(30.0)).unwrap();
     assert!(first.changed);
     assert_eq!(first.tiles.len(), 7);
-    let again = client.update_position(52.5201, 13.4051, Some(30.0)).unwrap();
+    let again = client
+        .update_position(52.5201, 13.4051, Some(30.0))
+        .unwrap();
     assert!(!again.changed);
     let fast = client.update_position(52.52, 13.405, Some(130.0)).unwrap();
     assert!(fast.changed);
@@ -480,7 +499,10 @@ async fn an_unreachable_network_is_a_report_not_an_error_and_reads_keep_working(
     let error = offline.sync().await.unwrap_err();
     assert_eq!(error.code, code::NETWORK);
     assert_eq!(offline.get_sync_status().unwrap().connection, "offline");
-    assert!(offline.get_speed_limit_at(52.0, 13.005, None).unwrap().is_some());
+    assert!(offline
+        .get_speed_limit_at(52.0, 13.005, None)
+        .unwrap()
+        .is_some());
 }
 
 #[tokio::test]
@@ -545,7 +567,10 @@ async fn the_json_call_reaches_every_method_and_reports_errors_the_same_way() {
     assert!(nothing.is_null());
 
     let id = client
-        .call("submitReport", json!({ "type": "traffic", "lat": 52.0, "lng": 13.0 }))
+        .call(
+            "submitReport",
+            json!({ "type": "traffic", "lat": 52.0, "lng": 13.0 }),
+        )
         .await
         .unwrap();
     assert!(id["localId"].is_string());
@@ -561,7 +586,11 @@ async fn the_json_call_reaches_every_method_and_reports_errors_the_same_way() {
     assert_eq!(nearby["items"][0]["kind"], "hazard");
 
     let events = client.call("pollEvents", json!({})).await.unwrap();
-    assert!(events["events"].as_array().unwrap().iter().any(|e| e["type"] == "syncCompleted"));
+    assert!(events["events"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|e| e["type"] == "syncCompleted"));
 
     let error = client.call("noSuchMethod", json!({})).await.unwrap_err();
     assert_eq!(error.code, code::INVALID_ARGUMENT);
@@ -571,7 +600,10 @@ async fn the_json_call_reaches_every_method_and_reports_errors_the_same_way() {
         .unwrap_err();
     assert_eq!(error.code, code::INVALID_ARGUMENT);
     let error = client
-        .call("submitReport", json!({ "type": "dragons", "lat": 52.0, "lng": 13.0 }))
+        .call(
+            "submitReport",
+            json!({ "type": "dragons", "lat": 52.0, "lng": 13.0 }),
+        )
         .await
         .unwrap_err();
     assert_eq!(error.code, code::INVALID_ARGUMENT);
@@ -584,10 +616,20 @@ async fn a_closed_client_refuses_everything() {
 
     assert_eq!(client.sync().await.unwrap_err().code, code::CLOSED);
     assert_eq!(
-        client.get_speed_limit_at(52.0, 13.0, None).unwrap_err().code,
+        client
+            .get_speed_limit_at(52.0, 13.0, None)
+            .unwrap_err()
+            .code,
         code::CLOSED
     );
-    assert_eq!(client.call("getSyncStatus", Value::Null).await.unwrap_err().code, code::CLOSED);
+    assert_eq!(
+        client
+            .call("getSyncStatus", Value::Null)
+            .await
+            .unwrap_err()
+            .code,
+        code::CLOSED
+    );
 }
 
 #[test]
@@ -614,7 +656,8 @@ fn the_same_event_from_two_servers_is_shown_once() {
     let client = client(working_server(false));
     // Two servers, two ids, one accident.
     let store = client.store_for_test();
-    let mut a: crate::sync::HazardReport = serde_json::from_value(hazard_json("from-a", "accident", 52.0, 13.0)).unwrap();
+    let mut a: crate::sync::HazardReport =
+        serde_json::from_value(hazard_json("from-a", "accident", 52.0, 13.0)).unwrap();
     a.confirm_count = 1;
     let mut b: crate::sync::HazardReport =
         serde_json::from_value(hazard_json("from-b", "accident", 52.0002, 13.0002)).unwrap();
@@ -622,12 +665,16 @@ fn the_same_event_from_two_servers_is_shown_once() {
     store.upsert_hazard_reports(&[a, b]).unwrap();
     // A different type at the same place is a different event.
     store
-        .upsert_hazard_reports(&[serde_json::from_value(hazard_json("ice", "ice", 52.0, 13.0)).unwrap()])
+        .upsert_hazard_reports(&[
+            serde_json::from_value(hazard_json("ice", "ice", 52.0, 13.0)).unwrap(),
+        ])
         .unwrap();
     // The configuration (merge radius 100 m) comes with the first sync; set it directly.
     client.set_test_config(config_json(false));
 
-    let items = client.get_nearby(52.0, 13.0, 500.0, &[NearbyCategory::Hazards]).unwrap();
+    let items = client
+        .get_nearby(52.0, 13.0, 500.0, &[NearbyCategory::Hazards])
+        .unwrap();
 
     let ids: Vec<&str> = items
         .iter()
@@ -637,7 +684,10 @@ fn the_same_event_from_two_servers_is_shown_once() {
         })
         .collect();
     assert_eq!(ids.len(), 2, "{ids:?}");
-    assert!(ids.contains(&"from-b"), "the better-confirmed one is kept: {ids:?}");
+    assert!(
+        ids.contains(&"from-b"),
+        "the better-confirmed one is kept: {ids:?}"
+    );
     assert!(ids.contains(&"ice"));
 }
 
@@ -650,7 +700,10 @@ fn the_search_radius_and_positions_are_checked() {
         code::INVALID_ARGUMENT
     );
     assert_eq!(
-        client.get_nearby(52.0, 13.0, 60_000.0, &[]).unwrap_err().code,
+        client
+            .get_nearby(52.0, 13.0, 60_000.0, &[])
+            .unwrap_err()
+            .code,
         code::INVALID_ARGUMENT
     );
     assert_eq!(
@@ -658,7 +711,10 @@ fn the_search_radius_and_positions_are_checked() {
         code::INVALID_ARGUMENT
     );
     assert_eq!(
-        client.submit_report("ice", f64::NAN, 13.0, None).unwrap_err().code,
+        client
+            .submit_report("ice", f64::NAN, 13.0, None)
+            .unwrap_err()
+            .code,
         code::INVALID_ARGUMENT
     );
 }

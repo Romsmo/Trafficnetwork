@@ -9,7 +9,9 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
-use crate::sync::{Correction, CorrectionReason, CorrectionTarget, SpeedLimitUnit, WrongSpeedLimitReport};
+use crate::sync::{
+    Correction, CorrectionReason, CorrectionTarget, SpeedLimitUnit, WrongSpeedLimitReport,
+};
 
 use super::client::{segment_ref, TrafficNetworkClient};
 use super::error::ApiError;

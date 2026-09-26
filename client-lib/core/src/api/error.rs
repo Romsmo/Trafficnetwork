@@ -134,10 +134,9 @@ impl From<CorrectionError> for ApiError {
                 code::NOT_OFFERED,
                 "the server does not offer speed-limit corrections",
             ),
-            CorrectionError::UnknownSegment => ApiError::new(
-                code::UNKNOWN_SEGMENT,
-                "no speed-limit segment matches",
-            ),
+            CorrectionError::UnknownSegment => {
+                ApiError::new(code::UNKNOWN_SEGMENT, "no speed-limit segment matches")
+            }
             CorrectionError::Store(message) => ApiError::new(code::STORAGE, message),
             other => ApiError::invalid(other.to_string()),
         }
