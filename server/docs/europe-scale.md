@@ -174,7 +174,8 @@ backfill, `CHECK … NOT VALID` + `VALIDATE`): a *stored generated column* has n
 the substitutes (trigger + batched backfill, expression index, side table) cost more than they save — bloat and
 WAL from updating every row, a second non-transactional migration phase because the migrator runs everything
 in one transaction, a readiness state for the half-backfilled window, or a permanent per-read cost (the backfill's
-cost is an argument until `measure-scale --phase keycolumn` has run on a copy, see "Recording the numbers"). What
+cost is measured: +28 % time, +57 % WAL, about twice the table until vacuumed — see "Measured on the real Europe
+import"). What
 protects users is *when* the migration runs (the Europe node, before it has any), not making it online.
 Instead of a fix, the branch adds a **migration lock policy**: `tests/unit/migration-locks.test.ts` requires every
 lock-heavy statement (from 0007 on) to carry a `-- lock-ok(<table>): …` / `-- lock-trivial: …` comment, and the
@@ -227,13 +228,48 @@ the bulk and are close to incompressible beyond that). A binary encoding would b
 **Bulk import** (5000-row batches over the real HTTP handler, local Postgres): **1,238 rows/s** with one INSERT per
 row. The batched statement is implemented and tested; its throughput on the same database is to be recorded.
 
-**Not measured yet — needs Docker, which is held back while the real Europe import runs** (the operator paused
-other Docker work; the scratch database also proved to be one more thing competing for the same VM's memory):
-* a *complete* package build on 12.6 M rows: wall-clock time, peak RSS of the process, tile-size distribution at
-  resolutions 2/3/4/5, manifest size at each;
-* batched-import throughput; the time of one incremental (single-tile) rebuild; `VACUUM ANALYZE`/`REINDEX` durations;
-* all of the above **on the real Europe import** once it finished (`npm run measure-scale` and
-  `npm run static-packages -- status` work against any `DATABASE_URL`) — the synthetic dataset is a stand-in for it.
+### Measured on the real Europe import (2026-09-26)
+
+A physical copy of the `tn-europe` data volume (12,083,574 segments, 1,550,801 signs, 45,025 cameras; the cameras are
+not delivered — the namespace flag is off) in a scratch Postgres container (2.5 GB memory, `shared_buffers` 768 MB) on the
+operator's PC, the server code of this branch, resolution 4. Raw results: `measure-scale` JSON and the build log.
+
+| | measured |
+|---|---|
+| **Migrations 0007 + 0008** (`npm run db:migrate`) | **373.6 s** for 12.08 M segments ≈ **31 s per million rows** under an exclusive lock (the K-A branch measured 21 s per million on synthetic rows); the startup warning printed "about 12,101,376 rows". Database 4,122 MB → 5,309 MB (the `geometry_key` column and its index: +1.2 GB) |
+| `VACUUM (ANALYZE)` of the segment table | 74 s (run with `max_parallel_maintenance_workers = 0`: parallel vacuum needs shared memory as large as `maintenance_work_mem`) |
+| Storage per segment | **434 B** incl. indexes (heap 3,467 MB + `geometry_key` 680 + GiST 482 + pkey 364), the synthetic figure was 440 B; signs 180 B |
+| Reads, in-process, median (20 random points over Europe) | lookup 2.1 ms (first pass p95 72 ms); `nearby` r = 200 m 2.4 ms; r = 2 km 9.1 ms (229 KB); r = 20 km 49 ms (1.5 MB); r = 50 km 54 ms (1.6 MB) |
+| **Full package build** | **25,414 s = 7 h 4 min**, 6,214 candidate tiles, 5,825 with data, 389 empty, 0 failed; **peak memory 315 MB** (512 MB heap cap) |
+| Packages | 6,027.7 MB JSON (443 B per row) → **1,492.8 MB gzip** (110 B per row, 4.0×), **1,442.1 MB brotli** (4.2×); 2,934.9 MB on disk (11,650 files); `verify`: 5,825 checked, 0 missing, 0 corrupt |
+| Tile sizes (uncompressed) | median 0.2 MB, p90 2.6 MB, **max 38.7 MB** (9.4 MB gzip); the manifest is 1.59 MB (361 KB gzip) for 5,825 tiles, 84 ms cold, 7 ms warm; the largest tile answers in 222 ms |
+| Bulk import (5,000-row batches, this 12 M-row table) | legacy one-INSERT-per-row **462 rows/s**; batched **1,411 rows/s** (3.1×). The gain is smaller than on an empty table because every row still updates three indexes on a table that no longer fits in cache |
+| Incremental rebuild | one tile: **3 s** (2.2 MB, peak 265 MB); 67 touched tiles: 173 s (2.6 s per tile) |
+
+**What the numbers say.** Memory, storage and delivery hold at Europe scale: the build never needed more than 315 MB, a complete
+bootstrap is **≈ 1.44 GB (brotli) to 1.49 GB (gzip) per device**, and no tile is larger than 9.4 MB on the wire (most are far
+smaller). **The first full build is slow: 7 hours.** It is database-bound, not CPU-bound — each tile is a cursor over
+`… where <envelope> order by id` (a random uuid), so its rows are read from the heap in random order, and on this
+setup the working set (3.5 GB heap + 1.5 GB of indexes) does not fit the 2.5 GB container's cache (the cursor's first fetch of a dense tile
+regularly took minutes, waiting on `DataFileRead`). It is a one-time cost — the build resumes and later rebuilds touch only the changed
+tiles (3 s for one) — but it should be run on a database with RAM for the working set; that (and `CLUSTER speed_limit_segments USING
+speed_limit_segments_geometry_gist`, "Not done") is expected to help and is **not measured**. The real import itself ran at about
+2,500 rows/s on the Ingestion side, faster than the copy's 1,411 rows/s because the table was still small during the import.
+
+**Migration 0007, online or not** (`measure-scale --phase keycolumn`, 1,000,000-row probe copied from the real table, pre-0007 shape):
+
+| | rewrite (stored generated column + index; the migration) | plain column + backfill in 100 k-row ctid batches + `CREATE INDEX CONCURRENTLY` |
+|---|---|---|
+| time | **32.9 s** | 39.0 s + 3.1 s = **42.1 s** (+28 %) |
+| WAL | 389 MB | 610 MB (+57 %) |
+| table after | 267 MB | **393 MB** — every row was rewritten once, the old versions stay until a `VACUUM FULL` (about twice the table) |
+| indexes after | 126 MB | 193 MB (+53 %) |
+| locks | `ACCESS EXCLUSIVE` for the whole time | none that block reads or writes |
+| keys | reference | identical (0 differences) |
+
+So the online variant is not dramatically slower — it costs about a quarter more time, a good half more WAL and roughly twice the table until
+it is vacuumed — but it needs the second, non-transactional migration phase and a "keys ready" state described in `operating.md`; the decision
+there stands, now on measured numbers.
 
 ## Interfaces for the other parts
 
@@ -241,7 +277,7 @@ other Docker work; the scratch database also proved to be one more thing competi
   batch (`BULK_IMPORT_MAX_ROWS`, up to 50,000) is now cheaper per row. An import into a server that has
   the new code marks package tiles as it goes and builds them afterwards; into a server that has not,
   build with `npm run static-packages -- build` after upgrading (see the upgrade notes below).
-  Migration 0007 (K-A) rewrites the segment table once under an exclusive lock (≈ 21 s per million rows) — do it while the
+  Migration 0007 (K-A) rewrites the segment table once under an exclusive lock (21–31 s per million rows, 374 s measured on the real 12 M) — do it while the
   node is empty or has no users; it is why a node with users and big data needs a maintenance window
   (`operating.md`, "Migrations that take a heavy lock", which also says why there is no online variant).
 * **C (client-lib):** the manifest and partitions keep their shape; new, additive: `gzipBytes`/`brotliBytes`/`path`
@@ -249,12 +285,15 @@ other Docker work; the scratch database also proved to be one more thing competi
   the immutable `…/packages/<tile>/<hash>` URL, `503 PACKAGES_BUILDING` + `Retry-After` while the first build is
   running (retry, do not fail), `413 STATIC_DATA_TOO_LARGE_FOR_SNAPSHOT` from `/v1/snapshot` (use
   `?staticData=false`), and the partition resolution from `GET /v1/config` (recommended 4 — read it, never hard-code).
-  What a complete bootstrap costs on the wire: ≈ 93 B per row over gzip, i.e. **≈ 1.4 GB for 15 M rows** (a measured
-  ratio, not a forecast of the real row count) — that number is for the decision C is asked to inform.
+  What a complete bootstrap costs on the wire — **measured on the real Europe import**: 5,825 tiles, **1.49 GB over gzip /
+  1.44 GB over brotli** for 13.63 M rows (110 / 106 B per row; the largest tile is 9.4 MB gzip, the median 0.1 MB, the manifest
+  361 KB gzip) — that number is for the decision C is asked to inform.
 * **D (web):** no server change needed; `GET /v1/speed-limit` stays point-wise and cheap (≈ 2 ms). Do not use
   `nearby` with a radius above a few km for the map — the API allows 50 km, which is 43 MB in dense areas.
 
-## Recording the numbers on the real import
+## Recording the numbers on the real import (done 2026-09-26; how to repeat it)
+
+The results of the run above are in "Measured on the real Europe import". To repeat it on another dataset:
 
 ```bash
 cd server
@@ -268,15 +307,12 @@ npm run measure-scale -- --phase import --import-rows 50000 --import-impl legacy
 ```
 
 A node that predates this branch (the Europe node was set up from `main`) needs migrations 0007 and 0008 first —
-0007 is the ≈ 21 s-per-million-rows rewrite of the segment table (K-A), so on 13 M segments about **5 minutes with
-the table locked**. Operator's decision (2026-09-25): measure on a copy (`pg_dump`/restore into a scratch container)
-first, then run the migration on the node itself — 5 minutes are harmless while it has no users. On the copy, also
-measure the two things `operating.md` ("Migrations that take a heavy lock") only argues so far:
-the migration itself (`npm run db:migrate`, wall time, the row estimate the warning printed), and, for the
-rejected online variant, `npm run measure-scale -- --phase keycolumn --probe-rows 1000000` (rewrite vs. plain column +
-batched backfill by ctid range + `CREATE INDEX CONCURRENTLY` on scratch tables built from a sample; time, WAL, table and
-index growth, and a check that both produce the same keys) — the claim in `operating.md` is "slower and heavier than the rewrite",
-still an argument until this has run. The phase never writes to the real tables, but generates WAL and I/O: a copy only.
+0007 is the rewrite of the segment table (K-A): **373.6 s on the copy of the real 12.08 M-row database, with the table locked**.
+Operator's decision (2026-09-25): measure on a copy first (done: a physical copy of the data volume — `docker run --rm --entrypoint cp
+-v <node volume>:/from:ro -v <copy>:/to <postgres image> -a /from/. /to/` while the node is stopped — 96 s for 5.9 GB), then run the migration
+on the node itself — about 6 minutes are harmless while it has no users; **not yet done**, see `docs/status.md`. The `keycolumn` phase
+(`npm run measure-scale -- --phase keycolumn --probe-rows 1000000`) compares the rewrite with an online backfill on scratch tables built
+from a sample; it never writes to the real tables but generates WAL and I/O: a copy only.
 
 ## Not done, on purpose
 

@@ -91,28 +91,27 @@ single server in the meantime.
 ## Running a node with Europe-sized data (E-B)
 
 Design, decisions and the reasoning behind the numbers: [`europe-scale.md`](europe-scale.md).
-Numbers below are **measured** unless marked otherwise; how they were obtained (a
-scratch database with the real Bayern import replicated across Europe, plus the real Bayern
-import itself) and what is still to be re-measured on the real Europe import is stated there.
+Numbers below are **measured** unless marked otherwise — on the real Europe import (a copy of the `tn-europe`
+node, 12.08 M segments + 1.55 M signs) where it says so, otherwise on the real Bayern import replicated across Europe;
+how they were obtained is in `europe-scale.md`.
 
-**What a row costs** (real Bayern geometry, PostGIS 16, indexes included):
+**What a row costs** (PostGIS 16, indexes included):
 
-| | per row | |
+| | per row | real Europe import (13.63 M rows) |
 |---|---|---|
-| speed-limit segment | **≈ 440 B** in the database (table 267 B + `geometry_key` index 75 B + GiST 41 B + primary key 40 B), unchanged from 0.44 M to 2.6 M to 10 M rows | 10.1 M segments + 2.5 M signs = **4.9 GB** database |
-| sign | ≈ 180 B | |
-| package JSON (uncompressed) | ≈ 390 B | 12.6 M rows ≈ 4.9 GB of JSON |
-| package, gzip 9 / brotli 9 | ≈ 93 B / ≈ 90 B (4.2× / 4.4×) | the same 12.6 M rows ≈ 1.15 GB each |
+| speed-limit segment | **≈ 434 B** in the database (table 301 B + `geometry_key` index 59 B + GiST 42 B + primary key 32 B), unchanged from 0.44 M to 12 M rows | database **5.3 GB** after migration 0007 (4.1 GB before) |
+| sign | ≈ 180 B | 278 MB |
+| package JSON (uncompressed) | ≈ 443 B | **6.0 GB** of JSON in 5,825 tiles |
+| package, gzip 9 / brotli 9 | ≈ 110 B / ≈ 106 B (4.0× / 4.2×) | **1.49 GB / 1.44 GB**; both copies on disk **2.9 GB** |
 
-**Sizing** (the operator's own estimate for the real import is ≈ 15 M rows, range 12–18 M — take
-the per-row costs above and multiply): for 15 M rows about **6–7 GB of database**, **≈ 3 GB in
-`STATIC_PACKAGES_DIR`** (gzip + brotli copies of ≈ 5.9 GB of JSON, plus room for files a rebuild
-replaces), and **≈ 1.4 GB per device** for a complete bootstrap over gzip. Disk: allow ≥ 3× the database
-size for WAL, autovacuum and the initial import. RAM: `shared_buffers` 1–2 GB and 4 GB for the
-whole node is enough to serve; more helps the index-heavy queries and the package builds. 2 vCPUs.
-The API process no longer holds the dataset in memory — by construction: a build streams one tile at a time
-(the 75 tiles built so far ran under a 512 MB heap cap), and a snapshot over the limit is refused. Its peak memory during a full
-build on the real Europe import is one of the numbers still to be recorded (see `europe-scale.md`).
+**Sizing** (measured for the real import; a different dataset scales linearly): **≈ 5.3 GB of database** for
+13.6 M rows (allow 6–7 GB for growth), **≈ 3 GB in `STATIC_PACKAGES_DIR`** (gzip + brotli copies, plus room for files a rebuild
+replaces), and **≈ 1.44 GB (brotli) to 1.49 GB (gzip) per device** for a complete bootstrap; the largest tile is 9.4 MB on the wire, the median
+0.1 MB, the manifest 361 KB gzip. Disk: allow ≥ 3× the database size for WAL, autovacuum and the initial import. RAM: the
+API process needs little — **a complete package build peaked at 315 MB** under a 512 MB heap cap, a snapshot over the limit is refused —
+but **the first full build is database-bound: 7 h 4 min** with 2.5 GB for Postgres (the working set is 3.5 GB heap + 1.5 GB indexes). Give the
+database RAM for its working set (untested here: it should shorten this a lot) or accept a one-time overnight build; it resumes after an
+interruption, and later rebuilds touch only changed tiles (3 s for one). 2 vCPUs.
 
 **Building the packages.** `STATIC_PACKAGES_DIR` (in Docker a volume). After an import the worker
 notices the marked tiles and rebuilds them (debounced, see below); to do it explicitly, and to see progress:
@@ -156,7 +155,8 @@ data) is refused above `SNAPSHOT_STATIC_MAX_ROWS` rows — clients use the manif
 * A bulk import is insert-only: no bloat to reclaim. `REINDEX` is only needed after a crash or an index-corruption
   warning; the three segment indexes together are ≈ 37 % of the segment table's size.
 * `CLUSTER speed_limit_segments USING speed_limit_segments_geometry_gist` would store rows in spatial order, making a
-  package build read sequentially. Not measured here (it needs room for a second copy of the table, and an exclusive lock).
+  package build read sequentially — the likely cure for the 7-hour first build (see above). Not measured here (it needs room
+  for a second copy of the table, and an exclusive lock).
 * Back up the database, **not** `STATIC_PACKAGES_DIR` (derived data): after a restore run `static-packages build --full`.
 
 ## Community speed-limit corrections (K-A)
@@ -240,10 +240,10 @@ avoid it.
 **What happens.** 0007 adds a *stored generated column* (`speed_limit_segments.geometry_key`) and an
 index over it. Adding a stored generated column rewrites the whole table, and drizzle's migrator applies
 all pending migrations in **one transaction**, so the table is held under `ACCESS EXCLUSIVE` — neither
-readable nor writable — until that transaction commits. Roughly **20 s per million segments**
-(measured on the K-A branch: 0.44 M rows ≈ 9 s, see `schema.md`; extrapolated, not yet measured, to
-**≈ 5 min at 15 M rows** — to be re-measured on a copy of the real Europe database). The static-data
-version is bumped once, so clients re-download their packages (every segment now carries `segmentKey`).
+readable nor writable — until that transaction commits. **20–30 s per million segments**: 21 s on the K-A
+branch (synthetic rows, `schema.md`), and **373.6 s for the real 12.08 M-row Europe database** (31 s per million;
+a copy of the `tn-europe` volume in a container with 2.5 GB of memory). Plan **≈ 6 minutes at 12 M rows, ≈ 8 at 15 M**.
+The static-data version is bumped once, so clients re-download their packages (every segment now carries `segmentKey`).
 
 **What you see.** The migrate step prints a `WARNING: pending migrations take a heavy lock` block with the
 table and its row estimate *before* it starts. In Docker the migration runs when the container starts,
@@ -257,8 +257,8 @@ shows the `ALTER TABLE` while it runs.
 | Situation | Impact |
 |---|---|
 | New database (fresh install, tests, the integration suite) | none — the tables are empty |
-| Node without users, or before the big import | none that matters; 5 min of nobody waiting |
-| Node upgrading from a release *before* K-A **with** users and Europe-sized data | a maintenance window of ≈ 20 s per million segments — announce it, take a `pg_dump` first, run `npm run db:migrate` (or the container's migrate step) *before* starting the new server |
+| Node without users, or before the big import | none that matters; 6 min of nobody waiting |
+| Node upgrading from a release *before* K-A **with** users and Europe-sized data | a maintenance window of 20–30 s per million segments — announce it, take a `pg_dump` first, run `npm run db:migrate` (or the container's migrate step) *before* starting the new server |
 
 The way to avoid the window altogether is to take it early: **migrate a big node while it has no users** (the
 Europe node `tn-europe` is upgraded before the network opens), and every later database either starts
@@ -273,12 +273,11 @@ columns (no rewrite since PostgreSQL 11), `CREATE INDEX CONCURRENTLY`, a backfil
 
 1. **A stored generated column has no online form** on PostgreSQL 16 (the supported image; PostgreSQL 18 adds
    *virtual* generated columns, which need no rewrite but are not what the images ship).
-2. **Plain column + trigger + batched backfill + concurrent index** is online, but: the backfill updates every
-   row once, which is expected to double the table and to write each row into the indexes again until vacuum
-   (after a bulk import the pages are full, so hardly any update is HOT) — a lot of WAL and a longer total run
-   than the rewrite. *That expectation is an argument, not yet a measurement*: `npm run measure-scale -- --phase
-   keycolumn` runs both variants on scratch tables of a copy of the database and reports time, WAL and table
-   growth; the numbers go here once the copy of the real Europe data has been measured.
+2. **Plain column + trigger + batched backfill + concurrent index** is online, but heavier — measured with
+   `npm run measure-scale -- --phase keycolumn` on 1,000,000 rows of the real table: the backfill updates every
+   row once (after a bulk import the pages are full, so hardly any update is HOT), so against the rewrite it took
+   **+28 % time (42.1 s vs 32.9 s), +57 % WAL (610 vs 389 MB), and left the table about twice as large (393 vs 267 MB)
+   and the indexes +53 % (193 vs 126 MB)** until a `VACUUM FULL`; the keys came out identical.
    `CREATE INDEX CONCURRENTLY` cannot run inside the migrator's transaction, so the migrate step would
    need a second, non-transactional phase; until the backfill has finished the overlay would not match some
    segments, so a "keys ready" state like the package `ready` flag would be needed to avoid serving wrong
@@ -373,7 +372,7 @@ away from their defaults:
 | A speed-limit correction I expected isn't showing | Below threshold (`list --status proposed`, needs `COMMUNITY_CORRECTIONS_CONFIRMATIONS_REQUIRED` *net* confirmations — denials count against it), a tie between two values (imported value stays), reset by an operator (`show <segment>`), or the votes came from a banned reporter |
 | Corrections proposed on another server never arrive | That server's votes were unsigned (node-local by design), it has corrections off, or your vote pull can't reach it — look for `federation: speed-limit vote pull from peer failed` in the logs |
 | Users get `422 CORRECTION_VALUE_NOT_ON_STEP` / `..._OUT_OF_RANGE` | The configured step/range (`GET /v1/config` → `communityCorrections`); relax `COMMUNITY_CORRECTIONS_VALUE_STEP` or the bounds if real limits are being refused |
-| Migration 0007 seems stuck | It is rewriting the segment table (about 20 s per million rows); check `pg_stat_activity` before interrupting |
+| Migration 0007 seems stuck | It is rewriting the segment table (20–30 s per million rows, 6 min at 12 M); check `pg_stat_activity` before interrupting |
 | `FEDERATION_PUBLIC_ADDRESS is required whenever FEDERATION_ENABLED=true` at startup | Set both together — see "Joining the network" step 2 |
 | Join to a seed fails at startup, logged as a warning | Seed unreachable, wrong URL, or its `excludedNodeIds` includes you — check the seed's own logs/directory if you can reach an operator |
 | A peer never shows up in `GET /v1/federation/peers` even though you're sure they joined | Discovery is one-hop, join-time only (`federation-protocol.md` §7) — if you learned about them only via a third party's gossip and never joined them directly, and that third party never re-gossips, you may simply never have a direct relationship; join them directly if you need one |
