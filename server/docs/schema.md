@@ -76,8 +76,16 @@ transactionally alongside `hazard_confirmations` inserts, not computed via
 `event_log.payload->>'type'` can carry it for camera-namespace events, see
 below) but is structurally impossible to find in this table's `type` column.
 
+Seed reports (`source = 'seed'`, migration 0007) additionally carry `source_feed`
+(which import feed), `external_id` (that feed's own id) and `last_seen_run` (the
+import run that last saw the row; a complete run retires what it did not see) —
+all NULL for community reports. `(source_feed, external_id)` is unique where
+`source_feed` is not null, which is what makes the periodic import an upsert.
+`source_license` is mandatory for seed rows (API-enforced). See api.md "Seed reports".
+
 Indexes: GIST on `position`; btree on `(region_tile, status)`,
-`(status, expires_at)`, `type`.
+`(status, expires_at)`, `type`; partial UNIQUE on `(source_feed, external_id)`
+where `source_feed is not null`.
 
 ### `event_log`
 Append-only. `sequence` (a plain integer PK, not bigint — at any scale this

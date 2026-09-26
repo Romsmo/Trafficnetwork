@@ -557,6 +557,45 @@ Row shapes:
 { "lat": 52.5, "lng": 13.4, "source": "seed", "sourceLicense": "unclear" }
 ```
 
+### Seed reports (roadworks): `POST /v1/bulk-import/seed-reports` and `.../retire`
+
+For authoritative, **time-limited** reports that a periodic import keeps in step with its source — today roadworks
+from national access points. They are ordinary `hazard_reports` rows (`type: "construction"`, `source: "seed"`), so
+clients read them through the normal hazard endpoints, snapshot and delta. Unlike the three static-entity endpoints above,
+seed reports **do** append event-log entries (they are dynamic data), but only for real changes.
+
+```jsonc
+// POST /v1/bulk-import/seed-reports  — upsert one batch (1..5000 reports) of a feed
+{
+  "feedId": "de-autobahn",            // lowercase [a-z0-9._-], ≤64: which import feed
+  "runId": "8f0c3a…",                 // any id, new per import run (see retire)
+  "sourceLicense": "Licence Ouverte 2.0", // mandatory provenance, ≤200
+  "reports": [
+    { "externalId": "2023-001923--vi-bs.…", // the feed's own id, ≤200 — with feedId the row's identity
+      "type": "construction",               // only value for now
+      "lat": 48.8718, "lng": 11.4677,
+      "endsAt": "2026-12-31T06:00:00+01:00", // optional, offset required. The report expires then.
+      "ttlHours": 168 }                       // optional (1..2160): lifetime when there is no endsAt; default = HAZARD_EXPIRY_CONSTRUCTION_DAYS
+  ]
+}
+// → 200 { "created": n, "reactivated": n, "updated": n, "refreshed": n, "skippedEnded": n, "duplicatesInRequest": n }
+```
+
+* **Idempotent.** Re-sending a batch changes nothing. A report is identified by `(feedId, externalId)`; the last occurrence within one request wins.
+* **Events only for real changes:** new or re-activated → `ReportCreated`; moved by more than 100 m or a changed source end date (> 1 min) → `ReportConfirmed` carrying the new full state; a plain re-sighting is silent, so an hourly import of thousands of unchanged roadworks does not flood the log or the WebSocket subscribers. Events have `source: "seed"`.
+* **Expiry:** the source's `endsAt` when given (a report whose end is already past is not created — `skippedEnded`). Without it the report lives `ttlHours` and is **renewed on every sighting** — if the importer stops for good, the rows age out by themselves.
+* **Not a community submission:** no moderation gate, no per-device rate limit, no confirm/deny bookkeeping. A community report near a seeded one still merges into it as a confirmation (`DUPLICATE_MERGE_RADIUS_METERS`). Seed events are **not federated** (no device signature); like static data, each node imports its own.
+
+```jsonc
+// POST /v1/bulk-import/seed-reports/retire — after a run that fetched the COMPLETE feed
+{ "feedId": "de-autobahn", "runId": "8f0c3a…" }
+// → 200 { "retired": n }   — active reports of that feed that this run did not re-send are over:
+//   status "expired" + a ReportExpired event (exactly what the expiry worker does)
+// → 409 SEED_RUN_EMPTY     — the run wrote no report of this feed: an empty or failed fetch must not wipe a feed
+```
+
+Provenance columns on the row: `source_feed`, `external_id`, `last_seen_run` (see schema.md).
+
 ## Real-time push (WebSocket)
 
 `GET /v1/ws` (upgrade). Auth is a message, not a query-string token (query
