@@ -44,7 +44,8 @@ mapping of these is sparse, so expect far fewer than the 45 k cameras — but no
 | rollback: `DROP COLUMN` + `DROP TYPE` | 2 + 2 ms |
 | rows before / after, rows carrying the default | 1,000,000 / 1,000,000 / 1,000,000 |
 
-On the real 45,025 rows it is faster still (the one size-dependent statement, `VALIDATE`, would take about 4 ms). "Work in blocks" (rule 4 of the
+Run for real on the copy of the Europe node's database (after 0007/0008, 45,025 cameras): **2.1 s including the start of the Node
+process**, no lock warning, all 45,025 rows `fixedSpeedCamera`. On the real 45,025 rows it is faster still (the one size-dependent statement, `VALIDATE`, would take about 4 ms). "Work in blocks" (rule 4 of the
 prompt) is therefore not needed for *this* migration — there is no backfill to block. What the plan does instead is what the rule is
 for: no long transaction, no lock that lasts. `ALTER TABLE … ADD COLUMN` takes `ACCESS EXCLUSIVE` for the catalogue update only.
 (On `tn-europe` the migrator will still run 0007 first, which *is* the known 5-minute rewrite of the segment table; 0009 adds nothing to it.)
