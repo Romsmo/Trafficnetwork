@@ -47,8 +47,12 @@ describe("migration 0009 on a database with legacy data", () => {
     dirs.push(dir);
     cpSync(MIGRATIONS, dir, { recursive: true });
     const journalPath = path.join(dir, "meta", "_journal.json");
-    const journal = JSON.parse(readFileSync(journalPath, "utf8")) as { entries: { tag: string }[] };
-    journal.entries = journal.entries.filter((e) => e.tag !== TAG_0009);
+    const journal = JSON.parse(readFileSync(journalPath, "utf8")) as { entries: { idx: number; tag: string }[] };
+    // "Before 0009" means idx strictly less than 0009's — not merely "not 0009" — so a migration added
+    // after 0009 (e.g. 0010 seed-reports) doesn't sneak into this "legacy" fixture (found when 0010 landed:
+    // this used to filter by tag alone, which left every later migration in the journal, unlike its name/comment).
+    const idx0009 = journal.entries.find((e) => e.tag === TAG_0009)!.idx;
+    journal.entries = journal.entries.filter((e) => e.idx < idx0009);
     writeFileSync(journalPath, JSON.stringify(journal, null, 2));
     return dir;
   }
