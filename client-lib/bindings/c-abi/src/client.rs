@@ -461,20 +461,30 @@ pub unsafe extern "C" fn tn_client_start_realtime(client: *mut c_void) -> i32 {
     if client.is_null() {
         return -1;
     }
-    // Safety: a live handle, per the contract.
-    let handle = unsafe { &*client.cast::<Handle>() };
-    let mut stop_slot = handle.realtime_stop.lock().unwrap();
-    if stop_slot.is_some() {
-        return 0; // already running
+    // Every other function here that touches a `Handle` is wrapped the same
+    // way (see `tn_client_call`/`tn_client_free`) — unwinding a panic across
+    // an `extern "C"` boundary is undefined behavior, not just an ugly crash,
+    // so a poisoned `Mutex` (or anything else panicking below) must never be
+    // allowed past this point uncaught.
+    let outcome = catch_unwind(AssertUnwindSafe(|| {
+        // Safety: a live handle, per the contract.
+        let handle = unsafe { &*client.cast::<Handle>() };
+        let mut stop_slot = handle.realtime_stop.lock().unwrap();
+        if stop_slot.is_some() {
+            return; // already running
+        }
+        let stop = Arc::new(AtomicBool::new(false));
+        *stop_slot = Some(stop.clone());
+        drop(stop_slot);
+        let client_arc = handle.client.clone();
+        runtime().spawn(async move {
+            let _ = client_arc.run_realtime(&stop).await;
+        });
+    }));
+    match outcome {
+        Ok(()) => 0,
+        Err(_) => -1,
     }
-    let stop = Arc::new(AtomicBool::new(false));
-    *stop_slot = Some(stop.clone());
-    drop(stop_slot);
-    let client_arc = handle.client.clone();
-    runtime().spawn(async move {
-        let _ = client_arc.run_realtime(&stop).await;
-    });
-    0
 }
 
 /// Signals a running realtime task to stop and returns at once — it stops
@@ -489,11 +499,15 @@ pub unsafe extern "C" fn tn_client_stop_realtime(client: *mut c_void) {
     if client.is_null() {
         return;
     }
-    // Safety: a live handle, per the contract.
-    let handle = unsafe { &*client.cast::<Handle>() };
-    if let Some(stop) = handle.realtime_stop.lock().unwrap().take() {
-        stop.store(true, std::sync::atomic::Ordering::Relaxed);
-    }
+    // See `tn_client_start_realtime`'s comment on why this must not let a
+    // panic unwind across the FFI boundary.
+    let _ = catch_unwind(AssertUnwindSafe(|| {
+        // Safety: a live handle, per the contract.
+        let handle = unsafe { &*client.cast::<Handle>() };
+        if let Some(stop) = handle.realtime_stop.lock().unwrap().take() {
+            stop.store(true, std::sync::atomic::Ordering::Relaxed);
+        }
+    }));
 }
 
 /// The library's version, as a string to free with `tn_free_string`.
