@@ -101,6 +101,16 @@ Löst das letzte Stück der Local-First-mit-Push-Zusage ein: bis hierhin gab es 
 - **C-ABI:** `tn_client_start_realtime(handle)`/`tn_client_stop_realtime(handle)` — spawnt die Schleife auf der ohnehin schon vorhandenen Tokio-Runtime des C-ABI-Crates; die Host-App braucht dafür keinen eigenen Thread.
 - **Bekannte Vereinfachung:** eine Kacheländerung während eine Verbindung offen ist, wirkt erst beim nächsten Wiederverbinden (der Protokolltreiber abonniert nur einmal, direkt nach dem Auth-Handshake) — im Code und in `docs/api.md` vermerkt, nicht stillschweigend hingenommen.
 
+## Mehrknoten-Integrationstests gegen echte Server (Zusatz B2)
+
+Belegt, dass Discovery/Failover/Föderation im Zusammenspiel wirklich halten — gegen echte Server-Prozesse, nicht gegen den geskripteten Konformitäts-Mock (der bleibt für binding-übergreifende Alltagsszenarien richtig, ersetzt das hier nicht).
+
+- **`server/tests/support/multi-node-harness.ts`** (neu, reines Testwerkzeug — keine Server-Anwendungscode-Änderung): startet echte `buildApp`-Prozesse mit je eigener Testcontainers-Postgres-Datenbank, steuerbar über eine kleine Admin-HTTP-API (Knoten anlegen/stoppen, Fehler gezielt einspeisen über einen vorgeschalteten Proxy — für „gefälschte"/„zurückgehaltene" Daten, ohne den Server selbst je absichtlich fehlverhalten zu lassen).
+- **`client-lib/core/tests/multi_node.rs`** (neu): echter `TrafficNetworkClient` gegen den Harness — Kaltstart nur mit Seed, Ausfall eines Knotens mitten im Sync, dieselbe Meldung über zwei Server nur einmal gezeigt, Offline-Meldung an einem anderen Server abgeliefert, verfälschte Antwort nicht stillschweigend akzeptiert. **Bewusst nicht versucht:** „Zurückhalten erkannt" Ende-zu-Ende — das feste 5-Minuten-Toleranzfenster (`TOLERANCE_WINDOW_MS`) macht das gegen einen echten Server unpraktikabel schnell testbar; die Vergleichslogik hat volle Unit-Abdeckung, `SyncEngine::with_withholding_sample_rate` (neu) macht wenigstens die Prüfung selbst zu 100 % statt 10 % testbar.
+- **Neuer CI-Job** `multi-node` (Docker + echtes Postgres, wie `server-ci.yml`s eigener Integrationstest-Job).
+
+**Zwei echte Cross-Language-Fehler gefunden** (serverseitig, hier nicht behoben — keine Server-Änderungen in diesem Zusatz, siehe `docs/status.md`): mehrere serverseitige Zeitstempel-Spalten (`reportedAt`/`expiresAt`/`occurredAt`) kommen als Postgres-eigenes `timestamptz`-Textformat zurück (z. B. `"2026-09-27 14:45:15.923718+00"`), nicht als das dokumentierte RFC 3339 (`sync::server_time` toleriert jetzt beides). Und `event_log.sequence` (`snapshotSequence`/`sequence`/`nextSince`) kommt als JSON-*String* zurück statt als Zahl, überall dort, wo der Server per rohem `sql`-Aufruf statt über Drizzles typisierten Query-Builder liest — das ließ jeden Sync mit `SyncError::InvalidResponse` scheitern, noch bevor er `set_cursor` erreichte, was von außen exakt wie nie replizierende Daten aussieht (`sync::types::deserialize_sequence`/`_opt` tolerieren jetzt beides). Zusätzlich ein echter Fehler im Kern selbst gefunden und behoben: `tn_client_start_realtime`/`tn_client_stop_realtime` fingen als einzige C-ABI-Funktionen keine Panics ab (jede andere Funktion hier schon) — ein über die `extern "C"`-Grenze laufender Panic ist undefiniertes Verhalten und zeigte sich in CI als echter SIGSEGV.
+
 ## Bauen & Testen
 
 Rust ist auf der Entwicklungsmaschine dieser Session nicht installiert — Verifikation ausschließlich über `.github/workflows/client-lib-ci.yml` (native build+test+clippy+fmt als eigener Job, `wasm32-unknown-unknown`-Build, Cross-Language-Krypto-Vektor, cbindgen-Header-Generierung, `conformance-python` gegen den geskripteten Server). Mit lokalem Rust: `cargo build --workspace`, `cargo test --workspace` in `client-lib/`.
@@ -122,7 +132,7 @@ Fortsetzung nach PR #10 (`rework/client-lib-bindings`, ersetzt F-C4-Rest/F-C5 du
 |---|---|---|
 | B0 | Plan (echter Push zuerst, dann Mehrknoten-Belege, dann Bindings nach Schwierigkeitsgrad), Entscheidungen mit Begründung | ✅ |
 | B1 | Echter WebSocket-Transport (`tokio-tungstenite`), `platform::Sleep`, Wiederverbindung mit Backoff + Lückenschluss, C-ABI-Start/Stop | ✅ |
-| B2 | Mehrknoten-Integrationstests gegen echte Server-Prozesse | 🔜 |
-| B3 | WASM + JS/TS | |
+| B2 | Mehrknoten-Integrationstests gegen echte Server-Prozesse | ✅ |
+| B3 | WASM + JS/TS | 🔜 |
 | B4 | Kotlin, Swift, Dart | |
 | B5 | React Native, Paketierung, Konformitätstests über mehrere Bindings — **Abschluss** | |
