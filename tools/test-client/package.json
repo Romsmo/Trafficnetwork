@@ -1,0 +1,15 @@
+{
+  "name": "@trafficnetwork/test-client",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Local test tool for a Trafficnetwork server (CLI + local web UI). Talks plain HTTP/WebSocket, not client-lib.",
+  "type": "module",
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "cli": "node src/cli.mjs",
+    "serve": "node src/cli.mjs serve"
+  },
+  "dependencies": {
+    "h3-js": "^4.1.0"
+  }
+}

@@ -1,0 +1,7 @@
+{
+  "servers": [
+    { "url": "http://localhost:3000", "appKey": { "clientId": "client_...", "clientSecret": "..." } },
+    { "url": "http://localhost:3001", "appKey": { "clientId": "client_...", "clientSecret": "..." } }
+  ],
+  "maxLookupDistanceM": 200
+}

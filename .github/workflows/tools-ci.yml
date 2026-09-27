@@ -1,0 +1,32 @@
+name: tools-ci
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "tools/test-client/**"
+      - ".github/workflows/tools-ci.yml"
+  pull_request:
+    paths:
+      - "tools/test-client/**"
+      - ".github/workflows/tools-ci.yml"
+
+jobs:
+  install-smoke:
+    # tools/test-client has no TypeScript/lint/test setup of its own (plain .mjs, a small
+    # local-only helper — see tools/README.md); this mirrors the install-smoke jobs the
+    # other packages have: prove a fresh install actually boots, not a full test suite.
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: tools/test-client
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci
+      - run: node src/cli.mjs --help
+      - run: node -e "require('node:fs').readFileSync('src/core.mjs','utf8')" # syntax sanity, no network
+      - run: node --check src/core.mjs
+      - run: node --check src/web.mjs
