@@ -306,6 +306,7 @@ async fn the_same_report_seen_through_two_servers_is_shown_once() {
     wait_for(
         || async {
             let probe = client_for(&b, &temp_storage("dedup-probe"));
+            probe.update_position(48.5, 9.5, None).ok()?;
             probe.sync().await.ok()?;
             let items = probe
                 .get_nearby(48.5, 9.5, 500.0, &[NearbyCategory::Hazards])
@@ -335,6 +336,7 @@ async fn the_same_report_seen_through_two_servers_is_shown_once() {
         },
     )
     .unwrap();
+    client.update_position(48.5, 9.5, None).unwrap();
     client.sync().await.unwrap();
     let items = client
         .get_nearby(48.5, 9.5, 500.0, &[NearbyCategory::Hazards])
