@@ -64,6 +64,13 @@
       "when": 1790343238467,
       "tag": "0008_static_packages",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1790433506774,
+      "tag": "0009_persistent_enforcement_devices",
+      "breakpoints": true
     }
   ]
 }

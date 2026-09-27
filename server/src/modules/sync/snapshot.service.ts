@@ -3,7 +3,11 @@ import type { Queryable } from "../../db/client.js";
 import { findAllSpeedLimitSegments } from "../../db/queries/speed-limit-segments.js";
 import { findAllStaticSigns } from "../../db/queries/static-signs.js";
 import { findHazardReportsByTiles } from "../../db/queries/hazard-reports.js";
-import { findAllActiveFixedSpeedCameras, type FixedSpeedCameraApi } from "../../db/queries/fixed-speed-cameras.js";
+import {
+  findAllActiveEnforcementDevices,
+  findAllActiveFixedSpeedCameras,
+  type FixedSpeedCameraApi,
+} from "../../db/queries/fixed-speed-cameras.js";
 import type { HazardType } from "../../config/constants.js";
 import { resolveSyncHazardTypes } from "../cameras/filter.js";
 
@@ -12,8 +16,10 @@ export interface SnapshotResult {
   speedLimitSegments: Awaited<ReturnType<typeof findAllSpeedLimitSegments>>;
   staticSigns: Awaited<ReturnType<typeof findAllStaticSigns>>;
   hazardReports: Awaited<ReturnType<typeof findHazardReportsByTiles>>;
-  /** Only populated when SPEED_CAMERA_NAMESPACE_ENABLED — omitted (empty) otherwise. */
+  /** Only populated when SPEED_CAMERA_NAMESPACE_ENABLED — omitted (empty) otherwise. The classic speed cameras only, as it has always meant. */
   fixedSpeedCameras: FixedSpeedCameraApi[];
+  /** Add-on D. Every persistent enforcement device (speed cameras included), each with `cameraType`. Same gating as `fixedSpeedCameras`. */
+  enforcementDevices: FixedSpeedCameraApi[];
 }
 
 /**
@@ -56,11 +62,13 @@ export async function generateSnapshot(
   const includeStaticData = opts.includeStaticData ?? true;
   return db.transaction(
     async (tx) => {
-      const [sequenceRows, speedLimitSegments, staticSigns, fixedSpeedCameras] = await Promise.all([
+      const includeCameras = includeStaticData && opts.cameraNamespaceEnabled;
+      const [sequenceRows, speedLimitSegments, staticSigns, fixedSpeedCameras, enforcementDevices] = await Promise.all([
         tx.execute<{ max: number | null }>(sql`select max(sequence) as max from event_log`),
         includeStaticData ? findAllSpeedLimitSegments(tx, opts.communityCorrectionsEnabled) : Promise.resolve([]),
         includeStaticData ? findAllStaticSigns(tx) : Promise.resolve([]),
-        includeStaticData && opts.cameraNamespaceEnabled ? findAllActiveFixedSpeedCameras(tx) : Promise.resolve([]),
+        includeCameras ? findAllActiveFixedSpeedCameras(tx) : Promise.resolve([]),
+        includeCameras ? findAllActiveEnforcementDevices(tx) : Promise.resolve([]),
       ]);
       const snapshotSequence = sequenceRows[0]?.max ?? 0;
 
@@ -68,7 +76,7 @@ export async function generateSnapshot(
       const hazardReports =
         opts.tiles && opts.tiles.length > 0 ? await findHazardReportsByTiles(tx, opts.tiles, allowedTypes) : [];
 
-      return { snapshotSequence, speedLimitSegments, staticSigns, hazardReports, fixedSpeedCameras };
+      return { snapshotSequence, speedLimitSegments, staticSigns, hazardReports, fixedSpeedCameras, enforcementDevices };
     },
     { isolationLevel: "repeatable read", accessMode: "read only" },
   );

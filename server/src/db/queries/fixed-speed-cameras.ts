@@ -1,13 +1,23 @@
 import { sql, type SQL } from "drizzle-orm";
 import type { Queryable } from "../client.js";
 import { envelopeOverlap, type Envelope } from "../../lib/geo-bbox.js";
+import type { PersistentCameraType } from "../../config/constants.js";
+import { pgArray } from "../pg-array.js";
 
+/**
+ * A permanently installed enforcement device (add-on D: the table holds speed cameras, red-light
+ * and distance devices). The name predates the generalisation and is kept — see
+ * docs/persistent-enforcement-devices.md, "What deliberately does not change".
+ */
 export interface FixedSpeedCameraApi {
   id: string;
-  /** Not a stored column — stamped here so this shape matches the other four
-   *  camera-adjacent types when they're combined in modules/cameras/routes.ts,
-   *  and so event payloads carry a "type" the generic delta type-filter can read. */
-  type: "fixedSpeedCamera";
+  /** Equal to `cameraType` — a value of the hazard enum, so this shape matches the other
+   *  camera-adjacent types when they're combined in modules/cameras/routes.ts, and so event
+   *  payloads carry a "type" the generic delta type-filter can read. Every row that existed
+   *  before the column is "fixedSpeedCamera". */
+  type: PersistentCameraType;
+  /** Which kind of device this is (stored column `camera_type`). */
+  cameraType: PersistentCameraType;
   position: unknown; // GeoJSON Point
   status: "active" | "removed";
   removedAt: string | null;
@@ -26,6 +36,7 @@ export interface FixedSpeedCameraApi {
 
 interface Row extends Record<string, unknown> {
   id: string;
+  camera_type: PersistentCameraType;
   position_geojson: unknown;
   status: "active" | "removed";
   removed_at: string | null;
@@ -39,7 +50,8 @@ interface Row extends Record<string, unknown> {
 function toApi(row: Row): FixedSpeedCameraApi {
   return {
     id: row.id,
-    type: "fixedSpeedCamera",
+    type: row.camera_type,
+    cameraType: row.camera_type,
     position: row.position_geojson,
     status: row.status,
     removedAt: row.removed_at,
@@ -52,34 +64,75 @@ function toApi(row: Row): FixedSpeedCameraApi {
 }
 
 const SELECT_COLUMNS = sql`
-  c.id, ST_AsGeoJSON(c.position)::json as position_geojson, c.status, c.removed_at,
+  c.id, c.camera_type, ST_AsGeoJSON(c.position)::json as position_geojson, c.status, c.removed_at,
   c.source, c.source_license, c.imported_at, c.last_confirmed_at,
   (select count(*)::int from camera_removal_reports r where r.camera_id = c.id) as removal_report_count
 `;
 
-/** Full active set — used by the snapshot endpoint when the namespace flag is on (docs/concept.md section 3.1: synced globally like other static entities, not tile-filtered). */
+/**
+ * The classic speed cameras only — what `fixedSpeedCameras` in the snapshot and in the packages has always
+ * meant. Used by the snapshot endpoint when the namespace flag is on (docs/concept.md section 3.1: synced
+ * globally like other static entities, not tile-filtered). Every persistent device: findAllActiveEnforcementDevices.
+ */
 export async function findAllActiveFixedSpeedCameras(db: Queryable): Promise<FixedSpeedCameraApi[]> {
+  const rows = await db.execute<Row>(sql`
+    select ${SELECT_COLUMNS} from fixed_speed_cameras c
+    where c.status = 'active' and c.camera_type = 'fixedSpeedCamera'
+  `);
+  return rows.map(toApi);
+}
+
+/** Every active persistent device of every kind (snapshot field `enforcementDevices`). */
+export async function findAllActiveEnforcementDevices(db: Queryable): Promise<FixedSpeedCameraApi[]> {
   const rows = await db.execute<Row>(sql`
     select ${SELECT_COLUMNS} from fixed_speed_cameras c where c.status = 'active'
   `);
   return rows.map(toApi);
 }
 
-export async function findFixedSpeedCamerasNearby(
+/** Active persistent devices of the given kinds within a radius. */
+export async function findEnforcementDevicesNearby(
   db: Queryable,
   lat: number,
   lng: number,
   radiusM: number,
+  types: readonly PersistentCameraType[],
 ): Promise<FixedSpeedCameraApi[]> {
+  if (types.length === 0) return [];
   const rows = await db.execute<Row>(sql`
     select ${SELECT_COLUMNS} from fixed_speed_cameras c
     where c.status = 'active'
+      and c.camera_type = any(${pgArray(types)}::camera_type[])
       and ST_DWithin(c.position::geography, ST_SetSRID(ST_MakePoint(${lng}, ${lat}), 4326)::geography, ${radiusM})
   `);
   return rows.map(toApi);
 }
 
-/** FOR UPDATE — locks the candidate so two concurrent camera reports at the same spot can't race. */
+/**
+ * Candidate active persistent devices of the given kinds whose position lies in one of the envelopes
+ * (a superset of the tiles asked for, found through the GiST index) — the caller keeps the ones that are
+ * really in a requested tile. Persistent devices have no region_tile column: adding one would need a backfill.
+ */
+export async function findEnforcementDeviceCandidatesInEnvelopes(
+  db: Queryable,
+  envelopes: readonly Envelope[],
+  types: readonly PersistentCameraType[],
+): Promise<FixedSpeedCameraApi[]> {
+  if (types.length === 0 || envelopes.length === 0) return [];
+  const rows = await db.execute<Row>(sql`
+    select ${SELECT_COLUMNS} from fixed_speed_cameras c
+    where c.status = 'active'
+      and c.camera_type = any(${pgArray(types)}::camera_type[])
+      and ${envelopeOverlap(sql`c.position`, envelopes)}
+  `);
+  return rows.map(toApi);
+}
+
+/**
+ * FOR UPDATE — locks the candidate so two concurrent camera reports at the same spot can't race.
+ * Only speed cameras merge: a community `fixedSpeedCamera` report next to a red-light or distance device
+ * (the same junction) is a different device and must not be swallowed by it.
+ */
 export async function findDuplicateFixedSpeedCamera(
   db: Queryable,
   lat: number,
@@ -89,6 +142,7 @@ export async function findDuplicateFixedSpeedCamera(
   const rows = await db.execute<Row>(sql`
     select ${SELECT_COLUMNS} from fixed_speed_cameras c
     where c.status = 'active'
+      and c.camera_type = 'fixedSpeedCamera'
       and ST_DWithin(c.position::geography, ST_SetSRID(ST_MakePoint(${lng}, ${lat}), 4326)::geography, ${radiusM})
     order by c.imported_at asc
     limit 1
@@ -147,8 +201,19 @@ export async function markFixedSpeedCameraRemoved(db: Queryable, id: string): Pr
   return updated;
 }
 
-/** Candidate active cameras of one partition tile, ordered by id — see tileStaticSignsQuery. */
+/** Candidate active speed cameras of one partition tile, ordered by id — see tileStaticSignsQuery. */
 export function tileFixedSpeedCamerasQuery(envelopes: readonly Envelope[]): { query: SQL; map: (row: Record<string, unknown>) => FixedSpeedCameraApi } {
+  return {
+    query: sql`
+      select ${SELECT_COLUMNS} from fixed_speed_cameras c
+      where c.status = 'active' and c.camera_type = 'fixedSpeedCamera' and ${envelopeOverlap(sql`c.position`, envelopes)} order by c.id
+    `,
+    map: (row) => toApi(row as Row),
+  };
+}
+
+/** Candidate active persistent devices of every kind of one partition tile (package key `enforcementDevices`), ordered by id. */
+export function tileEnforcementDevicesQuery(envelopes: readonly Envelope[]): { query: SQL; map: (row: Record<string, unknown>) => FixedSpeedCameraApi } {
   return {
     query: sql`
       select ${SELECT_COLUMNS} from fixed_speed_cameras c

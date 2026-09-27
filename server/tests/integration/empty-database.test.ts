@@ -94,6 +94,7 @@ describe("empty database", () => {
       staticSigns: [],
       hazardReports: [],
       fixedSpeedCameras: [],
+      enforcementDevices: [],
     });
   });
 

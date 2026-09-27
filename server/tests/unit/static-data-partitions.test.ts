@@ -32,10 +32,11 @@ function staticSign(id: string, coordinates: [number, number]): StaticSignApi {
   };
 }
 
-function fixedSpeedCamera(id: string, coordinates: [number, number]): FixedSpeedCameraApi {
+function fixedSpeedCamera(id: string, coordinates: [number, number], cameraType: FixedSpeedCameraApi["cameraType"] = "fixedSpeedCamera"): FixedSpeedCameraApi {
   return {
     id,
-    type: "fixedSpeedCamera",
+    type: cameraType,
+    cameraType,
     position: { type: "Point", coordinates },
     status: "active",
     removedAt: null,
@@ -107,6 +108,36 @@ describe("buildPartitions", () => {
     );
     const sydneyPartition = [...partitions.values()].find((p) => p.staticSigns.length > 0);
     expect(sydneyPartition!.speedLimitSegments).toEqual([]);
+  });
+});
+
+describe("buildPartitions — persistent enforcement devices (add-on D)", () => {
+  const camera = fixedSpeedCamera("cam-1", [BERLIN[0] + 0.01, BERLIN[1] + 0.01]);
+  const redLight = fixedSpeedCamera("light-1", [BERLIN[0] + 0.02, BERLIN[1] + 0.02], "redLightCamera");
+
+  it("puts every device into `enforcementDevices` of its partition and leaves `fixedSpeedCameras` to the speed cameras", () => {
+    const partitions = buildPartitions(
+      { speedLimitSegments: [], staticSigns: [], fixedSpeedCameras: [camera], enforcementDevices: [camera, redLight] },
+      2,
+    );
+    const [partition] = [...partitions.values()];
+    expect(partition!.fixedSpeedCameras.map((c) => c.id)).toEqual(["cam-1"]);
+    expect(partition!.enforcementDevices!.map((c) => c.cameraType)).toEqual(["fixedSpeedCamera", "redLightCamera"]);
+  });
+
+  it("omits the key when a partition has no device — the bytes, and so the hash, stay what they were before the key existed", () => {
+    const [partition] = [...buildPartitions({ speedLimitSegments: [], staticSigns: [staticSign("sign-1", BERLIN)], fixedSpeedCameras: [] }, 2).values()];
+    expect("enforcementDevices" in partition!).toBe(false);
+    const json = serializePartition(partition!).json;
+    expect(json).not.toContain("enforcementDevices");
+    expect(json.endsWith(`"fixedSpeedCameras":[]}`)).toBe(true);
+  });
+
+  it("appends the key after `fixedSpeedCameras`, so the leading bytes of a package never move", () => {
+    const [partition] = [...buildPartitions({ speedLimitSegments: [], staticSigns: [], fixedSpeedCameras: [], enforcementDevices: [redLight] }, 2).values()];
+    const json = serializePartition(partition!).json;
+    expect(json.indexOf(`"fixedSpeedCameras":[]`)).toBeGreaterThan(0);
+    expect(json.indexOf(`"enforcementDevices"`)).toBeGreaterThan(json.indexOf(`"fixedSpeedCameras"`));
   });
 });
 

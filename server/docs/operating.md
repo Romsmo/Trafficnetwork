@@ -298,6 +298,46 @@ statement carries a comment — `-- lock-ok(<table>): <why, how long>` (the migr
 warning with the table's row estimate) or `-- lock-trivial: <why it is cheap>` — and this section names the
 window. Migrations 0001–0006 predate the policy; they ran on small or empty tables.
 
+## Persistent enforcement devices (add-on D): upgrading and rolling back 0009
+
+`fixed_speed_cameras` now holds every permanently installed enforcement device — speed cameras, red-light and
+distance devices (`camera_type`); design in [`persistent-enforcement-devices.md`](persistent-enforcement-devices.md),
+wire contract in `api.md` ("Persistent enforcement devices"). Migration **0009 needs no maintenance window**: it
+adds one column with a constant default, which is a catalogue change and touches no row (5 ms at 1,000,000 rows).
+Every existing row becomes a speed camera. It also makes a node rebuild its static packages once (the fingerprint
+changed) and bumps the static-data version so clients refresh.
+
+**Before the upgrade** take a backup — at least the tables the migration touches:
+
+```bash
+pg_dump -Fc -f before-0009.dump "$DATABASE_URL"
+# or, smaller: pg_dump -Fc -t fixed_speed_cameras -t camera_removal_reports -t event_log -f before-0009-cameras.dump "$DATABASE_URL"
+```
+
+and, if you like a count to compare: `select count(*) from fixed_speed_cameras;` before and after must match
+(`tests/integration/persistent-devices-migration.test.ts` runs exactly this check on a database filled in today's format).
+
+**Rolling back.** Stop the server, then run the script once (it is one transaction; a second run changes nothing):
+
+```bash
+psql -v ON_ERROR_STOP=1 -f src/db/rollback/0009_persistent_enforcement_devices.down.sql "$DATABASE_URL"
+```
+
+It drops `camera_type`, drops the `camera_type` type, removes the migration's row from `drizzle.__drizzle_migrations`
+(without which the next start of the new code would believe 0009 is applied) and bumps the static-data version. **It
+refuses — and changes nothing — while red-light or distance devices exist**: dropping the column would turn them into
+speed cameras, and the script never reclassifies data silently. Export or delete those rows on purpose, then run it again:
+
+```sql
+\copy (select * from fixed_speed_cameras where camera_type <> 'fixedSpeedCamera') to 'devices.csv' csv header
+delete from fixed_speed_cameras where camera_type <> 'fixedSpeedCamera';
+```
+
+What stays after a rollback: the label `enforcementDevice` in the `entity_type` enum (PostgreSQL cannot drop an enum
+label; nothing writes it any more). Then start the previous release; it rebuilds its packages once. Importing
+red-light or distance devices is only for servers that have this feature — an older server would store them as speed
+cameras (it ignores the unknown `cameraType`), so take them out of the import until every server you feed has been upgraded.
+
 ## Restarting, upgrading, backing up
 
 An upgrade that includes a migration with a heavy lock (0007, above) needs a maintenance window on a big node;

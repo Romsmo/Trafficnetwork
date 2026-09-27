@@ -101,7 +101,10 @@ describe("migration 0007 on a database that already holds segments", () => {
       cpSync("./src/db/migrations", scratch, { recursive: true });
       const journalPath = path.join(scratch, "meta", "_journal.json");
       const journal = JSON.parse(readFileSync(journalPath, "utf8")) as { entries: { idx: number }[] };
-      const full = JSON.parse(JSON.stringify(journal)) as typeof journal;
+      // ...and the state after 0007 alone: later migrations (0008, 0009) have their own tests and must not
+      // move the counted version, which is what this test pins to 0007.
+      const upToSeven = JSON.parse(JSON.stringify(journal)) as typeof journal;
+      upToSeven.entries = upToSeven.entries.filter((e) => e.idx <= 7);
       journal.entries = journal.entries.filter((e) => e.idx <= 6);
       writeFileSync(journalPath, JSON.stringify(journal));
 
@@ -116,7 +119,7 @@ describe("migration 0007 on a database that already holds segments", () => {
       await old.client.end();
 
       const upgraded = createDb({ DATABASE_URL: container.getConnectionUri() });
-      writeFileSync(journalPath, JSON.stringify(full));
+      writeFileSync(journalPath, JSON.stringify(upToSeven));
       await migrate(upgraded.db, { migrationsFolder: scratch });
       const rows = await upgraded.db.execute<{ geometry_key: string; speed_limit: number } & Record<string, unknown>>(sql`
         select geometry_key, speed_limit from speed_limit_segments

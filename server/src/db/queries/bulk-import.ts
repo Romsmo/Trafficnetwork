@@ -1,6 +1,7 @@
 import { sql } from "drizzle-orm";
 import { latLngToCell } from "h3-js";
 import type { Queryable } from "../client.js";
+import type { PersistentCameraType } from "../../config/constants.js";
 import { pgArray } from "../pg-array.js";
 import { bumpStaticDataVersion } from "./sync-state.js";
 import { fillMissingBaseValues } from "./speed-limit-corrections.js";
@@ -105,6 +106,8 @@ export async function bulkInsertStaticSigns(db: Queryable, rows: StaticSignImpor
 export interface FixedSpeedCameraImportRow {
   lat: number;
   lng: number;
+  /** Omitted = "fixedSpeedCamera". */
+  cameraType?: PersistentCameraType;
   source: string;
   sourceLicense?: string;
   importedAt?: string;
@@ -116,15 +119,16 @@ export async function bulkInsertFixedSpeedCameras(db: Queryable, rows: FixedSpee
 
   return db.transaction(async (tx) => {
     await tx.execute(sql`
-      insert into fixed_speed_cameras (position, source, source_license, imported_at)
-      select ST_SetSRID(ST_MakePoint(t.lng, t.lat), 4326), t.source, nullif(t.license, ''), t.imported_at
+      insert into fixed_speed_cameras (position, camera_type, source, source_license, imported_at)
+      select ST_SetSRID(ST_MakePoint(t.lng, t.lat), 4326), t.camera_type::camera_type, t.source, nullif(t.license, ''), t.imported_at
       from unnest(
         ${pgArray(rows.map((r) => String(r.lng)))}::float8[],
         ${pgArray(rows.map((r) => String(r.lat)))}::float8[],
+        ${pgArray(rows.map((r) => r.cameraType ?? "fixedSpeedCamera"))}::text[],
         ${pgArray(rows.map((r) => r.source))}::text[],
         ${pgArray(rows.map((r) => r.sourceLicense ?? ""))}::text[],
         ${pgArray(rows.map((r) => r.importedAt ?? nowIso))}::timestamptz[]
-      ) as t(lng, lat, source, license, imported_at)
+      ) as t(lng, lat, camera_type, source, license, imported_at)
     `);
     await bumpStaticDataVersion(tx);
     await markTilesDirty(tx, [...tiles]);

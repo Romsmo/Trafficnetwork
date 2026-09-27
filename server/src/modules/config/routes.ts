@@ -1,6 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import { getStaticDataVersion } from "../../db/queries/sync-state.js";
-import { CAMERA_NAMESPACE_TYPES, hazardExpiryMs, REPORTABLE_HAZARD_TYPES } from "../../config/constants.js";
+import { CAMERA_NAMESPACE_TYPES, hazardExpiryMs, PERSISTENT_CAMERA_TYPES, REPORTABLE_HAZARD_TYPES } from "../../config/constants.js";
 
 /**
  * Curated subset of server env tunables a client-lib instance must mirror
@@ -20,6 +20,10 @@ export async function registerConfigRoutes(app: FastifyInstance) {
       staticDataPartitionH3Resolution: env.STATIC_DATA_PARTITION_H3_RESOLUTION,
       speedCameraNamespaceEnabled: env.SPEED_CAMERA_NAMESPACE_ENABLED,
       cameraNamespaceHazardTypes: CAMERA_NAMESPACE_TYPES,
+      // Add-on D: the kinds of permanently installed enforcement device this server knows (never
+      // expiring, delivered in the snapshot's `enforcementDevices` and the packages). A server that
+      // predates the feature has no such key — that is how a client tells them apart.
+      persistentCameraTypes: PERSISTENT_CAMERA_TYPES,
       duplicateMergeRadiusMeters: env.DUPLICATE_MERGE_RADIUS_METERS,
       speedLimitLookupMaxDistanceMeters: env.SPEED_LIMIT_LOOKUP_MAX_DISTANCE_METERS,
       hazardExpiryMsByType: expiryByType,

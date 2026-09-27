@@ -112,12 +112,25 @@ reporter; the count drives the `active → removed` transition
 (`CAMERA_REMOVAL_THRESHOLD`). No `region_tile` column — this table is global
 like the other static entities.
 
-The other four camera-adjacent types (`mobileSpeedCamera`, `trailerCamera`,
-`redLightCamera`, `distanceControl`) do **not** get their own tables — they
-behave exactly like ordinary hazard types (10–15 min expiry, extended on
-confirmation) and live in `hazard_reports` via the `type` discriminator. Only
-`fixedSpeedCamera` — the one camera type with no automatic expiry — gets
-separate storage.
+**`camera_type` (add-on D, migration 0009)** — `camera_type` enum
+(`fixedSpeedCamera` | `redLightCamera` | `distanceControl`), `NOT NULL DEFAULT
+'fixedSpeedCamera'`. The table holds every *permanently installed* enforcement
+device, not only speed cameras; the name stays (a rename would need a view under
+the old name and is a separate, later step). Adding the column is metadata-only
+(a constant default is stored in the catalogue, no row is rewritten — measured
+5 ms at 1,000,000 rows), and every row that existed before is a speed camera
+without being touched. The enum is append-only, like `hazard_type`: a new value is
+one `ALTER TYPE … ADD VALUE`. Every value is also a `hazard_type` label, so a client
+that decodes an item's `type` into the hazard enum handles it. No index: three
+values, always combined with the GiST index on `position`. Design, rollback and the
+reasons for each choice: [`persistent-enforcement-devices.md`](persistent-enforcement-devices.md).
+
+The other camera-adjacent types (`mobileSpeedCamera`, `trailerCamera`) and — by
+default — user reports of `redLightCamera` and `distanceControl` do **not** go
+there — they behave exactly like ordinary hazard types (10–15 min expiry, extended on
+confirmation) and live in `hazard_reports` via the `type` discriminator. A red-light or
+distance device that is *permanently installed* (imported from a map source, for example)
+is a row of `fixed_speed_cameras` with the matching `camera_type`.
 
 ### `hazard_reports` + `hazard_confirmations`
 `type` (11-value enum, `fixedSpeedCamera` included for completeness but never
@@ -147,7 +160,10 @@ project will plausibly reach, it stays a safe JS integer, which keeps it
 usable directly in delta query params and JSON responses without bigint
 serialization workarounds), `occurred_at`, `type` (`ReportCreated` |
 `ReportConfirmed` | `ReportDenied` | `ReportExpired` | `StaticDataUpdated` |
-`StaticDataRemoved`), `entity_type`, `entity_id`, `payload` (jsonb — the full
+`StaticDataRemoved`), `entity_type` (`hazardReport` | `fixedSpeedCamera` |
+`speedLimitSegment` | `staticSign` | `enforcementDevice` — the last one, add-on D,
+for the persistent red-light and distance devices; speed cameras keep
+`fixedSpeedCamera`), `entity_id`, `payload` (jsonb — the full
 current representation of the entity, not a diff), `region_tile` (nullable —
 null means "global", e.g. every static-entity event), `moderation_status`
 (currently only ever `"accepted"` — every event that reaches the log has
