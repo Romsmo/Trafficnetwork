@@ -19,6 +19,7 @@
     "test:unit": "vitest run tests/unit",
     "test:integration": "vitest run tests/integration",
     "test:watch": "vitest",
+    "test:support:multi-node": "tsx tests/support/multi-node-harness.ts",
     "e2e": "playwright test --project=e2e",
     "e2e:screenshots": "playwright test --project=screenshots",
     "db:generate": "drizzle-kit generate",

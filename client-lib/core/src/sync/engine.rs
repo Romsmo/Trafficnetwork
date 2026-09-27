@@ -158,6 +158,7 @@ pub struct SyncEngine {
     store: Arc<dyn Store>,
     clock: Arc<dyn Clock>,
     observer: Option<Arc<dyn SyncObserver>>,
+    withholding_sample_rate: f64,
 }
 
 impl SyncEngine {
@@ -171,7 +172,28 @@ impl SyncEngine {
             store,
             clock,
             observer: None,
+            withholding_sample_rate: withholding::DEFAULT_SAMPLE_RATE,
         }
+    }
+
+    /// Overrides how often a sync cycle also cross-checks a second server
+    /// for withheld data (F-C0 plan §1.5: "akku-/datensparsam per Design,
+    /// konfigurierbar" — the default (10%) was, until now, only ever a
+    /// hardcoded constant with no way to actually configure it). `0.0`
+    /// disables the check entirely; `1.0` runs it on every cycle.
+    ///
+    /// Even at `1.0` a real end-to-end test of the whole detection path is
+    /// slow to write deterministically: [`withholding::TOLERANCE_WINDOW_MS`]
+    /// (5 minutes, not configurable) only counts an omission once the
+    /// withheld event is genuinely that old, so a real multi-node test would
+    /// need to either wait 5 real minutes or backdate a server's database
+    /// directly. `withholding::detects_withholding`'s own unit tests already
+    /// cover the comparison logic with fake ages; add-on B2's real-server
+    /// suite (`core/tests/multi_node.rs`) does not attempt this one
+    /// end-to-end for that reason — see its module doc.
+    pub fn with_withholding_sample_rate(mut self, rate: f64) -> Self {
+        self.withholding_sample_rate = rate.clamp(0.0, 1.0);
+        self
     }
 
     pub fn with_observer(mut self, observer: Arc<dyn SyncObserver>) -> Self {
@@ -377,7 +399,7 @@ impl SyncEngine {
         // §1.5) — a failure here is never a sync failure, it's just a
         // missed opportunity to catch a misbehaving server this cycle.
         if let Some(page) = first_page {
-            if withholding::should_sample(random_roll(), withholding::DEFAULT_SAMPLE_RATE) {
+            if withholding::should_sample(random_roll(), self.withholding_sample_rate) {
                 let _ = withholding::sample_check(
                     &self.discovery,
                     server,
