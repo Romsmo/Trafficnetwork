@@ -10,6 +10,15 @@ Feature-Branch, damit er immer ohne Branch-Wechsel sichtbar ist) — dieser
 Abschnitt hier wird nicht mehr laufend aktualisiert, siehe dortige Historie
 für den Verlauf.
 
+**Veraltet (Stand 2026-09-17, hier nur noch als Historie stehen gelassen):**
+frühere Fassungen dieses Abschnitts gingen davon aus, dass F-C auf F-S
+wartet und noch keinen Code hat. Tatsächlicher Stand seither: F-S0–F-S5 sind
+fertig und auf `main` gemergt (PR #1); F-C0–F-C3 sind fertig, F-C4 ist
+angefangen (öffentliche API, C-ABI, Python-Binding, Konformitätsrahmen),
+F-C5 (weitere Bindings, Mehrknoten-Integrationstests, Abschluss-PR) steht
+aus — Einzelheiten in `client-lib/README.md`s Meilenstein-Tabelle und in
+[`docs/status.md`](status.md).
+
 ## Vor der Prompt-Erstellung — offene Entscheidungen
 - [x] GitHub-Repo-Struktur: ein Monorepo für Server, Client-Bibliothek, Ingestion
 - [x] Geografischer Start-Scope: Europa, Architektur weltweit-fähig ausgelegt
@@ -57,7 +66,7 @@ für den Verlauf.
 - [x] Claude-Code-Prompts erstellt (`docs/prompt-rework-server-federation.md`, `docs/prompt-rework-client-lib-federation.md`)
 - [x] Stand von Phase 2 im Repo klären: P2.0 (Server-Erweiterungen für client-lib) ist auf GitHub; `client-lib/` selbst enthält bewusst noch keinen Code — das ist die eigentliche Phase-2-Client-Bibliothek, eigener, noch nicht gestarteter Auftrag
 - [x] F-S: Server-Überarbeitung (Docker/Apache/nginx/Caddy, Signaturen, Föderation, Reputation, Verzeichnis) — F-S0–F-S5 vollständig umgesetzt (Docker/Compose/Installation ohne Docker, Node-/Wurzelschlüssel + CLI, geräteseitig signierte Auth, signierte Netzwerk-Konfiguration, Beitritt über Seeds, Peer-Verzeichnis + Gossip, signierte Heartbeats, Push/Pull-Replikation geräteseitig signierter Meldungserstellungen, Reputationsstufen, `GET /v1/network/directory` + Export-Skript, Überlast-Signal, echtes Mehrknoten-Testnetz), Doku vollständig (`server/docs/{installation,operating,api,schema,threat-model,federation-protocol}.md`), Branch `rework/server-federation`, Pull Request nach `main` eingereicht
-- [ ] F-C: Client-Bibliothek-Überarbeitung (Discovery, Failover, Signaturprüfung, gerätesignierte Meldungen) — F-C0–F-C3 fertig (Plan; Kryptografie im Kern per Cross-Language-Vektor-Test verifiziert, Cargo-Workspace, C-ABI-Skelett, CI-Matrix; Discovery-Modul + Mehrserver-Transport-Pool + Failover; Sync-Engine mit pro-Server-Cursor + signierter Offline-Schreibpuffer + lokales Map-Matching/Verfallsberechnung + Stichproben-Prüfung + WebSocket-Push-Protokoll), F-C4–F-C5 offen, Branch `rework/client-lib-federation`
+- [ ] F-C: Client-Bibliothek-Überarbeitung (Discovery, Failover, Signaturprüfung, gerätesignierte Meldungen) — Kern (F-C0–F-C3) und die öffentliche API/C-ABI/Python-Binding (Teil von F-C4) fertig, siehe `client-lib/README.md`; weitere Bindings + Mehrknoten-Tests + Abschluss-PR offen (F-C4 Rest/F-C5)
 - [ ] Projekt-Domain registrieren, Platzhalter `trafficnetwork.example` ersetzen
 - [ ] Netzwerk-Wurzelschlüssel erzeugen und offline sicher aufbewahren
 - [ ] Mindestens zwei Seed-Server bei unterschiedlichen Anbietern bereitstellen
@@ -66,11 +75,11 @@ für den Verlauf.
 ## Phase 3 — Ingestion-Programm (Grundstock-Befüllung) — nach Überarbeitung F
 - [x] Claude-Code-Prompt erstellt (`docs/prompt-phase3-ingestion.md`)
 - [x] Umfang der Erstbefüllung entschieden: **zuerst eine einzelne Region** (Bundesland-Extrakt, ~100 MB); Deutschland/Europa später per Konfiguration
-- [ ] Quellenkatalog vervollständigen, Limits/Lizenzen mit Beleg dokumentieren
-- [ ] OSM-Worker regionsparametrisiert bauen, Wiederaufnahme nach Abbruch
-- [ ] Weitere Quellen hinter Schaltern inkl. Kill-Switches (HERE/TomTom standardmäßig aus)
-- [ ] Ausschließlich über die öffentliche Bulk-Import-API anbinden (kein privilegierter Zugriff)
-- [ ] Grundbefüllung durchführen, danach Ingestion optional abschalten
+- [x] Quellenkatalog vervollständigen, Limits/Lizenzen mit Beleg dokumentieren (`ingestion/docs/sources.md`)
+- [x] OSM-Worker regionsparametrisiert bauen, Wiederaufnahme nach Abbruch
+- [x] Weitere Quellen hinter Schaltern inkl. Kill-Switches (HERE/TomTom standardmäßig aus, nur katalogisiert; Baustellen-Feeds und NVDB Norwegen je eigener Schalter)
+- [x] Ausschließlich über die öffentliche Bulk-Import-API anbinden (kein privilegierter Zugriff)
+- [x] Grundbefüllung durchführen, danach Ingestion optional abschalten (Bayern in Launch L, ganz Europa in Zusatz A)
 
 ## Launch L — Lokaler Testbetrieb auf dem Windows-PC (Docker)
 - [x] Claude-Code-Prompt erstellt (`docs/prompt-launch-local-test.md`)
@@ -79,6 +88,65 @@ für den Verlauf.
 - [ ] L3: Region importieren und verifizieren
 - [ ] L4: Testwerkzeug `tools/test-client/` (Kommandozeile + kleine Weboberfläche) auf Basis der Client-Bibliothek
 - [ ] L5: Abnahmetest inkl. zweitem lokalen Knoten und Failover, Ergebnis in `docs/launch-checklist.md`
+
+## Zusatz W — Weboberfläche des Servers (Karte, Melden, Anleitung)
+- [x] Claude-Code-Prompt erstellt (`docs/prompt-server-web-ui.md`) — reine Ergänzung, API bleibt unverändert
+- [ ] W1: Auslieferung durch den Server (`WEB_UI_ENABLED`), Grundgerüst, GitHub-Link in der Fußzeile, Deutsch/Englisch
+- [ ] W2: Karte (OpenStreetMap) mit Meldungen und Tempolimit-Abfrage, Live-Aktualisierung
+- [ ] W3: Melden und Bestätigen aus dem Browser, ohne Geheimnis im Quelltext, mit eigener Begrenzung
+- [ ] W4: Seiten „Verbinden" (App, eigener Knoten, API) und „Über das Projekt"
+- [ ] W5: E2E-Tests, `server/docs/web-ui.md`, Pull Request
+
+## Zusatz O — Anzeige „aktuell online" (Server + Web + Client-Bibliothek)
+- [x] Zusatz-Prompts erstellt (`docs/prompt-addon-online-counter.md`)
+- [x] O-A Server: `GET /v1/stats/online`, eigene Zahl im Heartbeat (`onlineCount`), Schwellenwert gegen Rückschlüsse (Branch `feature/online-counter`, lokal 295/295, PR wartet auf Freigabe; Antwortformat entspricht dem von O-B/O-C erwarteten)
+- [ ] O-B Web: Anzeige unten rechts, Aktualisierung, Textfall unter dem Schwellenwert
+- [x] O-C Client-Bibliothek: `NetworkStatus`-Felder `onlineNode`/`onlineNetwork`/`onlineEstimated`/`onlineAsOf` + `OnlineStatusService` (Branch `rework/client-lib-online-counter`, CI grün; gegen das vorgeschlagene Format gebaut, O-A steht noch aus; `getNetworkStatus()` als Fassade jetzt Teil der öffentlichen API in `rework/client-lib-europe-scale`, siehe Zusatz E unten)
+
+## Zusatz K — Falsche Tempolimits melden und korrigieren
+- [x] Zusatz-Prompts erstellt (`docs/prompt-addon-speed-limit-corrections.md`)
+- [x] K-A Server: Korrektur als überlagernder Datensatz (Import bleibt erhalten), Schwellenwert, Widerspruch, Verteilung über Pakete/Events und Föderation, Betreiber kann zurücksetzen (Branch `feature/speed-limit-corrections`, lokal 339 Tests grün (Gesamtlauf 338/339, der eine Fehler war eine veraltete Testerwartung, behoben und nachgelaufen), PR wartet auf Freigabe; Plan: `server/docs/speed-limit-corrections.md`; **Migration 0007 schreibt `speed_limit_segments` einmalig um, ~20 s pro Mio. Segmente** — Backup + Wartungsfenster einplanen)
+- [ ] K-B Web: „Stimmt nicht?"-Formular, Herkunft des Werts sichtbar (Allowlist der Web-Sitzungen um die vier Korrektur-Pfade erweitern; Hinweise im Status-Abschnitt "Zusatz K-A")
+- [x] K-C Client-Bibliothek: `report_wrong_speed_limit`/`confirm_speed_limit_correction` über den Offline-Puffer (beim Senden signiert), Überlagerung statt Überschreiben, Herkunft in `speed_limit_at()` (Branch `rework/client-lib-speed-corrections`, CI grün; gegen den dokumentierten Server-Vertrag gebaut; öffentliche Fassade `getSpeedLimitAt()`/`reportWrongSpeedLimit()` jetzt Teil der öffentlichen API in `rework/client-lib-europe-scale`, siehe Zusatz E unten)
+- [x] Schwellenwert entschieden: **3 verschiedene Geräte** (Konfigurationswert, Standard 3)
+- [x] Wertebereich für Korrekturen festgelegt: ganzzahlig, **5–150 km/h bzw. 5–85 mph**, nur Vielfache von **5**, in der Einheit des Segments (alles per Umgebungsvariable änderbar); Gleichstand ⇒ kein Gewinner; Importänderung ⇒ Korrektur bleibt, Markierung „zu prüfen"
+- [ ] Folgeaufgaben K-A (nicht Teil des Auftrags): temporäre Korrekturen (Baustelle) automatisch auslaufen lassen; `deviceAssertion` bei Meldungen an den gebundenen Schlüssel knüpfen (siehe Nebenbefund im Status); Stimmen nach Ruf des weiterleitenden Knotens gewichten
+
+## Zusatz E — Grundstock ganz Europa (einmalig, aktueller Stand)
+- [x] Entschieden: ganz Europa, **einmaliger** Import des aktuellsten Stands; kein wiederkehrender Update-Lauf vorerst
+- [x] Entschieden: statische Daten weiterhin **vollständig an jedes Gerät** — Machbarkeit wird nach dem Import gemessen, nicht geraten
+- [x] Zusatz-Prompts erstellt (`docs/prompt-addon-europe-basemap.md`)
+- [x] E-A Ingestion: Machbarkeitsbericht, Europa-Import (13,68 Mio. Zeilen, 4,1 GB) und Bericht (`ingestion/docs/europe-feasibility.md`, `europe-run-report.md`), Update-Weg nur dokumentiert
+- [~] E-B Server: Code fertig (Branch `feature/europe-scale`, gestapelt auf K-A + Perf-Fix, gepusht, PR wartet; vorgebaute, streamende, zwischenspeicherbare Pakete, Batch-Import, Snapshot-Schutz, `?since=`, Range). **Entschieden 2026-09-25:** Auflösung 4 ist Code-Standard, `partitionResolution` steht im Manifest (Client-Instanz: bei Abweichung neu bootstrappen); Migration 0007 bleibt als dokumentiertes Wartungsfenster (Migrations-Regel + Warnung eingeführt). **Offen:** Vollsuite mit Docker laufen lassen (erst nach dem Europa-Import), Integrationstest `europe-scale` nach der Auflösungs-Änderung wiederholen, vollständige Messung (Bau-Dauer, Spitzen-RSS, Kachelgrößen, Manifest, Migration 0007+0008) **auf einer Kopie des echten Bestands**, danach Migration + Paketbau auf `tn-europe` selbst
+- [x] E-C Client-Bibliothek: vollständigen Bootstrap gemessen und berichtet (`client-lib/docs/bootstrap-measurements.md`: echtes Bayern über einen echten Server, synthetisch bis 20 Mio. Segmente, Abbruch/Fortsetzen, Bandbreiten-Rechnung) — dabei `SqliteStore` (R*Tree, wiederaufnehmbarer Bootstrap, `SyncError::StorageFull`, Paket-Hashprüfung, `partitionResolution`-Abgleich mit E-B) und `plan_static_bootstrap`/`SyncObserver` als Vorab-Check bzw. Fortschritt gebaut. Branch `rework/client-lib-europe-scale`, CI grün, PR noch nicht geöffnet. Empfehlung an den Nutzer: erst E-A/E-B-Zahlen abwarten, dann Server-seitige Kompression + kleinere Partitionen + Streaming-Parser messen, bevor „alles auf jedem Gerät" infrage gestellt wird — nichts davon wurde umgestellt
+- [ ] E-D Web: Startansicht Europa, nur sichtbaren Ausschnitt laden, Cluster bei kleiner Zoomstufe
+- [ ] Nach den Messungen entscheiden, ob „alles auf jedem Gerät" so bleibt
+
+## Zusatz D — Dauerhafte Überwachungsanlagen (Rotlicht, Abstand)
+- [x] Entschieden: bestehende Tabelle `fixed_speed_cameras` verallgemeinern (Spalte `camera_type`), keine neue Tabelle je Bauart; Altbestand muss unversehrt bleiben
+- [x] Zusatz-Prompt erstellt (`docs/prompt-addon-persistent-cameras.md`) — für den Server-Chat
+- [x] D0 Plan (Server, `server/docs/persistent-enforcement-devices.md`, Branch `feature/persistent-enforcement-devices`): Migration gemessen (5 ms bei 1 Mio. Zeilen, kein Fenster), Schema/Rückrollen, API-Auswirkung belegt, Befund „feste Blitzer werden nicht föderiert", Abschnittskontrolle-Vorschlag; **wartet auf Antworten zu acht offenen Fragen**
+- [ ] D1 Migration + Migrationstest mit Altbestand (Zeilenzahl vorher/nachher, Rückrollen)
+- [ ] D2 API additiv (`cameraType`, neues Snapshot-Feld, Bulk-Import-Feld)
+- [ ] D3 Föderation und statische Pakete, Mehrknoten-Test
+- [ ] Offen: Abschnittskontrolle (`enforcement=average_speed`) — Vorschlag abwarten, noch nicht bauen
+- [ ] Offen: Soll es „dauerhaft gemeldet" durch Nutzer geben (Schwelle), oder bleiben Nutzermeldungen immer verfallend?
+
+## Zusatz Q — Quellenkatalog (Blitzer, Baustellen, Verkehrsschilder)
+- [x] Recherche des Betreibers liegt vor (Rechtslage, OSM, DATEX II/NAPCORE, nordische Behördenquellen)
+- [x] Zusatz-Prompt erstellt (`docs/prompt-addon-source-catalogue.md`) — für den Ingestion-Chat
+- [x] Q0 Quellenkatalog mit belegten Lizenzen + Ampel je Quelle (`ingestion/docs/sources.md`)
+- [x] Q1 Blitzer aus OSM (Namensraum bleibt deaktiviert; Test `camera-namespace.test.ts`)
+- [x] Q2 Verkehrsschilder aus OSM, Codes länderoffen
+- [x] Q3 Baustellen: DATEX-II-Leser + Autobahn GmbH, periodisch lauffähig (`ingestion/docs/roadworks.md`; Frankreich an, NL/DE aus)
+- [x] Q4 Eine amtliche Schildquelle inkl. Mapping-Tabelle: **NVDB Norwegen** (Schwedens offene API enthält keine Schilder, Digiroad ist abgeschaltet)
+- [x] Entschieden: Baustellen-Anbinder läuft dauerhaft (Zeitplan extern, Kosten in `ingestion/docs/roadworks.md`); Länder: Frankreich an, Niederlande und Deutschland aus bis zur Lizenzklärung
+- [ ] Entscheiden: Mapillary/KartaView einbinden? (erst nach belegter Lizenzprüfung, standardmäßig aus)
+- [ ] Attribution aus `ingestion/docs/attribution.md` in die Weboberfläche übernehmen (Web-Instanz; dazu braucht die Hazard-API das Feld `source_feed`, Server-Instanz)
+- [ ] Offen (Betreiber): Lizenz von NDW klären, danach `nl-ndw` einschalten; Entscheidung zur Autobahn-API (`de-autobahn`, Lizenz ungeklärt)
+- [ ] Offen (Betreiber): NVDB-Norwegen-Vollimport ausführen (`--region norway`, geschätzt 20–40 min, auf einem Knoten mit den Europa-Daten nur mit `--allow-non-empty`)
+- [ ] Offen (Betreiber): NVDB Schweden nur, wenn ein Lastkajen-Zugang samt Beispieldatei vorliegt
+- [ ] Offen (Betreiber): die 2.000 doppelt importierten Segmente auf `tn-europe` entfernen (SQL im Europa-Bericht), danach `pg_dump` als Grundstock
 
 ## Launch P — Öffentlicher Betrieb (gemieteter Server + Domain)
 - [x] Claude-Code-Prompt erstellt (`docs/prompt-launch-public-server.md`)
