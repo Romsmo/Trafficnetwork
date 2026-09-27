@@ -2,6 +2,24 @@
 
 Offenes, quelloffenes Verkehrsdaten-Netzwerk (Local-First): Tempolimits, Verkehrszeichen und Live-Gefahrenmeldungen (Stau, Unfall, Baustelle, Glaette, Panne, Hindernis, Blitzer). Start-Scope: Europa, Architektur fuer weltweite Ausweitung vorbereitet.
 
+## Schnellstart (eigener Server, Docker)
+
+Vom geklonten Repo bis zum antwortenden Server, ohne echte Daten (leerer Server ist ein gueltiger Zustand):
+
+```bash
+git clone https://github.com/Romsmo/Trafficnetwork.git
+cd Trafficnetwork/server
+cp .env.example .env
+# .env: POSTGRES_PASSWORD und JWT_SECRET setzen (zwei Zeilen, alles andere hat einen sinnvollen Default)
+docker compose up -d
+curl http://localhost:3000/v1/health
+# -> {"status":"ok","database":"ok"}
+```
+
+Damit laeuft ein einzelner, nicht foederierter Knoten mit eingebauter Weboberflaeche unter `http://localhost:3000/` (Karte, Melden, "Verbinden"-Seite) — Blitzer-Namensraum ist per Default aus. Ein eigenes Testgeraet anlegen und eine Meldung absetzen: `npm run create-client -- --name "mein-erster-client" --scope client` in `server/`, dann z. B. `tools/test-client/` (eigenes `README.md`) oder direkt gegen die API (`server/docs/api.md`). Vollstaendige Anleitung inkl. Betrieb ohne Docker, Foederation, Reverse-Proxy-Beispielen: [`server/docs/installation.md`](server/docs/installation.md), [`server/docs/operating.md`](server/docs/operating.md). Region mit echten Daten befuellen: [`ingestion/README.md`](ingestion/README.md) (optional, siehe unten).
+
+Selbst nachvollzogen (frischer Klon, dieselben Schritte, 2026-09-27) — siehe [`docs/audit.md`](docs/audit.md) Abschnitt 2 fuer den vollstaendigen Durchstich inklusive Client-Bibliothek und Weboberflaeche.
+
 ## Prinzip
 
 Jedes Geraet haelt seine Daten lokal und funktioniert offline. Der Server ist Vermittler und Moderator (Ereignisprotokoll, Snapshot/Delta-Sync), keine Live-Abfrage-API.
