@@ -3,11 +3,12 @@
 use serde::{Deserialize, Serialize};
 
 /// The seed servers a client asks for the network's server list when the
-/// host app names none. `trafficnetwork.example` is the placeholder for the
-/// domain that does not exist yet; **the one place to change** once it does.
+/// host app names none. The domain is `trafficnetwork.info` (decided
+/// 2026-09-27) — not yet in DNS, so nothing here is resolved by a test;
+/// **the one place to change** once real seeds exist under it.
 pub const DEFAULT_SEEDS: &[&str] = &[
-    "https://seed1.trafficnetwork.example",
-    "https://seed2.trafficnetwork.example",
+    "https://seed1.trafficnetwork.info",
+    "https://seed2.trafficnetwork.info",
 ];
 
 /// The network's root public key (base64url, raw). None is built in yet —

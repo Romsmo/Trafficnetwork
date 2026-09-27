@@ -374,6 +374,28 @@ impl DiscoveryService {
     /// static package whose hash does not match its manifest): it counts
     /// against that server exactly like a failed request.
     pub fn record_invalid_data(&self, node_id: &str) {
+        self.record_failure(node_id);
+    }
+
+    /// A WebSocket connection to this server failed, or closed with an
+    /// error while `sync::realtime::run` expected it to stay open (add-on
+    /// B1's reconnect loop, `api::client::run_realtime`) — counts against it
+    /// exactly like a failed HTTP request. A *clean* close is not a failure
+    /// (a server may legitimately end a connection, e.g. for its own
+    /// restart) and is not reported here.
+    pub fn record_ws_failure(&self, node_id: &str) {
+        self.record_failure(node_id);
+    }
+
+    /// The counterpart to [`Self::record_ws_failure`]: a WebSocket
+    /// connection to this server was established — clears any backoff from
+    /// an earlier failure and folds `latency_ms` into its running average,
+    /// exactly like a successful HTTP request would.
+    pub fn record_ws_success(&self, node_id: &str, latency_ms: f64) {
+        self.pool.lock().unwrap().record_success(node_id, latency_ms);
+    }
+
+    fn record_failure(&self, node_id: &str) {
         self.pool.lock().unwrap().record_failure(
             node_id,
             self.clock.now_unix_ms(),

@@ -17,20 +17,21 @@
 //!   (server, verified network configuration, host app) and as reports being
 //!   de-duplicated across servers when they are read.
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use crate::crypto::{generate_ed25519_keypair, verify_signed_envelope, Ed25519KeyPair};
 use crate::discovery::{DiscoveryConfig, DiscoveryService};
-use crate::platform::{Clock, HttpTransport};
+use crate::platform::{Clock, HttpTransport, Sleep, WsTransport};
 use crate::status::OnlineStatusService;
 use crate::storage::{Store, WriteKind};
 use crate::sync::{
     bind_device_key, confirm_hazard_report, confirm_speed_limit_correction,
     effective_camera_namespace_enabled, exchange_client_secret, fetch_corrections, flush_pending,
     haversine_distance_meters, nearby_hazard_reports, register_device, report_camera_removed,
-    report_wrong_speed_limit, speed_limit_at, submit_report, ClientConfig, Correction,
-    CorrectionTarget, FlushOutcome, HazardType, NetworkConfigPayload, ReportSubmission, SegmentRef,
-    SyncEngine, WrongSpeedLimitReport,
+    report_wrong_speed_limit, run_realtime as run_realtime_protocol, speed_limit_at,
+    submit_report, ClientConfig, Correction, CorrectionTarget, FlushOutcome, HazardType,
+    NetworkConfigPayload, ReportSubmission, SegmentRef, SyncEngine, WrongSpeedLimitReport,
 };
 
 use super::error::{code, ApiError};
@@ -53,6 +54,11 @@ const TOKEN_MARGIN_MS: i64 = 30_000;
 /// How far from a position `getSpeedLimitAt` looks, until the server's
 /// configuration says otherwise.
 const DEFAULT_LOOKUP_METERS: f64 = 50.0;
+/// How long `run_realtime` waits before looking again when there is no
+/// server to even try (nothing known yet, or every one just failed to
+/// issue a token) — short enough that push resumes soon after a server
+/// comes back, not so short that a genuinely offline device spins.
+const NO_SERVER_RETRY_MS: u64 = 5_000;
 
 /// The host app's side of the seams: where things are stored, how to reach
 /// the network, what time it is.
@@ -61,13 +67,19 @@ pub struct Platform {
     pub secure_store: Arc<dyn SecureStore>,
     pub http: Arc<dyn HttpTransport>,
     pub clock: Arc<dyn Clock>,
+    /// Backs [`TrafficNetworkClient::run_realtime`] (add-on B1). Unused by
+    /// every other call — a host app that never starts realtime push never
+    /// needs this to do anything.
+    pub ws: Arc<dyn WsTransport>,
+    pub sleep: Arc<dyn Sleep>,
 }
 
 #[cfg(not(target_arch = "wasm32"))]
 impl Platform {
     /// The native defaults, all inside `directory`: a SQLite database, a
     /// secret file (see [`super::FileSecureStore`] for what that is and is
-    /// not), `reqwest` for the network and the system clock.
+    /// not), `reqwest` for the network, the system clock, `tokio-tungstenite`
+    /// for realtime push and `tokio::time::sleep` for the reconnect backoff.
     pub fn native(directory: impl AsRef<std::path::Path>) -> Result<Self, ApiError> {
         let directory = directory.as_ref();
         std::fs::create_dir_all(directory).map_err(|e| {
@@ -84,6 +96,8 @@ impl Platform {
                     .map_err(|e| ApiError::new(code::NETWORK, e.to_string()))?,
             ),
             clock: Arc::new(crate::platform::SystemClock),
+            ws: Arc::new(crate::platform::TokioTungsteniteWsTransport),
+            sleep: Arc::new(crate::platform::TokioSleeper),
         })
     }
 }
@@ -126,6 +140,8 @@ pub struct TrafficNetworkClient {
     engine: SyncEngine,
     online: OnlineStatusService,
     events: Arc<EventHub>,
+    ws: Arc<dyn WsTransport>,
+    sleep: Arc<dyn Sleep>,
     state: Mutex<State>,
 }
 
@@ -181,6 +197,8 @@ impl TrafficNetworkClient {
             engine,
             online,
             events,
+            ws: platform.ws,
+            sleep: platform.sleep,
             state: Mutex::new(State::default()),
         })
     }
@@ -808,6 +826,107 @@ impl TrafficNetworkClient {
             bytes_total: plan.bytes_total,
             bytes_pending: plan.bytes_pending,
         })
+    }
+
+    // ------------------------------------------------------------ realtime
+
+    /// Keeps a WebSocket connection to the current best server open,
+    /// applying pushed events as they arrive
+    /// (`server/docs/api.md`'s "Real-time push", add-on B1) — the events
+    /// come out through the same [`ClientEvent::DataChanged`] a delta pull
+    /// produces, so a host app does not need to tell them apart. Runs until
+    /// `stop` is set to `true` or [`Self::close`] is called; checked between
+    /// connection attempts, not while one is open (a live connection ends
+    /// when the server closes it or an error occurs, same as any blocking
+    /// read).
+    ///
+    /// A server that fails to connect, or whose connection later errors, is
+    /// scored down exactly like a failed HTTP request
+    /// ([`crate::discovery::DiscoveryService::record_ws_failure`]) and the
+    /// next attempt picks a different one from the pool; a *clean* close is
+    /// not held against it. Every (re)connect first closes any gap with a
+    /// [`SyncEngine::sync_dynamic`] call — the WebSocket protocol itself has
+    /// no replay, so anything that happened while disconnected only ever
+    /// arrives through delta — then resumes listening.
+    ///
+    /// **Known simplification:** the tile subscription used for a
+    /// connection is whatever [`Self::update_position`] last set; a change
+    /// made while already connected takes effect on the *next* reconnect,
+    /// not by pushing new subscribe messages onto a live one
+    /// (`sync::realtime::run` subscribes only once, right after the auth
+    /// handshake). **Also:** this runs independently of `sync()`/`tick()` —
+    /// both may call into the sync engine at the same time, which is safe
+    /// (the store and the engine are thread-safe) but not deduplicated.
+    ///
+    /// Nothing here starts this on its own — the host app decides whether
+    /// and when to call it (typically on a background thread/task it owns;
+    /// the C ABI's `tn_client_start_realtime` does this using the crate's
+    /// own runtime).
+    pub async fn run_realtime(&self, stop: &AtomicBool) -> Result<(), ApiError> {
+        self.check_open()?;
+        while !stop.load(Ordering::Relaxed) && !self.state().closed {
+            let Some(server) = self.discovery.current_pool().into_iter().next() else {
+                if self.options.discovery {
+                    let _ = self.discovery.ensure_fresh_directory().await;
+                }
+                self.sleep.sleep_ms(NO_SERVER_RETRY_MS).await;
+                continue;
+            };
+            let wait_ms = server
+                .backoff_until_unix_ms
+                .map(|until| u64::try_from(until - self.now()).unwrap_or(0))
+                .unwrap_or(0);
+            if wait_ms > 0 {
+                self.sleep.sleep_ms(wait_ms).await;
+                continue;
+            }
+
+            let token = match self.ensure_token().await {
+                Ok(token) => token,
+                // Nothing will ever fix a missing credential by waiting.
+                Err(error) if error.code == code::NOT_CONFIGURED => return Err(error),
+                // Every server in the pool just failed to issue a token —
+                // transient (all of them briefly down, or a directory
+                // that needs refreshing); wait a moment and reassess
+                // rather than giving up on realtime push entirely.
+                Err(_) => {
+                    self.sleep.sleep_ms(NO_SERVER_RETRY_MS).await;
+                    continue;
+                }
+            };
+
+            let url = format!("{}/v1/ws", server.address.trim_end_matches('/'));
+            let connect_started = self.now();
+            let mut connection = match self.ws.connect(&url).await {
+                Ok(connection) => {
+                    let elapsed = (self.now() - connect_started).max(0) as f64;
+                    self.discovery.record_ws_success(&server.node_id, elapsed);
+                    connection
+                }
+                Err(_) => {
+                    self.discovery.record_ws_failure(&server.node_id);
+                    continue;
+                }
+            };
+
+            let tiles = self.state().tiles.clone();
+            match self.engine.sync_dynamic(&token, &tiles).await {
+                // The one gap-close failure worth stopping the whole loop
+                // for — everything else is best-effort (the WebSocket
+                // connection itself, about to run, will catch up on
+                // whatever it can from here).
+                Err(crate::sync::SyncError::StorageFull) => {
+                    return Err(ApiError::new(code::STORAGE_FULL, "the local store is out of space"))
+                }
+                _ => {}
+            }
+
+            match run_realtime_protocol(connection.as_mut(), &self.engine, &token, &tiles).await {
+                Ok(()) => {} // A clean close is not held against the server.
+                Err(_) => self.discovery.record_ws_failure(&server.node_id),
+            }
+        }
+        Ok(())
     }
 
     // -------------------------------------------------------------- status

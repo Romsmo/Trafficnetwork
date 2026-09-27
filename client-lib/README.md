@@ -89,7 +89,17 @@ Vorbereitung und Messung für den Europa-Grundstock ("alles auf jedem Gerät"). 
 - **`sync()`** trennt den statischen vom dynamischen Teil (ein unterbrochener Grundstock-Download blockiert nie frische Meldungen) und lässt einen ausgefallenen Pool-Server die anderen nicht aufhalten; scheitert nur bei fehlenden Zugangsdaten, keinem erreichbaren Server oder vollem Speicher (`storageFull`) — jeder Teilfehler steht im zurückgegebenen `SyncReport`, wird nicht geworfen.
 - **Gefundene und behobene Lücken in F-C2 beim Aufbau der Fassade:** ein Verzeichnis nennt nur die *anderen* Knoten, nie sich selbst — ein Kaltstart mit nur einem Seed landete deshalb mit leerem Pool; jetzt trägt sich der antwortende Server selbst ein. Und: geriet der (einzige) Server in Backoff, blieb der Pool leer und nichts wurde je wieder versucht — jetzt wird bei leerem Pool der Server mit der nächsten Erholungszeit trotzdem versucht.
 - **Erstes Binding:** `bindings/python/` (reines `ctypes`, keine Abhängigkeiten). **Konformität:** `client-lib/conformance/` — ein Satz Szenarien (`scenarios.json`) gegen einen geskripteten Server (`mock-server.mjs`, echtes Ed25519/RFC 8785, unabhängig vom echten Server-Code), aktuell mit einem Python-Runner, CI-Job `conformance-python`.
-- **Bewusst noch offen** (siehe Meilensteine): WASM/Browser-Speicher, Node/Dart/Kotlin/Swift-Wrapper samt eigener Konformitätsläufe, React-Native-Modul, Android-AAR/iOS-XCFramework-Paketierung, eine WebSocket-Standardimplementierung (nur der Protokolltreiber aus F-C3 existiert), Mehrknoten-Integrationstests gegen echte Server (F-C5).
+- **Bewusst noch offen** (siehe Meilensteine): WASM/Browser-Speicher, Node/Dart/Kotlin/Swift-Wrapper samt eigener Konformitätsläufe, React-Native-Modul, Android-AAR/iOS-XCFramework-Paketierung, Mehrknoten-Integrationstests gegen echte Server (B2).
+
+## Echter WebSocket-Transport (Zusatz B1)
+
+Löst das letzte Stück der Local-First-mit-Push-Zusage ein: bis hierhin gab es nur den Protokolltreiber (`sync::realtime::run`, F-C3), keinen echten Client, der ihn am Laufen hält.
+
+- **`platform::TokioTungsteniteWsTransport`** (nativ, `tokio-tungstenite` + `rustls-tls-webpki-roots` — passt zu `reqwest`s eigener TLS-Wahl, keine zweite TLS-Bibliothek). Bewusst **nicht** in Lese-/Schreibhälften gesplittet: `WsConnection::send_text`/`recv_text` sind ohnehin sequenziell, und nur so beantwortet `tokio-tungstenite` einen `Ping` automatisch mit einem `Pong`, ohne dass dieser Code selbst etwas davon merkt (gegen die tatsächliche Crate-Quelle geprüft, nicht angenommen).
+- **`platform::Sleep`** (neuer Seam, analog zu `Clock`/`HttpTransport`/`WsTransport`): das Warten zwischen Wiederverbindungsversuchen, nativ per `tokio::time::sleep`, austauschbar für Tests (die dann in Millisekunden statt Minuten laufen).
+- **`TrafficNetworkClient::run_realtime(&stop)`** (in `core::api`, nicht im Protokolltreiber selbst — braucht Tokenverwaltung/Kachel-Zustand/den Discovery-Pool, die dort privat liegen): wählt den besten Server, verbindet, schließt nach jedem (Wieder-)Verbinden zuerst die Lücke per `sync_dynamic()`, hört dann erst auf Ereignisse. Ein Verbindungsfehler zählt jetzt genauso gegen einen Server wie ein fehlgeschlagener HTTP-Aufruf (`DiscoveryService::record_ws_failure`, neu), eine erfolgreiche Verbindung hebt einen früheren Fehlschlag wieder auf (`record_ws_success`, neu, spiegelbildlich). Läuft, bis `stop` gesetzt wird oder der Client geschlossen wird — nichts startet das von selbst (Grundsatz „kein Hintergrund-Scheduling im Kern" bleibt gewahrt: die Host-App entscheidet, ob/wann sie es aufruft).
+- **C-ABI:** `tn_client_start_realtime(handle)`/`tn_client_stop_realtime(handle)` — spawnt die Schleife auf der ohnehin schon vorhandenen Tokio-Runtime des C-ABI-Crates; die Host-App braucht dafür keinen eigenen Thread.
+- **Bekannte Vereinfachung:** eine Kacheländerung während eine Verbindung offen ist, wirkt erst beim nächsten Wiederverbinden (der Protokolltreiber abonniert nur einmal, direkt nach dem Auth-Handshake) — im Code und in `docs/api.md` vermerkt, nicht stillschweigend hingenommen.
 
 ## Bauen & Testen
 
@@ -105,3 +115,14 @@ Rust ist auf der Entwicklungsmaschine dieser Session nicht installiert — Verif
 | F-C3 | Sync-Engine (Bootstrap/Delta/Pakete/WebSocket, pro-Server-Cursor), Offline-Schreibpuffer, Map-Matching, Verfallsberechnung, Stichproben-Prüfung | ✅ |
 | F-C4 | Öffentliche API + C-ABI + Python-Binding + Konformitätsrahmen fertig; **WASM, Node, Dart, Kotlin, Swift, React Native, Paketierung offen** | 🟡 |
 | F-C5 | Mehrknoten-Integrationstests grün, Doku, Pull Request — **Abschluss** | |
+
+Fortsetzung nach PR #10 (`rework/client-lib-bindings`, ersetzt F-C4-Rest/F-C5 durch die feinere B-Reihe aus dem Folgeauftrag):
+
+| # | Inhalt | Status |
+|---|---|---|
+| B0 | Plan (echter Push zuerst, dann Mehrknoten-Belege, dann Bindings nach Schwierigkeitsgrad), Entscheidungen mit Begründung | ✅ |
+| B1 | Echter WebSocket-Transport (`tokio-tungstenite`), `platform::Sleep`, Wiederverbindung mit Backoff + Lückenschluss, C-ABI-Start/Stop | ✅ |
+| B2 | Mehrknoten-Integrationstests gegen echte Server-Prozesse | 🔜 |
+| B3 | WASM + JS/TS | |
+| B4 | Kotlin, Swift, Dart | |
+| B5 | React Native, Paketierung, Konformitätstests über mehrere Bindings — **Abschluss** | |

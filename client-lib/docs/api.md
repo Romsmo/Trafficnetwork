@@ -202,6 +202,36 @@ changed, otherwise an instant no-op.
 static-data download still needs — `partitionsPending`/`bytesPending` — so a
 host app can compare that against free space *before* starting one.
 
+## Realtime push (add-on B1)
+
+```
+startRealtime()                                  // native / C ABI: tn_client_start_realtime
+stopRealtime()                                    // native / C ABI: tn_client_stop_realtime
+```
+
+Keeps a WebSocket connection to the network open (`GET /v1/ws`,
+`server/docs/api.md`'s "Real-time push") and applies pushed events as they
+arrive — they come out through the same `dataChanged` events a delta pull
+produces (see "Events" below), so a host app never has to tell the two
+apart. Reconnects on its own with backoff when a connection drops, and
+closes the gap with one delta sync right after each reconnect (the
+WebSocket protocol itself has no replay). A server that fails to connect,
+or errors once connected, is scored down exactly like a failed HTTP
+request; a *clean* close is not held against it. `stopRealtime()` (or
+closing the client) stops it between attempts, not by force-ending a
+connection that is currently open.
+
+The C ABI runs this on the library's own background task — a host app
+using the C ABI does not need a thread or an async runtime of its own for
+push to work. The Rust API itself (`TrafficNetworkClient::run_realtime`)
+is a plain `async fn` a host app can instead drive on its own task if it
+already has a runtime; the C ABI's `tn_client_start_realtime`/
+`tn_client_stop_realtime` are the thin wrapper every other binding uses.
+
+**Known simplification:** the tile subscription used for a connection is
+whatever `updatePosition` last set — a change made while a connection is
+open takes effect on the *next* reconnect, not immediately.
+
 ## Status
 
 ```
@@ -312,6 +342,7 @@ on an incompatible change to a method or a result shape).
 * `tn_client_call(handle, method, argsJson) -> resultJson` (blocking)
 * `tn_client_call_async(handle, method, argsJson, callback, userData)` (returns at once, calls back from a library thread)
 * `tn_client_set_event_callback(handle, callback | NULL, userData)`
+* `tn_client_start_realtime(handle) -> 0 | -1` / `tn_client_stop_realtime(handle)`
 * `tn_client_free(handle)`
 * `tn_free_string(ptr)` — every returned string is freed with this, never the host's own `free()`.
 
