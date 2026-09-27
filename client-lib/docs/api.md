@@ -24,7 +24,7 @@ reached through the C ABI's `storagePath` option):
 
 | Seam | Native default | Override for |
 |---|---|---|
-| `store` | `SqliteStore` at `<storagePath>/trafficnetwork.db` | a browser (F-C4: `sqlite-wasm-rs`) |
+| `store` | `SqliteStore` at `<storagePath>/trafficnetwork.db` | a browser (planned: `sqlite-wasm-rs`) |
 | `secureStore` | a JSON file at `<storagePath>/secure-store.json`, mode 0600 on Unix — **not hardware-backed** | a platform keystore (Keychain, Android Keystore, ...) — see "Secrets" below |
 | `http` | `reqwest`, gzip/brotli accepted, connect timeout 15 s, read timeout 60 s | a custom proxy or TLS pinning |
 | `clock` | the system clock | tests (inject a fixed clock) |

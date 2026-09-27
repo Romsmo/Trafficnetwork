@@ -4,15 +4,15 @@ Client-Sync-Bibliothek: einbettbarer, maximal portabler Adapter für beliebige A
 
 Zielplattformen: Android (Kotlin), iOS/macOS (Swift), Flutter (Dart), React Native, Desktop/Server über C-ABI (inkl. Python, Node.js), Web-Browser (WASM).
 
-**Status**: Meilenstein F-C3 abgeschlossen (Branch `rework/client-lib-federation`, noch nicht nach `main` gemergt). Details zum Gesamtplan siehe [`docs/concept.md`](../docs/concept.md) (Abschnitt 6/13), [`docs/federation.md`](../docs/federation.md), `docs/prompt-phase2-client-lib.md` (ausgelagert nach `../Trafficnetwork-prompts/`, nicht mehr im Repo) (ursprünglicher Basis-Auftrag), `docs/prompt-rework-client-lib-federation.md` (ausgelagert nach `../Trafficnetwork-prompts/`, nicht mehr im Repo) (Föderations-Auftrag) und [`docs/todo.md`](../docs/todo.md). Laufender Cross-Instanz-Status: [`docs/status.md`](../docs/status.md).
+**Status**: der plattformunabhängige Kern (Kryptografie, Discovery/Failover, Sync-Engine mit echtem WebSocket-Push, Offline-Schreibpuffer, lokales Map-Matching, Tempolimit-Korrekturen, Online-Anzeige) ist fertig und gegen ein echtes Mehrknoten-Testnetz verifiziert. Von den Anbindungen gibt es bisher ein C-ABI und ein Python-Binding; WASM/JS-TS, Kotlin, Swift, Dart, React Native und die Paketierung für Mobile-Plattformen fehlen noch — siehe "Was fehlt noch" unten. Details zum Gesamtplan siehe [`docs/concept.md`](../docs/concept.md) (Abschnitt 6/13), [`docs/federation.md`](../docs/federation.md) und [`docs/todo.md`](../docs/todo.md). Laufender Koordinationsstatus (solange noch aktiv daran gearbeitet wird): [`docs/status.md`](../docs/status.md).
 
 ## Warum Basis und Föderation zusammen
 
-`client-lib/` hatte noch keinen Code, als die Server-Föderation (F-S) fertig wurde — statt erst das ursprüngliche, nicht-föderierte P2.1–P2.5 zu bauen und danach umzubauen, entwirft der F-C0-Plan **eine** Bibliothek, die beides von Anfang an vereint. Kein Migrationspfad nötig, da es keine bestehende Integration gibt.
+`client-lib/` hatte noch keinen Code, als die Server-Föderation (F-S) fertig wurde — statt erst das ursprüngliche, nicht-föderierte P2.1–P2.5 zu bauen und danach umzubauen, entstand von Anfang an **eine** Bibliothek, die beides von Anfang an vereint. Kein Migrationspfad nötig, da es keine bestehende Integration gibt.
 
 ## Toolchain
 
-Rust-Kern (`core/`) + dünne Bindings pro Plattform (`bindings/`): UniFFI (Android/iOS), flutter_rust_bridge (Flutter), uniffi-bindgen-react-native (React Native), cbindgen + PyO3 + napi-rs (C-ABI/Python/Node.js), wasm-bindgen (Web). Speicher: `rusqlite`/`sqlite-wasm-rs` (SQLite, kein SpatiaLite — Begründung im F-C0-Plan). Tiling: `h3o` (reines Rust, gleiche H3-Resolution-7-Semantik wie der Server). Kryptografie: `ed25519-dalek` + `serde_json_canonicalizer` (RFC 8785) — siehe "Kryptografie" unten.
+Rust-Kern (`core/`) + dünne Bindings pro Plattform (`bindings/`): UniFFI (Android/iOS), flutter_rust_bridge (Flutter), uniffi-bindgen-react-native (React Native), cbindgen + PyO3 + napi-rs (C-ABI/Python/Node.js), wasm-bindgen (Web). Speicher: `rusqlite`/`sqlite-wasm-rs` (SQLite, kein SpatiaLite). Tiling: `h3o` (reines Rust, gleiche H3-Resolution-7-Semantik wie der Server). Kryptografie: `ed25519-dalek` + `serde_json_canonicalizer` (RFC 8785) — siehe "Kryptografie" unten.
 
 ## Kryptografie
 
@@ -26,13 +26,13 @@ cargo run -p trafficnetwork-core --example gen_vector | node fixtures/verify-vec
 
 ## Föderation
 
-Server-Discovery über `GET /v1/network/directory` (eingebaute Seed-Liste als Startpunkt), Mehrserver-Pool mit clientseitig gemessener Latenz + Reputationsstufe für die Auswahl (das Verzeichnis liefert keine Geo-Angabe — "Nähe" wird gemessen, nicht behauptet), Failover mit exponentiellem Backoff, pro-Server-Sync-Cursor (da `/v1/delta`s `since` serverseitig weiterhin lokal ist), client-lokale Stichproben-Prüfung gegen Zurückhalten (serverseitig nicht implementiert, siehe `server/docs/federation-protocol.md` §7). Details/Begründung: F-C0-Plan-Abschnitt dieser Session, konsolidiert in `docs/status.md`.
+Server-Discovery über `GET /v1/network/directory` (eingebaute Seed-Liste als Startpunkt), Mehrserver-Pool mit clientseitig gemessener Latenz + Reputationsstufe für die Auswahl (das Verzeichnis liefert keine Geo-Angabe — "Nähe" wird gemessen, nicht behauptet), Failover mit exponentiellem Backoff, pro-Server-Sync-Cursor (da `/v1/delta`s `since` serverseitig weiterhin lokal ist), client-lokale Stichproben-Prüfung gegen Zurückhalten (serverseitig nicht implementiert, siehe `server/docs/federation-protocol.md` §7). Details/Begründung: `docs/status.md`.
 
 `core/src/platform/{clock,http,ws}.rs` sind die host-app-austauschbaren Seams (kein direkter Netzwerk-/Uhrzugriff im Kern); `ReqwestHttpTransport` ist der Standard und läuft unverändert nativ wie auf `wasm32-unknown-unknown` (reqwest wechselt selbst auf `fetch()` im Browser). `core/src/discovery/{types,scoring,pool,service}.rs` implementiert das oben Beschriebene — `ServerPool` und `discovery::scoring` sind pure, deterministisch unit-getestete Logik (Zeit/Zufall werden injiziert, nie intern gelesen), `DiscoveryService` verbindet sie mit dem Transport.
 
-## Sync-Engine (F-C3)
+## Sync-Engine
 
-`core/src/storage/mod.rs` definiert `Store` — die Persistenz-Seam (Cursor pro Server, Partitions-Hashes, Entitäten, Schreibpuffer), analog zu `Clock`/`HttpTransport`. `InMemoryStore` ist die Referenzimplementierung, gegen die die meisten Tests in diesem Crate laufen und die kleine Datenmengen (Tests, Prototypen) trägt; für echte Bestände gibt es seit Zusatz E Teil C den `SqliteStore` (nativ, siehe unten). Die Browser-Variante (`sqlite-wasm-rs`) ist **weiterhin auf F-C4 verschoben** — das ist eine Plattform-/Binding-Entscheidung, keine, die der plattformunabhängige Kern selbst treffen sollte.
+`core/src/storage/mod.rs` definiert `Store` — die Persistenz-Seam (Cursor pro Server, Partitions-Hashes, Entitäten, Schreibpuffer), analog zu `Clock`/`HttpTransport`. `InMemoryStore` ist die Referenzimplementierung, gegen die die meisten Tests in diesem Crate laufen und die kleine Datenmengen (Tests, Prototypen) trägt; für echte Bestände gibt es einen `SqliteStore` (nativ, siehe unten). Die Browser-Variante (`sqlite-wasm-rs`) ist **weiterhin offen** — das ist eine Plattform-/Binding-Entscheidung, keine, die der plattformunabhängige Kern selbst treffen sollte.
 
 `core/src/sync/engine.rs`s `SyncEngine` orchestriert `GET /v1/snapshot` (immer mit `staticData=false`, da statische Daten separat über die inhaltsadressierten Manifest-/Partitions-Endpunkte laufen), `GET /v1/delta` mit einem **pro-Server-Cursor** (ein `409 SNAPSHOT_REQUIRED` löst einen Neu-Snapshot beim selben Server aus, nie bei einem anderen — `since` ist serverlokal, siehe "Föderation" oben) und `GET /v1/static-data/{manifest,partitions/:tile}` (Hash-Vergleich vor jedem Nachladen). Dafür neu: `DiscoveryService::request_to_server()`, die Einzelserver-Variante von `request_with_failover` für genau diesen Fall, wo ein anderer Server bei Fehlschlag aktiv falsch wäre.
 
@@ -42,11 +42,11 @@ Server-Discovery über `GET /v1/network/directory` (eingebaute Seed-Liste als St
 
 `core/src/sync/{matching,expiry}.rs` sind reine, netzwerkfreie lokale Abfragen gegen bereits synchronisierte Daten: nächstgelegenes Tempolimit / Nahbereich-Meldungen (flache Projektion, für die Zehner-Meter-Skala ausreichend genau) bzw. Verfallsberechnung (liest `ClientConfig.hazard_expiry_ms_by_type` aus `GET /v1/config`, statt die Server-Konstanten zu duplizieren).
 
-`core/src/sync/withholding.rs` ist die client-lokale Stichproben-Prüfung (Standard 10 % der Sync-Zyklen, F-C0-Plan §1.5): vergleicht die Delta-Antwort des Primärservers gegen einen Zweitserver für dieselbe `since`-Anfrage und verbucht eine gefundene Zurückhaltung als rein clientlokalen Reputations-Malus — in `SyncEngine` verankert, kein zusätzlicher Aufruf nötig.
+`core/src/sync/withholding.rs` ist die client-lokale Stichproben-Prüfung (Standard 10 % der Sync-Zyklen): vergleicht die Delta-Antwort des Primärservers gegen einen Zweitserver für dieselbe `since`-Anfrage und verbucht eine gefundene Zurückhaltung als rein clientlokalen Reputations-Malus — in `SyncEngine` verankert, kein zusätzlicher Aufruf nötig.
 
-`core/src/platform/ws.rs` (`WsConnection`/`WsTransport`) + `core/src/sync/realtime.rs`s `run()` treiben `GET /v1/ws` (Auth-Handshake, Tile-Subscriptions, Event-Dispatch über denselben `SyncEngine::apply_event`, den auch Delta-Pull nutzt) — vollständig getestet gegen eine simulierte Verbindung. **Ohne mitgelieferte Standardimplementierung**: anders als bei HTTP (`ReqwestHttpTransport`) ist ein echter WebSocket-Client eine Plattformentscheidung (`tokio-tungstenite` nativ, Browser-`WebSocket` auf `wasm32`), die sich ohne echte Toolchain nicht verifizieren lässt — bewusst auf F-C4 verschoben statt hier blind geraten.
+`core/src/platform/ws.rs` (`WsConnection`/`WsTransport`) + `core/src/sync/realtime.rs`s `run()` treiben `GET /v1/ws` (Auth-Handshake, Tile-Subscriptions, Event-Dispatch über denselben `SyncEngine::apply_event`, den auch Delta-Pull nutzt) — vollständig getestet gegen eine simulierte Verbindung. **Ohne mitgelieferte Standardimplementierung**: anders als bei HTTP (`ReqwestHttpTransport`) ist ein echter WebSocket-Client eine Plattformentscheidung (`tokio-tungstenite` nativ, Browser-`WebSocket` auf `wasm32`), die sich ohne echte Toolchain nicht verifizieren lässt — bewusst offen gelassen statt hier blind geraten.
 
-## Falsche Tempolimits melden und korrigieren (Zusatz K, Teil C)
+## Falsche Tempolimits melden und korrigieren
 
 `core/src/sync/corrections.rs` macht das Melden eines falschen Tempolimits und das Bestätigen/Widersprechen aus Host-Apps möglich — gebaut gegen den tatsächlichen Server-Vertrag (`server/docs/api.md`, "Speed-limit corrections"; Plan mit allen Entscheidungen: `server/docs/speed-limit-corrections.md`).
 
@@ -57,7 +57,7 @@ Server-Discovery über `GET /v1/network/directory` (eingebaute Seed-Liste als St
 - `correction_id()` leitet die deterministische Korrektur-ID exakt wie der Server ab (Testvektoren unabhängig mit einer zweiten SHA-256-Implementierung berechnet), sodass ein Vorschlag seine ID schon vor dem Senden kennt. `fetch_corrections()` (`GET /v1/speed-limit-corrections?tiles=…`) liefert offene Vorschläge für „stimmt das noch?"; ein alter Server liefert `404` = leere Liste, kein Fehler.
 - Widerspruch gegen den **eigenen** Vorschlag nimmt ihn sofort zurück (der Server entzieht einem Gerät bei Widerspruch die Zustimmung); war er noch nicht gesendet, wird er einfach verworfen und nichts gesendet.
 
-## Online-Anzeige (Zusatz O, Teil C)
+## Online-Anzeige
 
 `core/src/status.rs` macht die Zahl „aktuell online" aus dem öffentlichen `GET /v1/stats/online` für Host-Apps verfügbar: `NetworkStatus { online_node, online_network, online_estimated, online_as_of }` (JSON: `onlineNode`, `onlineNetwork`, `onlineEstimated`, `onlineAsOf`). Rein additiv, alle Felder optional.
 
@@ -65,10 +65,10 @@ Server-Discovery über `GET /v1/network/directory` (eingebaute Seed-Liste als St
 - **Ältere Server** ohne den Endpunkt (404/405/410, 401/403) oder mit abgeschalteter Funktion (`{"enabled": false}`) lassen die Felder leer, ohne Fehler, und werden fünf Minuten lang nicht erneut gefragt. Ein kurzer Ausfall behält die zuletzt bekannten Werte.
 - **Zwei Zusicherungen, die nicht vom Server abhängen:** Eine exakte Zahl unter `minDisplayThreshold` wird als `Below(N)` („weniger als N") weitergegeben, nie als Zahl; die netzweite Zahl ist immer `estimated`, was der Knoten auch behauptet (fremde Zahlen sind Behauptungen).
 - Die Bibliothek sendet dafür nichts Zusätzliches — die Zählung passiert serverseitig anhand bestehender Verbindungen/Anfragen.
-- `getNetworkStatus()` als öffentliche Fassade gibt es noch nicht (F-C4/F-C5); `NetworkStatus` ist dessen erste Heimat, die übrigen Felder aus dem F-C0-Plan (bekannte/aktive Knoten, Verzeichnis-/Config-Version) kommen dort dazu.
+- `getNetworkStatus()` als öffentliche Fassade gibt es noch nicht; `NetworkStatus` ist dessen erste Heimat, die übrigen geplanten Felder (bekannte/aktive Knoten, Verzeichnis-/Config-Version) kommen dort dazu.
 - Gebaut gegen das im Auftrag vorgeschlagene Antwortformat `{ node: { online, windowSeconds }, network?: { online, nodes, estimated, asOf }, minDisplayThreshold }` mit `online: null` + `below: N` unter dem Schwellenwert; **der Server-Teil (A) steht noch aus** — weicht er ab, genügt eine Anpassung von `parse_online_stats` samt Tests.
 
-## Grundstock in großem Maßstab (Zusatz E, Teil C)
+## Grundstock in großem Maßstab (Europa-Skala)
 
 Vorbereitung und Messung für den Europa-Grundstock ("alles auf jedem Gerät"). **Rein additiv** — keine bestehende API ändert sich; die Entscheidung "alles auf jedem Gerät" bleibt, bis der Nutzer sie ändert. Messwerte und Bewertung: [`docs/bootstrap-measurements.md`](docs/bootstrap-measurements.md).
 
@@ -78,22 +78,22 @@ Vorbereitung und Messung für den Europa-Grundstock ("alles auf jedem Gerät"). 
 - **Fortschritt:** `SyncEngine::with_observer(Arc<dyn SyncObserver>)` meldet nach jeder Partition `BootstrapProgress { partitions_total, partitions_done, bytes_total, bytes_done }`. `SyncEngine::sync_static_data(token)` führt nur den statischen Teil aus (der reguläre `sync` ruft ihn ebenfalls).
 - **Messwerkzeug:** `core/examples/measure_bootstrap.rs` — misst gegen einen echten Server (`--server URL --client-id … --client-secret …`) oder gegen synthetische, an die echte Bayern-Form angelehnte Daten (`--synthetic-segments N`): übertragene Bytes, gzip-Schätzung, Dauer (Transport vs. Verarbeitung), Datenbankgröße, Speicherspitze des Prozesses, Zeit bis zur ersten Abfrage, Latenzverteilung der Ortsabfragen nach Neustart. Ein Windows-Build liegt als Artefakt des Workflows `client-lib-bench.yml` (siehe unten).
 
-## Öffentliche API, C-ABI, erstes Binding (Zusatz F-C4, angefangen)
+## Öffentliche API, C-ABI, erstes Binding
 
 `core/src/api/` ist die eine öffentliche Fassade, die jedes Binding freigibt: `TrafficNetworkClient` (Rust) bzw. `call(methode, argumenteJson) -> ergebnisJson` (jedes andere Binding) über `bindings/c-abi/src/client.rs`s C-ABI (`tn_client_new`/`tn_client_call`/`tn_client_call_async`/`tn_client_free`, plus `tn_client_new_with_secure_store` für einen App-eigenen sicheren Speicher und `tn_client_set_event_callback`). Vollständige Methodenreferenz: [`docs/api.md`](docs/api.md).
 
-- **Init-Optionen** (`ClientOptions`): `nodes`/`discovery`/`seeds` wie im F-C0-Plan skizziert, dazu `networkRootKey` (Netzwerk-Konfiguration nur mit Schlüssel verifizierbar, ohne Schlüssel wird sie ignoriert — nie blind vertraut), `credentials` (fertiges `client`-Credential oder App-Schlüssel, der das Gerät beim ersten Gebrauch selbst registriert und das Ergebnis in den sicheren Speicher legt), `cameraNamespaceEnabled`, `syncIntervalSeconds`.
+- **Init-Optionen** (`ClientOptions`): `nodes`/`discovery`/`seeds` wie geplant, dazu `networkRootKey` (Netzwerk-Konfiguration nur mit Schlüssel verifizierbar, ohne Schlüssel wird sie ignoriert — nie blind vertraut), `credentials` (fertiges `client`-Credential oder App-Schlüssel, der das Gerät beim ersten Gebrauch selbst registriert und das Ergebnis in den sicheren Speicher legt), `cameraNamespaceEnabled`, `syncIntervalSeconds`.
 - **Lesend, nie netzwerkgebunden:** `getSpeedLimitAt`/`getNearby` beantworten sich ausschließlich aus dem lokalen Speicher (Sub-Millisekunde, siehe `bootstrap-measurements.md`); `getNearby` dedupliziert dieselbe Meldung von zwei Servern (unterschiedliche Zeilen-IDs) und zeigt eigene, noch nicht gesendete Meldungen sofort (`pending: true`).
-- **Schreibend:** `submitReport`/`confirmReport`/`reportCameraRemoved` reihen nur ein; `reportWrongSpeedLimit`/`confirmSpeedLimitCorrection` nutzen dieselbe Überlagerung wie K-C. Gesendet wird ausschließlich durch `sync()`/`tick()` — nichts läuft von selbst.
+- **Schreibend:** `submitReport`/`confirmReport`/`reportCameraRemoved` reihen nur ein; `reportWrongSpeedLimit`/`confirmSpeedLimitCorrection` nutzen dieselbe Überlagerung wie die Tempolimit-Korrekturen (siehe oben). Gesendet wird ausschließlich durch `sync()`/`tick()` — nichts läuft von selbst.
 - **Blitzer-Namensraum:** dreifaches Ja (Server-Flag **und** verifizierte Netzwerk-Konfiguration **und** `cameraNamespaceEnabled` der Host-App) — die Netzwerk-Konfiguration kann nur einschränken, nie freigeben.
 - **`sync()`** trennt den statischen vom dynamischen Teil (ein unterbrochener Grundstock-Download blockiert nie frische Meldungen) und lässt einen ausgefallenen Pool-Server die anderen nicht aufhalten; scheitert nur bei fehlenden Zugangsdaten, keinem erreichbaren Server oder vollem Speicher (`storageFull`) — jeder Teilfehler steht im zurückgegebenen `SyncReport`, wird nicht geworfen.
-- **Gefundene und behobene Lücken in F-C2 beim Aufbau der Fassade:** ein Verzeichnis nennt nur die *anderen* Knoten, nie sich selbst — ein Kaltstart mit nur einem Seed landete deshalb mit leerem Pool; jetzt trägt sich der antwortende Server selbst ein. Und: geriet der (einzige) Server in Backoff, blieb der Pool leer und nichts wurde je wieder versucht — jetzt wird bei leerem Pool der Server mit der nächsten Erholungszeit trotzdem versucht.
+- **Gefundene und behobene Lücken beim Aufbau der Fassade:** ein Verzeichnis nennt nur die *anderen* Knoten, nie sich selbst — ein Kaltstart mit nur einem Seed landete deshalb mit leerem Pool; jetzt trägt sich der antwortende Server selbst ein. Und: geriet der (einzige) Server in Backoff, blieb der Pool leer und nichts wurde je wieder versucht — jetzt wird bei leerem Pool der Server mit der nächsten Erholungszeit trotzdem versucht.
 - **Erstes Binding:** `bindings/python/` (reines `ctypes`, keine Abhängigkeiten). **Konformität:** `client-lib/conformance/` — ein Satz Szenarien (`scenarios.json`) gegen einen geskripteten Server (`mock-server.mjs`, echtes Ed25519/RFC 8785, unabhängig vom echten Server-Code), aktuell mit einem Python-Runner, CI-Job `conformance-python`.
-- **Bewusst noch offen** (siehe Meilensteine): WASM/Browser-Speicher, Node/Dart/Kotlin/Swift-Wrapper samt eigener Konformitätsläufe, React-Native-Modul, Android-AAR/iOS-XCFramework-Paketierung, Mehrknoten-Integrationstests gegen echte Server (B2).
+- **Bewusst noch offen** (siehe "Was noch fehlt" oben): WASM/Browser-Speicher, Node/Dart/Kotlin/Swift-Wrapper samt eigener Konformitätsläufe, React-Native-Modul, Android-AAR/iOS-XCFramework-Paketierung.
 
-## Echter WebSocket-Transport (Zusatz B1)
+## Echter WebSocket-Transport
 
-Löst das letzte Stück der Local-First-mit-Push-Zusage ein: bis hierhin gab es nur den Protokolltreiber (`sync::realtime::run`, F-C3), keinen echten Client, der ihn am Laufen hält.
+Löst das letzte Stück der Local-First-mit-Push-Zusage ein: bis hierhin gab es nur den Protokolltreiber (`sync::realtime::run`), keinen echten Client, der ihn am Laufen hält.
 
 - **`platform::TokioTungsteniteWsTransport`** (nativ, `tokio-tungstenite` + `rustls-tls-webpki-roots` — passt zu `reqwest`s eigener TLS-Wahl, keine zweite TLS-Bibliothek). Bewusst **nicht** in Lese-/Schreibhälften gesplittet: `WsConnection::send_text`/`recv_text` sind ohnehin sequenziell, und nur so beantwortet `tokio-tungstenite` einen `Ping` automatisch mit einem `Pong`, ohne dass dieser Code selbst etwas davon merkt (gegen die tatsächliche Crate-Quelle geprüft, nicht angenommen).
 - **`platform::Sleep`** (neuer Seam, analog zu `Clock`/`HttpTransport`/`WsTransport`): das Warten zwischen Wiederverbindungsversuchen, nativ per `tokio::time::sleep`, austauschbar für Tests (die dann in Millisekunden statt Minuten laufen).
@@ -101,7 +101,7 @@ Löst das letzte Stück der Local-First-mit-Push-Zusage ein: bis hierhin gab es 
 - **C-ABI:** `tn_client_start_realtime(handle)`/`tn_client_stop_realtime(handle)` — spawnt die Schleife auf der ohnehin schon vorhandenen Tokio-Runtime des C-ABI-Crates; die Host-App braucht dafür keinen eigenen Thread.
 - **Bekannte Vereinfachung:** eine Kacheländerung während eine Verbindung offen ist, wirkt erst beim nächsten Wiederverbinden (der Protokolltreiber abonniert nur einmal, direkt nach dem Auth-Handshake) — im Code und in `docs/api.md` vermerkt, nicht stillschweigend hingenommen.
 
-## Mehrknoten-Integrationstests gegen echte Server (Zusatz B2)
+## Mehrknoten-Integrationstests gegen echte Server
 
 Belegt, dass Discovery/Failover/Föderation im Zusammenspiel wirklich halten — gegen echte Server-Prozesse, nicht gegen den geskripteten Konformitäts-Mock (der bleibt für binding-übergreifende Alltagsszenarien richtig, ersetzt das hier nicht).
 
@@ -115,24 +115,20 @@ Belegt, dass Discovery/Failover/Föderation im Zusammenspiel wirklich halten —
 
 Rust ist auf der Entwicklungsmaschine dieser Session nicht installiert — Verifikation ausschließlich über `.github/workflows/client-lib-ci.yml` (native build+test+clippy+fmt als eigener Job, `wasm32-unknown-unknown`-Build, Cross-Language-Krypto-Vektor, cbindgen-Header-Generierung, `conformance-python` gegen den geskripteten Server). Mit lokalem Rust: `cargo build --workspace`, `cargo test --workspace` in `client-lib/`.
 
-## Meilensteine
+## Was heute geht
 
-| # | Inhalt | Status |
-|---|---|---|
-| F-C0 | Stand geprüft, Entscheidungen (Server-Auswahl, Failover, Sync beim Serverwechsel, Stichproben-Prüfung, Verzeichnis-Cache), Architektur-Skizze, Plan | ✅ |
-| F-C1 | Kryptografie im Kern + gerätesignierte Datenstrukturen, Cargo-Workspace, C-ABI-Skelett, CI-Matrix | ✅ |
-| F-C2 | Discovery-Modul + Mehrserver-Transport-Pool + Failover | ✅ |
-| F-C3 | Sync-Engine (Bootstrap/Delta/Pakete/WebSocket, pro-Server-Cursor), Offline-Schreibpuffer, Map-Matching, Verfallsberechnung, Stichproben-Prüfung | ✅ |
-| F-C4 | Öffentliche API + C-ABI + Python-Binding + Konformitätsrahmen fertig; **WASM, Node, Dart, Kotlin, Swift, React Native, Paketierung offen** | 🟡 |
-| F-C5 | Mehrknoten-Integrationstests grün, Doku, Pull Request — **Abschluss** | |
+- Kompletter plattformunabhängiger Kern: Kryptografie (Ed25519, RFC-8785-kanonisches JSON, cross-language gegen den Server verifiziert), Server-Discovery mit Mehrserver-Failover, Sync-Engine (Snapshot-Bootstrap, Delta-Pull mit pro-Server-Cursor, inhaltsadressierte Statikdaten-Pakete), echter WebSocket-Push mit Wiederverbindung und Lückenschluss, Offline-Schreibpuffer, lokales Map-Matching, lokale Verfallsberechnung, client-lokale Stichproben-Prüfung gegen zurückgehaltene Daten.
+- Zusatzfunktionen: Community-Tempolimit-Korrekturen (vorschlagen/bestätigen/widersprechen), "aktuell online"-Anzeige, ein `SqliteStore` für echte Datenmengen (nativ).
+- Gegen ein echtes Mehrknoten-Testnetz verifiziert (Kaltstart, Serverausfall mitten im Sync, Duplikate über zwei Server, bösartige Antworten).
+- Eine öffentliche API-Fassade (`core/src/api/`) über ein C-ABI, mit einem ersten Binding: Python (`bindings/python/`, reines `ctypes`).
 
-Fortsetzung nach PR #10 (`rework/client-lib-bindings`, ersetzt F-C4-Rest/F-C5 durch die feinere B-Reihe aus dem Folgeauftrag):
+## Was noch fehlt
 
-| # | Inhalt | Status |
-|---|---|---|
-| B0 | Plan (echter Push zuerst, dann Mehrknoten-Belege, dann Bindings nach Schwierigkeitsgrad), Entscheidungen mit Begründung | ✅ |
-| B1 | Echter WebSocket-Transport (`tokio-tungstenite`), `platform::Sleep`, Wiederverbindung mit Backoff + Lückenschluss, C-ABI-Start/Stop | ✅ |
-| B2 | Mehrknoten-Integrationstests gegen echte Server-Prozesse | ✅ |
-| B3 | WASM + JS/TS | 🔜 |
-| B4 | Kotlin, Swift, Dart | |
-| B5 | React Native, Paketierung, Konformitätstests über mehrere Bindings — **Abschluss** | |
+Weitere dünne Anbindungen auf demselben Kern, nach Schwierigkeitsgrad:
+
+- WASM + JS/TS (Browser)
+- Kotlin (Android), Swift (iOS/macOS), Dart (Flutter)
+- React Native, Paketierung je Zielplattform (Android-AAR, iOS-XCFramework, npm, …)
+- Konformitätstests über mehrere Bindings hinweg (derselbe Szenariensatz, gleiches Verhalten überall)
+
+Bis diese stehen, bleibt die Bibliothek bei einer `0.x`-Version. Details/aktueller Zwischenstand: [`docs/status.md`](../docs/status.md), solange die Arbeit daran läuft.

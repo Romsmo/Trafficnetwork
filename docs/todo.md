@@ -12,11 +12,13 @@ für den Verlauf.
 
 **Veraltet (Stand 2026-09-17, hier nur noch als Historie stehen gelassen):**
 frühere Fassungen dieses Abschnitts gingen davon aus, dass F-C auf F-S
-wartet und noch keinen Code hat. Tatsächlicher Stand seither: F-S0–F-S5 sind
-fertig und auf `main` gemergt (PR #1); F-C0–F-C3 sind fertig, F-C4 ist
-angefangen (öffentliche API, C-ABI, Python-Binding, Konformitätsrahmen),
-F-C5 (weitere Bindings, Mehrknoten-Integrationstests, Abschluss-PR) steht
-aus — Einzelheiten in `client-lib/README.md`s Meilenstein-Tabelle und in
+wartet und noch keinen Code hat. Tatsächlicher Stand seither: Server und
+Weboberfläche sind vollständig fertig und auf `main` gemergt. Die
+Client-Bibliothek hat ihren Kern, echten WebSocket-Push, ein C-ABI/Python-
+Binding fertig und ist gegen ein echtes Mehrknoten-Testnetz verifiziert;
+weitere Anbindungen (WASM/JS-TS, Kotlin, Swift, Dart, React Native) und
+Konformitätstests darüber stehen noch aus — Einzelheiten in
+`client-lib/README.md` ("Was heute geht" / "Was noch fehlt") und in
 [`docs/status.md`](status.md).
 
 ## Vor der Prompt-Erstellung — offene Entscheidungen
@@ -66,7 +68,7 @@ aus — Einzelheiten in `client-lib/README.md`s Meilenstein-Tabelle und in
 - [x] Claude-Code-Prompts erstellt (`docs/prompt-rework-server-federation.md`, `docs/prompt-rework-client-lib-federation.md`)
 - [x] Stand von Phase 2 im Repo klären: P2.0 (Server-Erweiterungen für client-lib) ist auf GitHub; `client-lib/` selbst enthält bewusst noch keinen Code — das ist die eigentliche Phase-2-Client-Bibliothek, eigener, noch nicht gestarteter Auftrag
 - [x] F-S: Server-Überarbeitung (Docker/Apache/nginx/Caddy, Signaturen, Föderation, Reputation, Verzeichnis) — F-S0–F-S5 vollständig umgesetzt (Docker/Compose/Installation ohne Docker, Node-/Wurzelschlüssel + CLI, geräteseitig signierte Auth, signierte Netzwerk-Konfiguration, Beitritt über Seeds, Peer-Verzeichnis + Gossip, signierte Heartbeats, Push/Pull-Replikation geräteseitig signierter Meldungserstellungen, Reputationsstufen, `GET /v1/network/directory` + Export-Skript, Überlast-Signal, echtes Mehrknoten-Testnetz), Doku vollständig (`server/docs/{installation,operating,api,schema,threat-model,federation-protocol}.md`), Branch `rework/server-federation`, Pull Request nach `main` eingereicht
-- [ ] F-C: Client-Bibliothek-Überarbeitung (Discovery, Failover, Signaturprüfung, gerätesignierte Meldungen) — Kern (F-C0–F-C3) und die öffentliche API/C-ABI/Python-Binding (Teil von F-C4) fertig, siehe `client-lib/README.md`; weitere Bindings + Mehrknoten-Tests + Abschluss-PR offen (F-C4 Rest/F-C5)
+- [ ] F-C: Client-Bibliothek-Überarbeitung (Discovery, Failover, Signaturprüfung, gerätesignierte Meldungen) — Kern, echter WebSocket-Push, C-ABI/Python-Binding und die Verifikation gegen ein echtes Mehrknoten-Testnetz sind fertig, siehe `client-lib/README.md`; weitere Anbindungen (WASM/JS-TS, Kotlin, Swift, Dart, React Native) und Konformitätstests über sie hinweg bleiben offen
 - [ ] Domain `trafficnetwork.info` (entschieden 2026-09-27) registrieren und DNS betreiben — Platzhalter in Code/Doku sind bereits ersetzt
 - [ ] Netzwerk-Wurzelschlüssel erzeugen und offline sicher aufbewahren
 - [ ] Mindestens zwei Seed-Server bei unterschiedlichen Anbietern bereitstellen
@@ -118,7 +120,7 @@ aus — Einzelheiten in `client-lib/README.md`s Meilenstein-Tabelle und in
 - [x] Entschieden: statische Daten weiterhin **vollständig an jedes Gerät** — Machbarkeit wird nach dem Import gemessen, nicht geraten
 - [x] Zusatz-Prompts erstellt (`docs/prompt-addon-europe-basemap.md`)
 - [x] E-A Ingestion: Machbarkeitsbericht, Europa-Import (13,68 Mio. Zeilen, 4,1 GB) und Bericht (`ingestion/docs/europe-feasibility.md`, `europe-run-report.md`), Update-Weg nur dokumentiert
-- [~] E-B Server: Code fertig (Branch `feature/europe-scale`, gestapelt auf K-A + Perf-Fix, gepusht, PR wartet; vorgebaute, streamende, zwischenspeicherbare Pakete, Batch-Import, Snapshot-Schutz, `?since=`, Range). **Entschieden 2026-09-25:** Auflösung 4 ist Code-Standard, `partitionResolution` steht im Manifest (Client-Instanz: bei Abweichung neu bootstrappen); Migration 0007 bleibt als dokumentiertes Wartungsfenster (Migrations-Regel + Warnung eingeführt). **Offen:** Vollsuite mit Docker laufen lassen (erst nach dem Europa-Import), Integrationstest `europe-scale` nach der Auflösungs-Änderung wiederholen, vollständige Messung (Bau-Dauer, Spitzen-RSS, Kachelgrößen, Manifest, Migration 0007+0008) **auf einer Kopie des echten Bestands**, danach Migration + Paketbau auf `tn-europe` selbst
+- [x] E-B Server: fertig und gemergt (vorgebaute, streamende, zwischenspeicherbare Pakete, Batch-Import, Snapshot-Schutz, `?since=`, Range). Auflösung 4 ist Code-Standard, `partitionResolution` steht im Manifest; die vollständige Messung auf einer Kopie des echten Bestands liegt in `server/docs/europe-scale.md`. **Offen bleibt nur der Betreiber-Schritt:** Migration + Paketbau auf `tn-europe` selbst (siehe "Offen (Betreiber)" weiter unten, Zusatz Q)
 - [x] E-C Client-Bibliothek: vollständigen Bootstrap gemessen und berichtet (`client-lib/docs/bootstrap-measurements.md`: echtes Bayern über einen echten Server, synthetisch bis 20 Mio. Segmente, Abbruch/Fortsetzen, Bandbreiten-Rechnung) — dabei `SqliteStore` (R*Tree, wiederaufnehmbarer Bootstrap, `SyncError::StorageFull`, Paket-Hashprüfung, `partitionResolution`-Abgleich mit E-B) und `plan_static_bootstrap`/`SyncObserver` als Vorab-Check bzw. Fortschritt gebaut. Branch `rework/client-lib-europe-scale`, CI grün, PR noch nicht geöffnet. Empfehlung an den Nutzer: erst E-A/E-B-Zahlen abwarten, dann Server-seitige Kompression + kleinere Partitionen + Streaming-Parser messen, bevor „alles auf jedem Gerät" infrage gestellt wird — nichts davon wurde umgestellt
 - [ ] E-D Web: Startansicht Europa, nur sichtbaren Ausschnitt laden, Cluster bei kleiner Zoomstufe
 - [ ] Nach den Messungen entscheiden, ob „alles auf jedem Gerät" so bleibt
@@ -126,10 +128,10 @@ aus — Einzelheiten in `client-lib/README.md`s Meilenstein-Tabelle und in
 ## Zusatz D — Dauerhafte Überwachungsanlagen (Rotlicht, Abstand)
 - [x] Entschieden: bestehende Tabelle `fixed_speed_cameras` verallgemeinern (Spalte `camera_type`), keine neue Tabelle je Bauart; Altbestand muss unversehrt bleiben
 - [x] Zusatz-Prompt erstellt (`docs/prompt-addon-persistent-cameras.md`) — für den Server-Chat
-- [x] D0 Plan (Server, `server/docs/persistent-enforcement-devices.md`, Branch `feature/persistent-enforcement-devices`): Migration gemessen (5 ms bei 1 Mio. Zeilen, kein Fenster), Schema/Rückrollen, API-Auswirkung belegt, Befund „feste Blitzer werden nicht föderiert", Abschnittskontrolle-Vorschlag; **wartet auf Antworten zu acht offenen Fragen**
-- [ ] D1 Migration + Migrationstest mit Altbestand (Zeilenzahl vorher/nachher, Rückrollen)
-- [ ] D2 API additiv (`cameraType`, neues Snapshot-Feld, Bulk-Import-Feld)
-- [ ] D3 Föderation und statische Pakete, Mehrknoten-Test
+- [x] D0 Plan (Server, `server/docs/persistent-enforcement-devices.md`): Migration gemessen (5 ms bei 1 Mio. Zeilen, kein Fenster), Schema/Rückrollen, API-Auswirkung belegt, Befund „feste Blitzer werden nicht föderiert", Abschnittskontrolle-Vorschlag
+- [x] D1 Migration + Migrationstest mit Altbestand (Zeilenzahl vorher/nachher, Rückrollen) — fertig und gemergt
+- [x] D2 API additiv (`cameraType`, neues Snapshot-Feld, Bulk-Import-Feld) — fertig und gemergt
+- [x] D3 Föderation und statische Pakete, Mehrknoten-Test — fertig und gemergt; **die acht offenen Fragen aus D0 §10 sind mit den dort genannten Standardwerten gebaut**, jede bleibt eine kleine, spätere Änderung (siehe `docs/audit.md`)
 - [ ] Offen: Abschnittskontrolle (`enforcement=average_speed`) — Vorschlag abwarten, noch nicht bauen
 - [ ] Offen: Soll es „dauerhaft gemeldet" durch Nutzer geben (Schwelle), oder bleiben Nutzermeldungen immer verfallend?
 

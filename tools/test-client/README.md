@@ -2,7 +2,7 @@
 
 Small tool to poke a Trafficnetwork server by hand: look up speed limits, browse the surroundings on a map, file and confirm reports, watch live push events and the sync/connection state — from the command line or a local web UI. Zero secrets in code; needs Node 22+ and nothing else but one dependency (`h3-js`).
 
-> **Not built on `client-lib`.** The tool speaks plain HTTP/WebSocket against `server/docs/api.md`. `client-lib/` is a Rust library; when this tool was written, its bindings (F-C4) had not started, so it could not be called from a Node/CLI tool at all. That has since changed — there is now a C-ABI and a Python binding (`client-lib/bindings/python`), and a real WebSocket transport (add-on B1) — but no Node/JS binding yet (`docs/prompt-client-lib-finish.md`, milestone B3). Once one exists, this tool should be re-based on it; until then it stays a plain-HTTP reference implementation, still useful on its own (e.g. as a second, independent client during a manual multi-node test).
+> **Not built on `client-lib`.** The tool speaks plain HTTP/WebSocket against `server/docs/api.md`. `client-lib/` is a Rust library; when this tool was written, its bindings had not started, so it could not be called from a Node/CLI tool at all. That has since changed — there is now a C-ABI and a Python binding (`client-lib/bindings/python`), and a real WebSocket transport — but no Node/JS binding yet (see `client-lib/README.md`'s "Was noch fehlt"). Once one exists, this tool should be re-based on it; until then it stays a plain-HTTP reference implementation, still useful on its own (e.g. as a second, independent client during a manual multi-node test).
 
 ## Start in three steps
 
