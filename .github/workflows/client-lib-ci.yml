@@ -54,6 +54,18 @@ jobs:
       - name: Test
         run: cargo test --workspace
 
+      # Cargo.lock is meant to be committed here (see the .gitignore comment:
+      # client-lib ships as prebuilt per-platform artifacts, not as a source
+      # dependency, so the usual "libraries don't commit their lockfile"
+      # advice doesn't apply) — but no session in this project has local
+      # Rust, so it can only ever be produced here. Uploaded on every run;
+      # download and commit it whenever this differs from what's checked in.
+      - uses: actions/upload-artifact@v4
+        with:
+          name: client-lib-cargo-lock
+          path: client-lib/Cargo.lock
+          retention-days: 14
+
   wasm-build:
     name: build (wasm32-unknown-unknown)
     runs-on: ubuntu-latest
