@@ -12,10 +12,13 @@ import {
   recordHealthCheckFailure,
   recordHealthCheckSuccess,
   setPeerLastPulledSequence,
+  setPeerLastPulledVotesSequence,
   upsertPeer,
+  type NetworkPeerRow,
 } from "../../db/queries/network-peers.js";
-import { requestJoin, sendHeartbeat, pullEvents } from "./http-client.js";
+import { requestJoin, sendHeartbeat, pullEvents, pullSpeedLimitVotes } from "./http-client.js";
 import { ingestDeviceCreateEvent } from "./ingest.js";
+import { ingestSpeedLimitVote } from "../speed-limit-corrections/ingest.js";
 import { getCapacityHint } from "./load.js";
 import { FEDERATION_PROTOCOL_VERSION, type HeartbeatPayload, type JoinRequestPayload } from "./protocol.js";
 
@@ -141,6 +144,45 @@ export async function pullFromPeers(deps: Deps): Promise<void> {
       deps.log.warn({ err, peer: peer.nodeId }, "federation: anti-entropy pull from peer failed");
       await recordHealthCheckFailure(deps.db, peer.nodeId);
     }
+
+    await pullSpeedLimitVotesFrom(deps, peer);
+  }
+}
+
+/** A catching-up server drains the vote stream in a burst instead of one page per cycle. */
+const VOTE_PULL_MAX_PAGES_PER_CYCLE = 20;
+
+/**
+ * Speed-limit vote stream (add-on K-A, docs/speed-limit-corrections.md D9).
+ * Kept apart from the event pull above so that a peer without the stream (an
+ * older server, or one with corrections switched off — it answers 404) is
+ * skipped quietly and is *not* counted as a failed health check: the peer is
+ * fine, it just doesn't offer this.
+ */
+async function pullSpeedLimitVotesFrom(deps: Deps, peer: NetworkPeerRow): Promise<void> {
+  if (!deps.env.COMMUNITY_CORRECTIONS_ENABLED) return;
+  try {
+    let cursor = peer.lastPulledVotesSequence ?? 0;
+    for (let pageNo = 0; pageNo < VOTE_PULL_MAX_PAGES_PER_CYCLE; pageNo++) {
+      const page = await pullSpeedLimitVotes(peer.address, cursor, deps.env.FEDERATION_ANTI_ENTROPY_PAGE_SIZE, deps.env.FEDERATION_PEER_TIMEOUT_MS);
+      if (page === null) return;
+      for (const item of page.votes) {
+        const outcome = await ingestSpeedLimitVote(deps.db, deps.env, item.envelope, peer.nodeId);
+        if (outcome.status === "recorded") {
+          for (const event of outcome.events) publishEvent(deps.realtime, event);
+        }
+      }
+      if (page.nextAfter !== null) {
+        cursor = page.nextAfter;
+        await setPeerLastPulledVotesSequence(deps.db, peer.nodeId, cursor);
+      }
+      if (page.votes.length > 0) {
+        deps.log.info({ peer: peer.nodeId, count: page.votes.length }, "federation: pulled speed-limit votes");
+      }
+      if (page.votes.length < deps.env.FEDERATION_ANTI_ENTROPY_PAGE_SIZE) return;
+    }
+  } catch (err) {
+    deps.log.warn({ err, peer: peer.nodeId }, "federation: speed-limit vote pull from peer failed");
   }
 }
 

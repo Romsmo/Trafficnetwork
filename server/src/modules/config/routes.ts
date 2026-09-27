@@ -26,6 +26,22 @@ export async function registerConfigRoutes(app: FastifyInstance) {
       reportRateLimitMax: env.REPORT_RATE_LIMIT_MAX,
       reportRateLimitWindowMinutes: env.REPORT_RATE_LIMIT_WINDOW_MINUTES,
       cameraRemovalThreshold: env.CAMERA_REMOVAL_THRESHOLD,
+      // Community speed-limit corrections (add-on K-A). Clients hide the whole
+      // feature when `enabled` is false and mirror the limits below to reject
+      // implausible input before it is sent.
+      communityCorrections: {
+        enabled: env.COMMUNITY_CORRECTIONS_ENABLED,
+        confirmationsRequired: env.COMMUNITY_CORRECTIONS_CONFIRMATIONS_REQUIRED,
+        valueRange: {
+          kmh: { min: env.COMMUNITY_CORRECTIONS_KMH_MIN, max: env.COMMUNITY_CORRECTIONS_KMH_MAX },
+          mph: { min: env.COMMUNITY_CORRECTIONS_MPH_MIN, max: env.COMMUNITY_CORRECTIONS_MPH_MAX },
+        },
+        valueStep: env.COMMUNITY_CORRECTIONS_VALUE_STEP,
+        rateLimit: {
+          max: env.COMMUNITY_CORRECTIONS_RATE_LIMIT_MAX,
+          windowMinutes: env.COMMUNITY_CORRECTIONS_RATE_LIMIT_WINDOW_MINUTES,
+        },
+      },
       staticDataVersion: await getStaticDataVersion(app.deps.db),
       federationEnabled: env.FEDERATION_ENABLED,
       // Full signed envelope (payload + keyId + signature), not just the

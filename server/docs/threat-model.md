@@ -122,6 +122,39 @@ narrows versus the full picture the threats table above describes:
   under load (e.g. always reserving headroom for `trusted` peers) is a
   natural follow-on, not built here.
 
+## Community speed-limit corrections (add-on K-A)
+
+A wrong speed limit is a **safety** problem in both directions: a falsified
+"130" in a 30 zone endangers people, and a correction that wrongly removes a
+real limit does too. The feature is therefore built around *not trusting any
+single party* — but it is a voting system in an open network, and voting
+systems have a ceiling. What is defended, and what is honestly left open:
+
+| Threat | Mitigation | Residual risk |
+|---|---|---|
+| One user (or a typo) changes a limit | Overlay only, never the import; needs `COMMUNITY_CORRECTIONS_CONFIRMATIONS_REQUIRED` *net* confirmations from distinct devices (default 3); values must be in range and on a step, in the segment's own unit, and differ from the import | None for a single actor |
+| A user tries to be several devices | The `deviceAssertion` key must be the key **bound to the calling client** (`403 DEVICE_KEY_NOT_BOUND`); a client with a bound key is one reporter whether it signs or not; the rate limit counts the *client*, not the reporter; one support per reporter per segment | A client that can register many credentials still gets one device per credential — bounded by `DEVICE_REGISTRATION_RATE_LIMIT_MAX_PER_DAY` per app key (50/day) and the correction rate limit (5/hour each), but not zero |
+| Web sessions (no device key) | Count as one voice per session on the local server only, never federated | A web layer that mints sessions without bound would defeat the threshold *locally*; the web module has to rate-limit session creation per IP |
+| A relay alters or forges a vote | Ed25519 signature by the device over the whole vote; verified by every receiver; `invalid_signature` is a reputation event against the sender | — |
+| A malicious **server** mints device keys and pushes valid-looking signed votes | Nothing in the protocol can tell a fresh key from a fresh device (Sybil resistance is not solvable in an open network — the F-S0 finding). Mitigations: node exclusion via the signed network config; operator `ban <reporter>`, `reset` and `reset --all`; per-server threshold | **Real and accepted.** A node an operator peers with can push enough keys to reach the threshold on that operator's server. Raising the threshold raises the cost; peer only with servers you trust. A follow-up could weigh votes by the reputation tier of the relaying node |
+| Correction spam / rate abuse | Own per-client limit (5 per 60 min vs. 10 per 10 min for reports), no-ops not charged; the push endpoint's existing IP limit and overload cap apply to votes | Per server, like report limits — the same device can vote once on each server |
+| A correction outlives its truth (import fixed upstream, roadworks over) | `needsReview` when the import changes to a third value; denials can flip it; operator `reset` | *Temporary* corrections do not expire automatically (non-goal, follow-up); an import that agrees with the community makes the overlay redundant and is served plain |
+| Denial abuse — trolls flipping good corrections | Denials are symmetric with support (net), each needs a distinct device, the same Sybil ceiling as above; the flip is visible in the vote log (`show`) and reversible | A correction with exactly the threshold of supporters falls to one denier until another supporter arrives — the price of a rule with no hysteresis (which would break convergence) |
+| Vote history rewritten | Votes are append-only, ordered by their *signed* timestamp; a device can only change its **own** stance (a later vote of the same reporter wins) | A device may backdate its own votes; this affects nobody else's |
+| Reporter privacy | Reporters are pseudonyms (`device:<key id>`); no endpoint returns them; rows carry no position beyond the segment | A key id links one device's votes to each other (as report events already do) |
+| Import silently overwrites a confirmed value | Corrections live in their own tables keyed by geometry, not row id; a re-import only inserts rows; `needsReview` instead of overwrite or silent drop | If a re-import changes a segment's *geometry*, its key changes and the correction stops matching (listed as an orphan) |
+
+**Implementation notes (choices that surprise).** Effective state is a pure
+function of the vote set (no path dependence), so federation converges; the
+tie-for-first rule ("no winner") is the conservative one — the source value stays
+until one side pulls ahead; resets and bans are deliberately *not* federated; a
+replicated vote is checked against the *receiving* server's range/step, so
+operators who tune those must do so consistently. The overlay is joined on
+`(segmentKey, unit)`, so a correction can never bleed into a segment with another
+unit. Everything is switchable with `COMMUNITY_CORRECTIONS_ENABLED`, and a flip
+is announced to clients through the static-data version and events
+(`docs/speed-limit-corrections.md` D11).
+
 ## Online counter notes (add-on O-A)
 
 `GET /v1/stats/online` publishes how many clients are online. What that adds,

@@ -29,16 +29,19 @@ interface Cache {
  * db/queries/sync-state.ts) — regenerated only when a write actually bumped
  * that counter, not on a timer. Same "single-instance, in-memory state" scope
  * as modules/realtime/registry.ts; horizontal scaling would need this shared
- * across instances too.
+ * across instances too. Held per database handle (not one module-level slot) so
+ * several servers in one process — the multi-node federation tests — never
+ * serve each other's packages just because their version counters coincide.
  */
-let cache: Cache | null = null;
+const caches = new WeakMap<object, Cache>();
 
 async function ensureCache(db: Queryable, env: Env): Promise<Cache> {
   const version = await getStaticDataVersion(db);
+  const cache = caches.get(db);
   if (cache && cache.version === version) return cache;
 
   const [speedLimitSegments, staticSigns, fixedSpeedCameras] = await Promise.all([
-    findAllSpeedLimitSegments(db),
+    findAllSpeedLimitSegments(db, env.COMMUNITY_CORRECTIONS_ENABLED),
     findAllStaticSigns(db),
     env.SPEED_CAMERA_NAMESPACE_ENABLED ? findAllActiveFixedSpeedCameras(db) : Promise.resolve([]),
   ]);
@@ -54,12 +57,13 @@ async function ensureCache(db: Queryable, env: Env): Promise<Cache> {
   }
   summaries.sort((a, b) => a.tile.localeCompare(b.tile));
 
-  cache = {
+  const fresh: Cache = {
     version,
     manifest: { staticDataVersion: version, generatedAt: new Date().toISOString(), partitions: summaries },
     partitionJson,
   };
-  return cache;
+  caches.set(db, fresh);
+  return fresh;
 }
 
 export async function getStaticDataManifest(db: Queryable, env: Env): Promise<StaticDataManifest> {

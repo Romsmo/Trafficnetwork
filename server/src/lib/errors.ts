@@ -31,6 +31,11 @@ export function conflict(code: string, message: string, details?: unknown): ApiE
   return new ApiError(409, code, message, details);
 }
 
+/** Well-formed request the server understood but will not act on (semantic validation) — `code` is machine-readable for clients. */
+export function unprocessable(code: string, message: string, details?: unknown): ApiError {
+  return new ApiError(422, code, message, details);
+}
+
 export function tooManyRequests(message = "Too many requests"): ApiError {
   return new ApiError(429, "TOO_MANY_REQUESTS", message);
 }

@@ -40,7 +40,7 @@ export interface DeviceCreateEventPayload {
  * dedup/lookup key, so it can't itself be forged independent of a real
  * signature the way a payload-embedded id could.
  */
-export function computeFederationEventId(envelope: SignedEnvelope<DeviceCreateEventPayload>): string {
+export function computeFederationEventId(envelope: SignedEnvelope<unknown>): string {
   return createHash("sha256")
     .update(toCanonicalBytes({ payload: envelope.payload, signature: envelope.signature }))
     .digest("hex");

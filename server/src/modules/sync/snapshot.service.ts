@@ -44,14 +44,21 @@ export interface SnapshotResult {
  */
 export async function generateSnapshot(
   db: Queryable,
-  opts: { tiles?: string[]; types?: HazardType[]; cameraNamespaceEnabled: boolean; includeStaticData?: boolean },
+  opts: {
+    tiles?: string[];
+    types?: HazardType[];
+    cameraNamespaceEnabled: boolean;
+    /** COMMUNITY_CORRECTIONS_ENABLED — whether speed-limit segments carry their community-corrected value. */
+    communityCorrectionsEnabled: boolean;
+    includeStaticData?: boolean;
+  },
 ): Promise<SnapshotResult> {
   const includeStaticData = opts.includeStaticData ?? true;
   return db.transaction(
     async (tx) => {
       const [sequenceRows, speedLimitSegments, staticSigns, fixedSpeedCameras] = await Promise.all([
         tx.execute<{ max: number | null }>(sql`select max(sequence) as max from event_log`),
-        includeStaticData ? findAllSpeedLimitSegments(tx) : Promise.resolve([]),
+        includeStaticData ? findAllSpeedLimitSegments(tx, opts.communityCorrectionsEnabled) : Promise.resolve([]),
         includeStaticData ? findAllStaticSigns(tx) : Promise.resolve([]),
         includeStaticData && opts.cameraNamespaceEnabled ? findAllActiveFixedSpeedCameras(tx) : Promise.resolve([]),
       ]);

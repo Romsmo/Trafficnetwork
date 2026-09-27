@@ -95,7 +95,7 @@ describe("spatial prefilter equivalence", () => {
       const lng = area.lng + (rand() - 0.5) * area.spread * 2.8;
       const radiusM = [50, 200, 1000, 5000, 20_000][i % 5]!;
       const expected = await referenceSegmentIds(lat, lng, radiusM);
-      const actual = (await findSpeedLimitSegmentsNearby(testDb.db, lat, lng, radiusM)).map((s) => s.id).sort();
+      const actual = (await findSpeedLimitSegmentsNearby(testDb.db, lat, lng, radiusM, true)).map((s) => s.id).sort();
       expect(actual).toEqual(expected);
       if (expected.length > 0) nonEmpty++;
     }
@@ -121,7 +121,7 @@ describe("spatial prefilter equivalence", () => {
       const lng = area.lng + (rand() - 0.5) * area.spread * 2;
       const maxM = [100, 200, 2000][i % 3]!;
       const expected = await referenceNearest(lat, lng, maxM);
-      const actual = await findNearestSpeedLimit(testDb.db, lat, lng, maxM);
+      const actual = await findNearestSpeedLimit(testDb.db, lat, lng, maxM, true);
       if (!expected) {
         expect(actual).toBeNull();
       } else {
@@ -134,7 +134,7 @@ describe("spatial prefilter equivalence", () => {
   it("still answers correctly right at the antimeridian, where no prefilter is applied", async () => {
     const expected = await referenceSegmentIds(10.0002, 179.9998, 500);
     expect(expected.length).toBe(2);
-    const actual = (await findSpeedLimitSegmentsNearby(testDb.db, 10.0002, 179.9998, 500)).map((s) => s.id).sort();
+    const actual = (await findSpeedLimitSegmentsNearby(testDb.db, 10.0002, 179.9998, 500, true)).map((s) => s.id).sort();
     expect(actual).toEqual(expected);
   });
 });

@@ -52,6 +52,11 @@ const PUBLIC_PATHS = new Set([
   "/v1/federation/peers",
   "/v1/federation/heartbeat",
   "/v1/federation/events",
+  // Add-on K-A: pull stream of device-signed speed-limit votes. A peer has no
+  // client JWT, exactly like /v1/federation/events above — and this is the
+  // fourth time this list needed a new entry, so it is also covered by
+  // tests/integration/auth-public-paths.test.ts.
+  "/v1/federation/speed-limit-votes",
 ]);
 
 /**

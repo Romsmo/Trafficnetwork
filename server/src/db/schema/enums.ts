@@ -1,7 +1,22 @@
 import { pgEnum } from "drizzle-orm/pg-core";
-import { CLIENT_SCOPES, ENTITY_TYPES, EVENT_TYPES, HAZARD_TYPES } from "../../config/constants.js";
+import {
+  CLIENT_SCOPES,
+  CORRECTION_REASONS,
+  CORRECTION_STATUSES,
+  CORRECTION_VOTE_KINDS,
+  ENTITY_TYPES,
+  EVENT_TYPES,
+  HAZARD_TYPES,
+  SPEED_LIMIT_UNITS,
+} from "../../config/constants.js";
 
-export const speedLimitUnitEnum = pgEnum("speed_limit_unit", ["kmh", "mph"]);
+export const speedLimitUnitEnum = pgEnum("speed_limit_unit", SPEED_LIMIT_UNITS);
+
+export const correctionStatusEnum = pgEnum("correction_status", CORRECTION_STATUSES);
+
+export const correctionVoteKindEnum = pgEnum("correction_vote_kind", CORRECTION_VOTE_KINDS);
+
+export const correctionReasonEnum = pgEnum("correction_reason", CORRECTION_REASONS);
 
 export const hazardTypeEnum = pgEnum("hazard_type", HAZARD_TYPES);
 
