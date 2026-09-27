@@ -84,6 +84,8 @@ Der unten dokumentierte rote CI-Befund ist behoben:
 
 ## Client-Bibliothek (`client-lib/`)
 
+**✅ Update (2026-09-27): PR #10 gemergt nach `main`.** Alles unten in diesem Abschnitt (F-C0–F-C3, Zusatz O-C, K-C, E-C, F-C4-Anfang: öffentliche API/C-ABI/Python-Binding/Konformitätsrahmen) liegt jetzt auf `main`, nicht mehr nur auf Feature-Branches — `client-lib/` hat seitdem echten Code auf `main`. Die Fortsetzung (B-Reihe: echter Push, Mehrknoten-Belege, weitere Bindings) läuft auf einem neuen Branch `rework/client-lib-bindings`, siehe „Zusatz B" weiter unten.
+
 - **Branch:** `rework/client-lib-federation` (von `main` nach dem F-Merge abgezweigt), noch nicht gemergt.
 - **Status:** F-C0–F-C3 abgeschlossen (Plan; Kryptografie im Kern; Discovery + Mehrserver-Transport-Pool + Failover; Sync-Engine + Offline-Schreibpuffer + Map-Matching + Verfallsberechnung + Stichproben-Prüfung + WebSocket-Push).
 - **CI:** Grün — `.github/workflows/client-lib-ci.yml`, Commit `61c88bb`, alle vier Jobs (native build+test+clippy+fmt, wasm32-unknown-unknown-Build, Cross-Language-Krypto-Vektor, cbindgen-Header-Generierung).
@@ -150,6 +152,19 @@ PULL REQUEST:   https://github.com/Romsmo/Trafficnetwork/pull/10 (offen, mergeab
 - Der neue Workflow `client-lib-bench.yml` läuft nur mit explizitem Trigger (`client-lib/bench/trigger.txt` anfassen) und ist kein Teil der normalen CI-Pflicht — falls das nicht gewünscht ist, bitte sagen.
 
 **BESTÄTIGUNG:** Ich bestätige, dass in meinem Bereich alle Tests in CI grün sind (bis auf den gerade laufenden letzten Merge-Commit-Lauf, dessen Vorgänger-Commits alle grün waren), die Doku dem Code entspricht und keine Geheimnisse im Repo liegen. Einschränkung: F-C4 ist nur teilweise fertig und F-C5 nicht begonnen — siehe „Offen" oben; das ist bewusst so gemeldet, nicht verschwiegen.
+
+### Zusatz B — echter Push, Mehrknoten-Belege, weitere Bindings (Fortsetzung nach PR #10)
+
+- **Branch:** `rework/client-lib-bindings` (von `main` nach dem Merge von PR #10 abgezweigt). Auftrag: `docs/prompt-*` gibt es hierfür nicht als Datei — der Auftrag kam direkt vom Nutzer, Plan mit Begründung erstellt und freigegeben (Plan-Datei dieser Sitzung, Zusammenfassung unten); ersetzt das alte F-C4-Rest/F-C5 durch eine feinere B0–B5-Reihe (siehe `client-lib/README.md`s Meilenstein-Tabelle).
+- **B0 (Plan) — fertig:** Reihenfolge nach Nutzen (nicht Bequemlichkeit): erst echter Push (B1), dann Mehrknoten-Belege gegen echte Server (B2, weil die beiden in PR #10 gefundenen Fehler genau von dieser Sorte waren), dann Bindings nach Schwierigkeitsgrad (B3 WASM zuerst, B4 Kotlin/Swift/Dart, B5 React Native + Paketierung + Konformitätstests). Domain jetzt fest: `trafficnetwork.info` (noch nicht im DNS).
+- **B1 (echter WebSocket-Transport) — fertig, CI grün:**
+  - `platform::TokioTungsteniteWsTransport` (nativ, `tokio-tungstenite` + `rustls-tls-webpki-roots` — passt zu `reqwest`s eigener TLS-Wahl). Bewusst nicht in Lese-/Schreibhälften gesplittet: gegen die tatsächliche `tungstenite`-Quelle geprüft, dass ein `Ping` beim nächsten `read()` automatisch mit einem geflushten `Pong` beantwortet wird — nur so, ohne die Hälften zu trennen, sieht der Protokolltreiber selbst nie einen Ping. Gegen einen echten lokalen WebSocket-Server getestet (inkl. echtem Ping/Pong-Austausch).
+  - `platform::Sleep` (neuer Seam neben `Clock`/`HttpTransport`/`WsTransport`), nativ `TokioSleeper`.
+  - `TrafficNetworkClient::run_realtime(&stop)`: wählt den besten Server, schließt nach jedem (Wieder-)Verbinden zuerst die Lücke per `sync_dynamic()`, hört dann erst zu; Fehler zählen jetzt gegen einen Server wie ein fehlgeschlagener HTTP-Aufruf (`DiscoveryService::record_ws_failure`/`record_ws_success`, neu, symmetrisch — Erfolg hebt einen früheren Fehlschlag wieder auf). Läuft, bis `stop` gesetzt wird oder der Client schließt — startet nie von selbst.
+  - C-ABI: `tn_client_start_realtime`/`tn_client_stop_realtime`, auf der ohnehin vorhandenen Runtime des C-ABI-Crates.
+  - Doku: `docs/api.md` („Realtime push"), `client-lib/README.md`.
+- **B2 (Mehrknoten-Integrationstests) — als Nächstes, noch nicht begonnen.**
+- **Für die Server-Instanz:** keine Änderungswünsche aus B1 — reine Client-Anbindung an das bereits dokumentierte `GET /v1/ws`-Protokoll, keine Abweichung gefunden.
 
 ## Launch L — lokaler Test (`launch/local-test`, Nutzer-PC, Windows+Docker)
 
