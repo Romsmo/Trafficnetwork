@@ -203,6 +203,18 @@ Beide sind serverseitige Bugs, in `client-lib` nur toleranzhalber abgefangen (Kr
 
 ---
 
+## 12. R3 — Domain ersetzt, Prompts ausgelagert
+
+**Domain-Platzhalter ersetzt** (Commit `3068084`): `trafficnetwork.example` → `trafficnetwork.info` in `docs/federation.md` (Anker-Absatz + Todo-Punkt) und `docs/todo.md`; die Beispiel-Seeds (`seed1.example`/`seed2.example`) → `seed1.trafficnetwork.info`/`seed2.trafficnetwork.info` in `server/.env.example`, `server/README.md`, `server/docs/operating.md`. `client-lib`s `DEFAULT_SEEDS` (`client-lib/core/src/api/options.rs`) hatte die echte Domain bereits — kam mit PR #10/#11, eine konfigurierbare Stelle, wie verlangt. Bewusst **nicht** angefasst: die Mock-Adressen `seed1.example` in `client-lib/core/src/discovery/service.rs`s Unit-Tests (Testfixtures, keine Konfiguration — die echte Domain dort zu verwenden wäre sachlich falsch und liefe der Vorgabe "keine Tests, die die Adressen auflösen" zuwider) und die beiden `docs/prompt-rework-*.md` (werden ohnehin ausgelagert, siehe unten). Repo-weite Suche nach beiden Platzhaltern danach: keine weiteren Treffer außerhalb dieser bewussten Ausnahmen.
+
+**Prompts ausgelagert** (Commit `50890cd`) nach `../Trafficnetwork-prompts/` (`docs/`-Unterordner, Dateinamen unverändert): 15 der 16 `docs/prompt-*.md`-Dateien — kopiert, per `sha256sum` einzeln auf Übereinstimmung geprüft (alle 16 `OK`, siehe Sitzungsprotokoll), erst danach im Repo per `git rm` entfernt. Bleiben in der Git-Historie sichtbar (unproblematisch, siehe Abschnitt 6 — keine Geheimnisse darin) und in `../Trafficnetwork-prompts/` mit eigenem `README.md`.
+
+**Ausnahme:** `docs/prompt-client-lib-finish.md` bleibt vorerst **im Repo** — die Client-Bibliothek-Instanz arbeitet zum Zeitpunkt dieses Commits noch aktiv danach (`rework/client-lib-bindings`, siehe `docs/status.md`). Wandert nach, sobald B3–B5 abgeschlossen sind.
+
+**Tote Links geprüft und behoben:** sechs echte Markdown-Hyperlinks auf jetzt ausgelagerte Prompts (`client-lib/README.md`, `ingestion/README.md`, `server/README.md`) in unverlinkte Dateinamen-Erwähnungen mit Verweis auf den neuen Ort umgewandelt. Danach das **gesamte Repo** automatisiert auf tote relative Markdown-Links geprüft (jeder `[text](pfad)`-Link in jeder `.md`-Datei gegen das Dateisystem aufgelöst) — **0 gefunden**. Reine Text-Erwähnungen von Prompt-Dateinamen ohne Verlinkung (z. B. in `docs/todo.md`, `docs/status.md`) sind unverändert gelassen — sie waren nie klickbare Links und bleiben als historische Referenz korrekt (die Datei hat unter diesem Namen existiert und diesen Auftrag beschrieben).
+
+---
+
 ## Zusammenfassung — Stand nach diesem Nachtrag
 
 R1 (Prüfbericht) und der aufräumende Teil von R2 (Branches) sind abgeschlossen. Vor R4 (Release `v1.0.0`) fehlt noch `fix/api-serialization` auf dem Server. Weiter mit R3 (Domain-Platzhalter ersetzen, Prompts auslagern, Doku entrümpeln).
