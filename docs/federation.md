@@ -110,7 +110,7 @@ Beide Wege sind gleichwertig und dokumentiert:
 
 **B als Basis, C und G als Komfort-Optionen, A nur für den Einstieg:**
 
-1. **Projekt-Domain** (noch zu registrieren; Platzhalter `trafficnetwork.example`) dient nur als **Anker**, nicht als Nadelöhr:
+1. **Projekt-Domain** (`trafficnetwork.info`, entschieden 2026-09-27; Registrierung/DNS-Betrieb liegt beim Betreiber) dient nur als **Anker**, nicht als Nadelöhr:
    - `directory.<domain>` → signiertes Server-Verzeichnis (JSON), zusätzlich gespiegelt (z. B. GitHub Pages / Repo, weitere Mirrors), damit ein Domain-Ausfall das Netzwerk nicht lahmlegt.
    - `seed1.<domain>`, `seed2.<domain>` → vom Projekt betriebene Seed-Server.
    - optional `nodes.<domain>` → automatische Subdomains für Community-Server ohne eigene Domain (Option C).
@@ -135,7 +135,7 @@ Beide Wege sind gleichwertig und dokumentiert:
 
 ## 9. Offene Punkte für den Projektinhaber
 
-- [ ] Projekt-Domain registrieren (danach Platzhalter `trafficnetwork.example` ersetzen)
+- [ ] Domain `trafficnetwork.info` registrieren und DNS betreiben (Platzhalter im Code/in der Doku sind bereits ersetzt, siehe `client-lib/core/src/api/options.rs`s `DEFAULT_SEEDS`)
 - [ ] Netzwerk-Wurzelschlüssel erzeugen und sicher offline aufbewahren (Anleitung liefert die Überarbeitung)
 - [ ] Mindestens zwei Seed-Server bereitstellen (verschiedene Anbieter/Standorte)
 - [ ] Betreiberbedingungen (Terms for node operators) + Datenschutz rechtlich prüfen lassen

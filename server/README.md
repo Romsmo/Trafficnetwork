@@ -74,7 +74,7 @@ Nur relevant, wenn `FEDERATION_ENABLED=true` — mit dem Standardwert `false` ex
 ```bash
 FEDERATION_ENABLED=true
 FEDERATION_PUBLIC_ADDRESS=https://mein-server.example   # Pflicht, sobald FEDERATION_ENABLED=true
-FEDERATION_SEEDS=https://seed1.example,https://seed2.example   # optional — der erste Server im Netz hat keinen Seed
+FEDERATION_SEEDS=https://seed1.trafficnetwork.info,https://seed2.trafficnetwork.info   # optional — der erste Server im Netz hat keinen Seed
 ```
 
 Mit gesetztem `FEDERATION_SEEDS` tritt der Server beim Start jedem Seed bei (selbstsigniert mit dem eigenen, automatisch erzeugten Node-Schlüssel — siehe "Network keys" oben) und übernimmt dessen aktuelle Peer-Liste (Gossip reitet auf der Beitritts-Antwort mit, kein separates Gossip-Protokoll). Danach laufen zwei Hintergrund-Jobs (wie Expiry-Sweep/Retention-Cleanup): signierte Heartbeats an alle bekannten Peers (`FEDERATION_HEARTBEAT_INTERVAL_SECONDS`, Standard 60s) und Anti-Entropy-Pull (`FEDERATION_ANTI_ENTROPY_INTERVAL_SECONDS`, Standard 300s) — schließt Lücken, falls ein Push verpasst wurde.

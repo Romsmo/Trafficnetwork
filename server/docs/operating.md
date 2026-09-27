@@ -16,7 +16,7 @@ the pieces work, and [`threat-model.md`](threat-model.md) for why.
    ```bash
    FEDERATION_ENABLED=true
    FEDERATION_PUBLIC_ADDRESS=https://your-server.example
-   FEDERATION_SEEDS=https://seed1.example,https://seed2.example
+   FEDERATION_SEEDS=https://seed1.trafficnetwork.info,https://seed2.trafficnetwork.info
    ```
    `FEDERATION_SEEDS` is optional — omit it if you're standing up the first
    server of a new network, or if you'd rather be joined *to* than initiate
