@@ -4,7 +4,7 @@ Client-Sync-Bibliothek: einbettbarer, maximal portabler Adapter für beliebige A
 
 Zielplattformen: Android (Kotlin), iOS/macOS (Swift), Flutter (Dart), React Native, Desktop/Server über C-ABI (inkl. Python, Node.js), Web-Browser (WASM).
 
-**Status**: Meilenstein F-C3 abgeschlossen (Branch `rework/client-lib-federation`, noch nicht nach `main` gemergt). Details zum Gesamtplan siehe [`docs/concept.md`](../docs/concept.md) (Abschnitt 6/13), [`docs/federation.md`](../docs/federation.md), [`docs/prompt-phase2-client-lib.md`](../docs/prompt-phase2-client-lib.md) (ursprünglicher Basis-Auftrag), [`docs/prompt-rework-client-lib-federation.md`](../docs/prompt-rework-client-lib-federation.md) (Föderations-Auftrag) und [`docs/todo.md`](../docs/todo.md). Laufender Cross-Instanz-Status: [`docs/status.md`](../docs/status.md).
+**Status**: Meilenstein F-C3 abgeschlossen (Branch `rework/client-lib-federation`, noch nicht nach `main` gemergt). Details zum Gesamtplan siehe [`docs/concept.md`](../docs/concept.md) (Abschnitt 6/13), [`docs/federation.md`](../docs/federation.md), `docs/prompt-phase2-client-lib.md` (ausgelagert nach `../Trafficnetwork-prompts/`, nicht mehr im Repo) (ursprünglicher Basis-Auftrag), `docs/prompt-rework-client-lib-federation.md` (ausgelagert nach `../Trafficnetwork-prompts/`, nicht mehr im Repo) (Föderations-Auftrag) und [`docs/todo.md`](../docs/todo.md). Laufender Cross-Instanz-Status: [`docs/status.md`](../docs/status.md).
 
 ## Warum Basis und Föderation zusammen
 

@@ -15,7 +15,7 @@ Optional bulk-import client that seeds a Trafficnetwork server's database from O
 - **Speed cameras and signs from OSM** are part of the Europe import above; the camera namespace stays closed.
 `npm run report:quality` prints, per source, what was taken over, discarded (with the reasons) and merged; what each license makes us credit is in [`docs/attribution.md`](docs/attribution.md).
 
-See [`docs/concept.md`](../docs/concept.md) section 7 and [`docs/prompt-phase3-ingestion.md`](../docs/prompt-phase3-ingestion.md) for the full design brief, and [`docs/sources.md`](docs/sources.md) for the evidenced source catalog (licenses, pricing, what's implemented vs. catalog-only).
+See [`docs/concept.md`](../docs/concept.md) section 7 and `docs/prompt-phase3-ingestion.md` (ausgelagert nach `../Trafficnetwork-prompts/`, nicht mehr im Repo) for the full design brief, and [`docs/sources.md`](docs/sources.md) for the evidenced source catalog (licenses, pricing, what's implemented vs. catalog-only).
 
 ## Setup
 
