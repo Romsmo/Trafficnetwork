@@ -57,6 +57,26 @@ describe("migration 0009 on a database with legacy data", () => {
     return dir;
   }
 
+  /**
+   * A copy of the migrations folder whose journal stops AT 0009 (inclusive) — "today's format" as this test
+   * defines it, regardless of how many unrelated migrations have landed after 0009 since. Using the real,
+   * full `MIGRATIONS` folder here would also apply those later migrations (found when 0010, seed-reports,
+   * landed: it silently ran alongside 0009 and the "+1 migration applied" / "back to exactly N migrations"
+   * assertions below no longer held) — this test is about 0009's own effect, not about whatever the newest
+   * migration happens to be.
+   */
+  function migrationsThrough0009(): string {
+    const dir = mkdtempSync(path.join(tmpdir(), "migrations-through-0009-"));
+    dirs.push(dir);
+    cpSync(MIGRATIONS, dir, { recursive: true });
+    const journalPath = path.join(dir, "meta", "_journal.json");
+    const journal = JSON.parse(readFileSync(journalPath, "utf8")) as { entries: { idx: number; tag: string }[] };
+    const idx0009 = journal.entries.find((e) => e.tag === TAG_0009)!.idx;
+    journal.entries = journal.entries.filter((e) => e.idx <= idx0009);
+    writeFileSync(journalPath, JSON.stringify(journal, null, 2));
+    return dir;
+  }
+
   async function withFreshConnection<T>(fn: (d: Database["db"]) => Promise<T>): Promise<T> {
     // postgres.js caches type OIDs per connection; migrations that create types need a connection opened afterwards.
     const c = createDb({ DATABASE_URL: container.getConnectionUri() });
@@ -172,7 +192,7 @@ describe("migration 0009 on a database with legacy data", () => {
   });
 
   it("migrates forward without losing or changing a row; every old camera becomes a speed camera", async () => {
-    await withFreshConnection((d) => migrate(d, { migrationsFolder: MIGRATIONS }));
+    await withFreshConnection((d) => migrate(d, { migrationsFolder: migrationsThrough0009() }));
 
     expect(await columnExists()).toBe(true);
     expect(await counts()).toEqual(before.counts);
@@ -273,7 +293,7 @@ describe("migration 0009 on a database with legacy data", () => {
     await runFile(DOWN_SQL);
     expect(await counts()).toEqual(before.counts);
 
-    await withFreshConnection((d) => migrate(d, { migrationsFolder: MIGRATIONS }));
+    await withFreshConnection((d) => migrate(d, { migrationsFolder: migrationsThrough0009() }));
     expect(await columnExists()).toBe(true);
     expect(await counts()).toEqual(before.counts);
     expect((await applied()).n).toBe(before.migrations.n + 1);
