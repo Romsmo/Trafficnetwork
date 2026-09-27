@@ -9,28 +9,13 @@ in die Quere kommt. **Jede Session aktualisiert nur ihren eigenen Block**,
 committet das für sich (kleine, isolierte Doku-Änderung) und pusht sofort,
 um Konflikte mit der anderen Session zu vermeiden.
 
-**F-S (Server, `server/`)** — Session "Trafficnetwork Backend"
-- Branch: `rework/server-federation` — Pull Request nach `main` eingereicht,
-  noch nicht gemergt (wartet auf Freigabe)
-- Stand: F-S0–F-S5 vollständig abgeschlossen und gepusht. Laufender,
-  detaillierter Stand steht ab jetzt in [`docs/status.md`](status.md) statt
-  hier (dieser Abschnitt wird nicht mehr laufend aktualisiert)
-- Nächster Schritt: wartet auf PR-Review/Merge-Freigabe; danach ggf. F-C
-  (Client-Bibliothek) gegen die jetzt stabile, gemergte API weiterführen
-
-**F-C (Client-Bibliothek, `client-lib/`)** — Session "Client-Sync-Bibliothek Phase 2"
-- Branch: `rework/client-lib-federation`
-- Stand: wartet bewusst auf F-S-Fortschritt (F-C ist laut
-  `docs/prompt-rework-client-lib-federation.md` von der Server-Föderation
-  abhängig — Protokoll/API der Server-Seite müssen erst stehen); bislang nur
-  P2.0 (nicht-föderierte Server-Erweiterungen, siehe unten) umgesetzt, noch
-  kein Code in `client-lib/` selbst
-- Nächster Schritt: F-S-Fortschritt weiter beobachten; F-C0 (Stand prüfen,
-  Entscheidungen, Plan) beginnt, sobald F-S so weit steht, dass Protokoll/API
-  sich nicht mehr grundlegend ändern (spätestens nach F-S2, ggf. früher in
-  Absprache)
-
-_Zuletzt aktualisiert: 2026-09-17 von der F-C-Session._
+**Veraltet (Stand 2026-09-17, hier nur noch als Historie stehen gelassen):**
+beide Abschnitte gingen davon aus, dass F-C auf F-S wartet und noch keinen
+Code hat. Tatsächlicher Stand seither: F-S0–F-S5 sind fertig und auf `main`
+gemergt (PR #1); F-C0–F-C3 sind fertig, F-C4 ist angefangen (öffentliche API,
+C-ABI, Python-Binding, Konformitätsrahmen), F-C5 (weitere Bindings,
+Mehrknoten-Integrationstests, Abschluss-PR) steht aus — Einzelheiten in
+`client-lib/README.md`s Meilenstein-Tabelle und in [`docs/status.md`](status.md).
 
 ## Vor der Prompt-Erstellung — offene Entscheidungen
 - [x] GitHub-Repo-Struktur: ein Monorepo für Server, Client-Bibliothek, Ingestion
@@ -79,7 +64,7 @@ _Zuletzt aktualisiert: 2026-09-17 von der F-C-Session._
 - [x] Claude-Code-Prompts erstellt (`docs/prompt-rework-server-federation.md`, `docs/prompt-rework-client-lib-federation.md`)
 - [x] Stand von Phase 2 im Repo klären: P2.0 (Server-Erweiterungen für client-lib) ist auf GitHub; `client-lib/` selbst enthält bewusst noch keinen Code — das ist die eigentliche Phase-2-Client-Bibliothek, eigener, noch nicht gestarteter Auftrag
 - [x] F-S: Server-Überarbeitung (Docker/Apache/nginx/Caddy, Signaturen, Föderation, Reputation, Verzeichnis) — F-S0–F-S5 vollständig umgesetzt (Docker/Compose/Installation ohne Docker, Node-/Wurzelschlüssel + CLI, geräteseitig signierte Auth, signierte Netzwerk-Konfiguration, Beitritt über Seeds, Peer-Verzeichnis + Gossip, signierte Heartbeats, Push/Pull-Replikation geräteseitig signierter Meldungserstellungen, Reputationsstufen, `GET /v1/network/directory` + Export-Skript, Überlast-Signal, echtes Mehrknoten-Testnetz), Doku vollständig (`server/docs/{installation,operating,api,schema,threat-model,federation-protocol}.md`), Branch `rework/server-federation`, Pull Request nach `main` eingereicht
-- [ ] F-C: Client-Bibliothek-Überarbeitung (Discovery, Failover, Signaturprüfung, gerätesignierte Meldungen)
+- [ ] F-C: Client-Bibliothek-Überarbeitung (Discovery, Failover, Signaturprüfung, gerätesignierte Meldungen) — Kern (F-C0–F-C3) und die öffentliche API/C-ABI/Python-Binding (Teil von F-C4) fertig, siehe `client-lib/README.md`; weitere Bindings + Mehrknoten-Tests + Abschluss-PR offen (F-C4 Rest/F-C5)
 - [ ] Projekt-Domain registrieren, Platzhalter `trafficnetwork.example` ersetzen
 - [ ] Netzwerk-Wurzelschlüssel erzeugen und offline sicher aufbewahren
 - [ ] Mindestens zwei Seed-Server bei unterschiedlichen Anbietern bereitstellen
@@ -114,13 +99,13 @@ _Zuletzt aktualisiert: 2026-09-17 von der F-C-Session._
 - [x] Zusatz-Prompts erstellt (`docs/prompt-addon-online-counter.md`)
 - [x] O-A Server: `GET /v1/stats/online`, eigene Zahl im Heartbeat (`onlineCount`), Schwellenwert gegen Rückschlüsse (Branch `feature/online-counter`, lokal 295/295, PR wartet auf Freigabe; Antwortformat entspricht dem von O-B/O-C erwarteten)
 - [ ] O-B Web: Anzeige unten rechts, Aktualisierung, Textfall unter dem Schwellenwert
-- [x] O-C Client-Bibliothek: `NetworkStatus`-Felder `onlineNode`/`onlineNetwork`/`onlineEstimated`/`onlineAsOf` + `OnlineStatusService` (Branch `rework/client-lib-online-counter`, CI grün; gegen das vorgeschlagene Format gebaut, O-A steht noch aus; `getNetworkStatus()` als Fassade folgt mit F-C4/F-C5)
+- [x] O-C Client-Bibliothek: `NetworkStatus`-Felder `onlineNode`/`onlineNetwork`/`onlineEstimated`/`onlineAsOf` + `OnlineStatusService` (Branch `rework/client-lib-online-counter`, CI grün; gegen das vorgeschlagene Format gebaut, O-A steht noch aus; `getNetworkStatus()` als Fassade jetzt Teil der öffentlichen API in `rework/client-lib-europe-scale`, siehe Zusatz E unten)
 
 ## Zusatz K — Falsche Tempolimits melden und korrigieren
 - [x] Zusatz-Prompts erstellt (`docs/prompt-addon-speed-limit-corrections.md`)
 - [x] K-A Server: Korrektur als überlagernder Datensatz (Import bleibt erhalten), Schwellenwert, Widerspruch, Verteilung über Pakete/Events und Föderation, Betreiber kann zurücksetzen (Branch `feature/speed-limit-corrections`, lokal 339 Tests grün (Gesamtlauf 338/339, der eine Fehler war eine veraltete Testerwartung, behoben und nachgelaufen), PR wartet auf Freigabe; Plan: `server/docs/speed-limit-corrections.md`; **Migration 0007 schreibt `speed_limit_segments` einmalig um, ~20 s pro Mio. Segmente** — Backup + Wartungsfenster einplanen)
 - [ ] K-B Web: „Stimmt nicht?"-Formular, Herkunft des Werts sichtbar (Allowlist der Web-Sitzungen um die vier Korrektur-Pfade erweitern; Hinweise im Status-Abschnitt "Zusatz K-A")
-- [x] K-C Client-Bibliothek: `report_wrong_speed_limit`/`confirm_speed_limit_correction` über den Offline-Puffer (beim Senden signiert), Überlagerung statt Überschreiben, Herkunft in `speed_limit_at()` (Branch `rework/client-lib-speed-corrections`, CI grün; gegen den dokumentierten Server-Vertrag gebaut; öffentliche Fassade `getSpeedLimitAt()`/`reportWrongSpeedLimit()` folgt mit F-C4/F-C5)
+- [x] K-C Client-Bibliothek: `report_wrong_speed_limit`/`confirm_speed_limit_correction` über den Offline-Puffer (beim Senden signiert), Überlagerung statt Überschreiben, Herkunft in `speed_limit_at()` (Branch `rework/client-lib-speed-corrections`, CI grün; gegen den dokumentierten Server-Vertrag gebaut; öffentliche Fassade `getSpeedLimitAt()`/`reportWrongSpeedLimit()` jetzt Teil der öffentlichen API in `rework/client-lib-europe-scale`, siehe Zusatz E unten)
 - [x] Schwellenwert entschieden: **3 verschiedene Geräte** (Konfigurationswert, Standard 3)
 - [x] Wertebereich für Korrekturen festgelegt: ganzzahlig, **5–150 km/h bzw. 5–85 mph**, nur Vielfache von **5**, in der Einheit des Segments (alles per Umgebungsvariable änderbar); Gleichstand ⇒ kein Gewinner; Importänderung ⇒ Korrektur bleibt, Markierung „zu prüfen"
 - [ ] Folgeaufgaben K-A (nicht Teil des Auftrags): temporäre Korrekturen (Baustelle) automatisch auslaufen lassen; `deviceAssertion` bei Meldungen an den gebundenen Schlüssel knüpfen (siehe Nebenbefund im Status); Stimmen nach Ruf des weiterleitenden Knotens gewichten
@@ -131,7 +116,7 @@ _Zuletzt aktualisiert: 2026-09-17 von der F-C-Session._
 - [x] Zusatz-Prompts erstellt (`docs/prompt-addon-europe-basemap.md`)
 - [x] E-A Ingestion: Machbarkeitsbericht, Europa-Import (13,68 Mio. Zeilen, 4,1 GB) und Bericht (`ingestion/docs/europe-feasibility.md`, `europe-run-report.md`), Update-Weg nur dokumentiert
 - [~] E-B Server: Code fertig (Branch `feature/europe-scale`, gestapelt auf K-A + Perf-Fix, gepusht, PR wartet; vorgebaute, streamende, zwischenspeicherbare Pakete, Batch-Import, Snapshot-Schutz, `?since=`, Range). **Entschieden 2026-09-25:** Auflösung 4 ist Code-Standard, `partitionResolution` steht im Manifest (Client-Instanz: bei Abweichung neu bootstrappen); Migration 0007 bleibt als dokumentiertes Wartungsfenster (Migrations-Regel + Warnung eingeführt). **Offen:** Vollsuite mit Docker laufen lassen (erst nach dem Europa-Import), Integrationstest `europe-scale` nach der Auflösungs-Änderung wiederholen, vollständige Messung (Bau-Dauer, Spitzen-RSS, Kachelgrößen, Manifest, Migration 0007+0008) **auf einer Kopie des echten Bestands**, danach Migration + Paketbau auf `tn-europe` selbst
-- [ ] E-C Client-Bibliothek: vollständigen Bootstrap messen und berichten (Datenmenge, Dauer, Speicher)
+- [x] E-C Client-Bibliothek: vollständigen Bootstrap gemessen und berichtet (`client-lib/docs/bootstrap-measurements.md`: echtes Bayern über einen echten Server, synthetisch bis 20 Mio. Segmente, Abbruch/Fortsetzen, Bandbreiten-Rechnung) — dabei `SqliteStore` (R*Tree, wiederaufnehmbarer Bootstrap, `SyncError::StorageFull`, Paket-Hashprüfung, `partitionResolution`-Abgleich mit E-B) und `plan_static_bootstrap`/`SyncObserver` als Vorab-Check bzw. Fortschritt gebaut. Branch `rework/client-lib-europe-scale`, CI grün, PR noch nicht geöffnet. Empfehlung an den Nutzer: erst E-A/E-B-Zahlen abwarten, dann Server-seitige Kompression + kleinere Partitionen + Streaming-Parser messen, bevor „alles auf jedem Gerät" infrage gestellt wird — nichts davon wurde umgestellt
 - [ ] E-D Web: Startansicht Europa, nur sichtbaren Ausschnitt laden, Cluster bei kleiner Zoomstufe
 - [ ] Nach den Messungen entscheiden, ob „alles auf jedem Gerät" so bleibt
 
