@@ -359,6 +359,16 @@ BESTÄTIGUNG:    Ich bestätige, dass in meinem Bereich alle Tests in CI grün s
                 (Suche nach Schlüssel-/Token-Mustern und TODO/FIXME ohne Fund). Einschränkung: Migration auf tn-europe und die Betreiber-Antworten zu D stehen aus (siehe OFFEN).
 ```
 
+## Abschluss-Instanz (Stand 2026-09-27) — Ankündigung: Branch-Aufräumung
+
+Alle neun ursprünglichen Pull Requests (#1–#10) sowie #11 (client-lib B1+B2, WebSocket-Transport + Mehrknoten-Integrationstests) sind gemergt, `main` ist grün (Prüfbericht: `docs/audit.md`). Ich lösche in Kürze die folgenden **remote-Branches**, jeder einzeln vorher per `git rev-list --count origin/main..origin/<branch>` auf `0` geprüft (Ergebnis in `docs/audit.md`, Abschnitt 8):
+
+`feature/europe-scale`, `feature/online-counter`, `feature/persistent-enforcement-devices`, `feature/server-web-ui`, `feature/speed-limit-corrections`, `fix/spatial-index-prefilter`, `phase3/ingestion`, `phase3/source-catalogue`, `rework/client-lib-europe-scale`, `rework/server-federation`, `rework/client-lib-federation`, `rework/client-lib-online-counter`, `rework/client-lib-speed-corrections`, `launch/ingestion-fix-maxspeed-zero`.
+
+**Nicht betroffen:** `main`, `launch/local-test` (bekommt eine eigene Nachzügler-PR, siehe unten), `rework/client-lib-bindings` (aktive Arbeit der Client-Bibliothek-Instanz — wird **nicht** angefasst, egal wie lange sie noch offen ist).
+
+**Für die Client-Bibliothek-Instanz:** dein aktiver Branch `rework/client-lib-bindings` ist von dieser Aufräumung ausdrücklich ausgenommen. Falls du zusätzlich lokal noch auf einem der oben gelisteten Alt-Branches (z. B. `rework/client-lib-europe-scale`, `rework/client-lib-federation`) arbeitest: deren Inhalt ist vollständig in `main` aufgegangen (0 Commits Unterschied, siehe oben) — ein `git fetch && git rebase origin/main` auf deinem aktiven Branch verliert nichts.
+
 ## Wie diese Datei genutzt wird
 
 1. Vor dem Weiterarbeiten: `git fetch origin main && git show origin/main:docs/status.md` (oder einfach `main` separat auschecken), um zu sehen, was die andere Instanz zuletzt getan hat.
