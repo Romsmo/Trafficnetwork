@@ -48,10 +48,7 @@ fn normalize_postgres_timestamptz(raw: &str) -> String {
         // The date portion's own hyphens sit before any space/'T', so the
         // *last* '+'/'-' is always the offset sign once one has been
         // inserted above — never a false match against "2026-09-27".
-        Some(pos)
-            if with_t.len() - pos == 3
-                && with_t[pos + 1..].bytes().all(|b| b.is_ascii_digit()) =>
-        {
+        Some(pos) if with_t.len() - pos == 3 && with_t[pos + 1..].bytes().all(|b| b.is_ascii_digit()) => {
             format!("{with_t}:00")
         }
         _ => with_t,

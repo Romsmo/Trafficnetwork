@@ -316,11 +316,23 @@ async fn the_same_report_seen_through_two_servers_is_shown_once() {
         || async {
             let probe = client_for(&b, &temp_storage("dedup-probe"));
             probe.update_position(48.5, 9.5, None).ok()?;
-            probe.sync().await.ok()?;
-            let items = probe
-                .get_nearby(48.5, 9.5, 500.0, &[NearbyCategory::Hazards])
-                .ok()?;
-            (!items.is_empty()).then_some(())
+            let report = probe.sync().await;
+            let items = if report.is_ok() {
+                probe
+                    .get_nearby(48.5, 9.5, 500.0, &[NearbyCategory::Hazards])
+                    .ok()
+            } else {
+                None
+            };
+            // Temporary B2 diagnostic (see docs/status.md's B2 note): the
+            // server side is independently confirmed correct (checked
+            // directly against a real server, bypassing this client, while
+            // debugging this test), so any remaining gap is somewhere in
+            // this client's own snapshot-fetch/storage/query path -- this
+            // prints exactly what each attempt actually saw instead of just
+            // "timed out", since cargo test keeps a failing test's stderr.
+            eprintln!("dedup-probe attempt: sync={report:?} items={items:?}");
+            items.filter(|items| !items.is_empty()).map(|_| ())
         },
         Duration::from_secs(15),
     )
