@@ -151,6 +151,13 @@ Konformitätstests darüber stehen noch aus — Einzelheiten in
 - [ ] Offen (Betreiber): NVDB Schweden nur, wenn ein Lastkajen-Zugang samt Beispieldatei vorliegt
 - [ ] Offen (Betreiber): die 2.000 doppelt importierten Segmente auf `tn-europe` entfernen (SQL im Europa-Bericht), danach `pg_dump` als Grundstock
 
+## Zusatz fix/api-serialization — Cross-Language-Fehler aus der Client-Bibliothek-B2-Mehrknoten-Suite
+- [x] Ursache gefunden (Drizzles Postgres.js-Treiber schaltet den `timestamptz`-Parser global ab; `int8` hat in `postgres.js` keinen Standard-Parser) und an der Wurzel behoben (`server/src/db/raw-sql-types.ts`), nicht an den ~19 einzelnen Aufrufstellen
+- [x] Zwei alte Aufrufstellen-Workarounds entfernt (`server/src/db/sql-iso.ts`, redundante `Number(row.seq)`-Stellen)
+- [x] Konformitätstest gegen `server/docs/api.md` (Typ und Format, nicht nur Vorhandensein): `server/tests/integration/api-serialization.test.ts`
+- [x] `server/docs/api.md`-Hinweis „bekannte Abweichung" entfernt; `docs/status.md` aktualisiert
+- [ ] Offen (Betreiber/Reviewer): PR #13 grün prüfen und mergen — lokal durch abstürzendes Docker Desktop nicht vollständig durchgelaufen, siehe Lagebericht in `docs/status.md`
+
 ## Launch P — Öffentlicher Betrieb (gemieteter Server + Domain)
 - [x] Claude-Code-Prompt erstellt (`docs/prompt-launch-public-server.md`)
 - [ ] Server und Domain besorgen
