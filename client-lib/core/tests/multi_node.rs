@@ -36,7 +36,8 @@ use trafficnetwork_core::api::{
 use trafficnetwork_core::platform::{HttpRequest, HttpTransport, ReqwestHttpTransport};
 
 fn harness_url() -> String {
-    std::env::var("TN_MULTI_NODE_HARNESS_URL").unwrap_or_else(|_| "http://127.0.0.1:4100".to_string())
+    std::env::var("TN_MULTI_NODE_HARNESS_URL")
+        .unwrap_or_else(|_| "http://127.0.0.1:4100".to_string())
 }
 
 /// A thin client for the harness's own admin API — reuses the crate's own
@@ -106,7 +107,8 @@ impl Harness {
     }
 
     async fn stop_node(&self, node: &Node) {
-        self.post(&format!("/nodes/{}/stop", node.id), json!({})).await;
+        self.post(&format!("/nodes/{}/stop", node.id), json!({}))
+            .await;
     }
 
     async fn fault(&self, node: &Node, path_includes: &str, kind: &str, times: u32) {
@@ -195,10 +197,15 @@ where
 #[tokio::test]
 async fn cold_start_finds_the_network_through_a_single_seed_and_can_sync() {
     let Some(harness) = Harness::connect().await else {
-        eprintln!("skipped: no multi-node harness at {} (see the module doc)", harness_url());
+        eprintln!(
+            "skipped: no multi-node harness at {} (see the module doc)",
+            harness_url()
+        );
         return;
     };
-    let seed = harness.start_node(json!({ "federationEnabled": true })).await;
+    let seed = harness
+        .start_node(json!({ "federationEnabled": true }))
+        .await;
     let peer = harness
         .start_node(json!({ "federationEnabled": true, "federationSeedIds": [seed.id] }))
         .await;
@@ -236,7 +243,10 @@ async fn cold_start_finds_the_network_through_a_single_seed_and_can_sync() {
 #[tokio::test]
 async fn a_node_failing_mid_session_does_not_stop_sync_when_another_is_available() {
     let Some(harness) = Harness::connect().await else {
-        eprintln!("skipped: no multi-node harness at {} (see the module doc)", harness_url());
+        eprintln!(
+            "skipped: no multi-node harness at {} (see the module doc)",
+            harness_url()
+        );
         return;
     };
     let a = harness.start_node(json!({})).await;
@@ -275,12 +285,20 @@ async fn a_node_failing_mid_session_does_not_stop_sync_when_another_is_available
 #[tokio::test]
 async fn the_same_report_seen_through_two_servers_is_shown_once() {
     let Some(harness) = Harness::connect().await else {
-        eprintln!("skipped: no multi-node harness at {} (see the module doc)", harness_url());
+        eprintln!(
+            "skipped: no multi-node harness at {} (see the module doc)",
+            harness_url()
+        );
         return;
     };
-    let a = harness.start_node(json!({ "federationEnabled": true })).await;
+    let a = harness
+        .start_node(json!({ "federationEnabled": true }))
+        .await;
     let b = harness
-        .start_node_sharing_credential(json!({ "federationEnabled": true, "federationSeedIds": [a.id] }), &a)
+        .start_node_sharing_credential(
+            json!({ "federationEnabled": true, "federationSeedIds": [a.id] }),
+            &a,
+        )
         .await;
 
     harness.seed_hazard_report(&a, "accident", 48.5, 9.5).await;
@@ -323,7 +341,9 @@ async fn the_same_report_seen_through_two_servers_is_shown_once() {
         .unwrap();
     let accidents: Vec<_> = items
         .iter()
-        .filter(|i| matches!(i, NearbyItem::Hazard { hazard_type, .. } if hazard_type == "accident"))
+        .filter(
+            |i| matches!(i, NearbyItem::Hazard { hazard_type, .. } if hazard_type == "accident"),
+        )
         .collect();
     assert_eq!(accidents.len(), 1, "{items:?}");
 
@@ -334,7 +354,10 @@ async fn the_same_report_seen_through_two_servers_is_shown_once() {
 #[tokio::test]
 async fn an_offline_report_is_delivered_once_a_different_server_is_reachable() {
     let Some(harness) = Harness::connect().await else {
-        eprintln!("skipped: no multi-node harness at {} (see the module doc)", harness_url());
+        eprintln!(
+            "skipped: no multi-node harness at {} (see the module doc)",
+            harness_url()
+        );
         return;
     };
     let a = harness.start_node(json!({})).await;
@@ -389,11 +412,16 @@ async fn an_offline_report_is_delivered_once_a_different_server_is_reachable() {
 #[tokio::test]
 async fn a_static_package_that_does_not_match_its_hash_is_rejected() {
     let Some(harness) = Harness::connect().await else {
-        eprintln!("skipped: no multi-node harness at {} (see the module doc)", harness_url());
+        eprintln!(
+            "skipped: no multi-node harness at {} (see the module doc)",
+            harness_url()
+        );
         return;
     };
     let node = harness.start_node(json!({})).await;
-    harness.seed_hazard_report(&node, "traffic", 50.0, 8.0).await;
+    harness
+        .seed_hazard_report(&node, "traffic", 50.0, 8.0)
+        .await;
     // Corrupting a *dynamic* response the client actually reads
     // (`GET /v1/snapshot`) stands in for the static-package hash-mismatch
     // path this harness cannot populate real static packages for — the
@@ -401,11 +429,21 @@ async fn a_static_package_that_does_not_match_its_hash_is_rejected() {
     // real server, not a mock, does not silently corrupt the local store":
     // an unparseable body becomes an `InvalidResponse`/network error the
     // client reports honestly instead of storing garbage.
-    harness.fault(&node, "/v1/snapshot", "corrupt-body", 1).await;
+    harness
+        .fault(&node, "/v1/snapshot", "corrupt-body", 1)
+        .await;
 
-    let client = client_for_address(&node.proxy_address, &node.client_id, &node.client_secret, &temp_storage("forged"));
+    let client = client_for_address(
+        &node.proxy_address,
+        &node.client_id,
+        &node.client_secret,
+        &temp_storage("forged"),
+    );
     let report = client.sync().await.unwrap();
-    assert!(!report.ok, "a corrupted response must not look like a clean sync: {report:?}");
+    assert!(
+        !report.ok,
+        "a corrupted response must not look like a clean sync: {report:?}"
+    );
 
     harness.stop_node(&node).await;
 }

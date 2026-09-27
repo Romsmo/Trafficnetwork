@@ -33,6 +33,9 @@ import { startTestDatabase, type TestDatabase } from "../integration/setup.js";
 import { generateClientId, generateClientSecret, hashSecret } from "../../src/modules/auth/credentials.js";
 import { insertClient } from "../../src/db/queries/clients.js";
 import { startFederationWorkers, type FederationWorkersHandle } from "../../src/modules/federation/workers.js";
+import { generateEd25519KeyPair } from "../../src/modules/crypto/keys.js";
+import { signEnvelope } from "../../src/modules/crypto/envelope.js";
+import type { DeviceCreateEventPayload } from "../../src/modules/federation/device-event.js";
 
 const ADMIN_PORT = Number(process.env.MULTI_NODE_HARNESS_PORT ?? 4100);
 let nextPort = 19100;
@@ -238,8 +241,31 @@ const server = http.createServer(async (req, res) => {
       return json(res, 200, { ok: true });
     }
     if (node && req.method === "POST" && nodeMatch![2] === "/hazard-reports") {
-      const body = (await readBody(req)) as { type: string; lat: number; lng: number };
-      const created = await node.app.inject({ method: "POST", url: "/v1/hazard-reports", headers: { authorization: `Bearer ${await signTestToken(node)}` }, payload: body });
+      // Device-signed (not a bare admin insert): only a report with a
+      // deviceAssertion gets a `federation_event_id` at all (see
+      // db/queries/event-log.ts's getFederationEventsSince — its `where`
+      // clause excludes rows without one), so this is the only way to seed a
+      // report that anti-entropy will ever actually replicate to a peer. The
+      // signing device key is generated fresh per report and only used here —
+      // never a "real" key, just this harness playing the role of a device.
+      const body = (await readBody(req)) as { type: string; lat: number; lng: number; speedKmh?: number };
+      const keyPair = generateEd25519KeyPair();
+      const payload: DeviceCreateEventPayload = {
+        kind: "create",
+        type: body.type as DeviceCreateEventPayload["type"],
+        lat: body.lat,
+        lng: body.lng,
+        ...(body.speedKmh !== undefined ? { speedKmh: body.speedKmh } : {}),
+        devicePublicKey: keyPair.publicKeyRaw,
+        timestamp: new Date().toISOString(),
+      };
+      const deviceAssertion = signEnvelope(payload, keyPair);
+      const created = await node.app.inject({
+        method: "POST",
+        url: "/v1/hazard-reports",
+        headers: { authorization: `Bearer ${await signTestToken(node)}` },
+        payload: { ...body, deviceAssertion },
+      });
       return json(res, created.statusCode, created.json());
     }
     if (req.method === "POST" && url.pathname === "/shutdown") {
