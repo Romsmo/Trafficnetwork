@@ -26,7 +26,9 @@ use std::sync::{Arc, OnceLock};
 
 use serde_json::{json, Value};
 use tokio::runtime::Runtime;
-use trafficnetwork_core::api::{code, ApiError, ClientOptions, Platform, SecureStore, TrafficNetworkClient};
+use trafficnetwork_core::api::{
+    code, ApiError, ClientOptions, Platform, SecureStore, TrafficNetworkClient,
+};
 
 fn runtime() -> &'static Runtime {
     static RUNTIME: OnceLock<Runtime> = OnceLock::new();
