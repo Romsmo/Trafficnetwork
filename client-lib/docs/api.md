@@ -338,3 +338,39 @@ unreachable network, and the JSON-call error shapes. `run_python.py` is the
 first runner; a later binding adds `run_<language>.<ext>` alongside it and
 the CI job that runs it (`.github/workflows/client-lib-ci.yml`'s
 `conformance-<language>` jobs).
+
+## Network & privacy — what each server sees
+
+The federation design (F-C0 plan, `docs/federation.md`) spreads a device's
+requests over several servers on purpose, so no single operator sees a
+complete movement profile. What actually crosses the wire, and to whom:
+
+* **Position** never leaves the device as a raw coordinate. `updatePosition`
+  turns it into H3 tile ids (`~2.4 km` across at the default resolution 7)
+  before anything is sent; `GET /v1/delta`/`GET /v1/snapshot` are called
+  with those tile ids, not with lat/lng.
+* **A submitted report** (`submitReport`) carries the exact position given
+  (a hazard's location *is* the report) — sent, at most, to one server per
+  attempt (`request_with_failover` tries the pool in order, stops at the
+  first success), signed with the device key when one is bound. An
+  unsigned report is not attributable to a device across servers at all; a
+  signed one carries the device's public key (pseudonymous — no name, email
+  or persistent account), which lets the *same* device's reports be linked
+  to each other by any server that later sees that key, but not to a
+  real-world identity.
+* **Static data reads** (segments, signs) name only a tile, never a device
+  or a route — the same request any device asking about that tile would
+  make.
+* **The device credential** (`clientId`/`clientSecret`, or the bound
+  signing key) is sent with every authenticated request as a bearer token /
+  assertion; a server that has ever authenticated a request therefore knows
+  "this credential exists and made these calls to me", but not who holds
+  it. Credentials never leave the device otherwise (they live in the
+  secure store — see "Secrets" — and are never logged by the library).
+* **No telemetry.** The library sends nothing beyond what a call above
+  describes — no usage statistics, no crash reports, no analytics
+  endpoint of its own.
+* **The host app decides what a user is told.** This section is a
+  statement of what the library itself transmits, not a substitute for a
+  privacy policy; a host app combining this library with its own account
+  system, analytics, or crash reporting adds its own exposure on top.
