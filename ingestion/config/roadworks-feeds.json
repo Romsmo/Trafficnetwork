@@ -1,0 +1,42 @@
+{
+  "feeds": {
+    "fr-tipi-rrn": {
+      "enabled": true,
+      "kind": "datex2",
+      "country": "FR",
+      "name": "France - road events on the national non-concessioned network (Bison Futé / DIR), hourly aggregate",
+      "url": "https://transport.data.gouv.fr/resources/79174/download",
+      "sourceLicense": "Licence Ouverte 2.0",
+      "attribution": "Source: Bison Futé / directions interdépartementales des routes (DIR), via transport.data.gouv.fr, Licence Ouverte 2.0 (Etalab)",
+      "minIntervalMinutes": 60,
+      "ttlHours": 72,
+      "notes": "License checked 2026-09-26 at https://transport.data.gouv.fr/datasets/evenements-routiers-sur-le-reseau-routier-national-non-concede (Licence Ouverte 2.0, no registration). Resource 79174 is the hourly aggregate (one file); 79173 is a directory of per-event files."
+    },
+    "nl-ndw": {
+      "enabled": false,
+      "kind": "datex2",
+      "country": "NL",
+      "name": "Netherlands - NDW roadworks and events planning feed (DATEX II v3)",
+      "url": "https://opendata.ndw.nu/planningsfeed_wegwerkzaamheden_en_evenementen.xml.gz",
+      "sourceLicense": "NDW open data (license text not confirmed)",
+      "attribution": "Source: NDW (Nationaal Dataportaal Wegverkeer), opendata.ndw.nu",
+      "minIntervalMinutes": 60,
+      "ttlHours": 72,
+      "notes": "OFF until the license is settled: file access needs no login, but NDW's own license text was not found on opendata.ndw.nu or docs.ndw.nu on 2026-09-26 (only the parent agency's general 'open, tenzij' policy). Ask mail@servicedeskndw.nu, then set enabled to true. ~18 MB gzip per fetch."
+    },
+    "de-autobahn": {
+      "enabled": false,
+      "enabledByEnv": "AUTOBAHN_API_ENABLED",
+      "kind": "autobahn-de-json",
+      "country": "DE",
+      "name": "Germany - Die Autobahn GmbH des Bundes, own JSON API (not DATEX II)",
+      "url": "https://verkehr.autobahn.de/o/autobahn/",
+      "sourceLicense": "ungeklärt",
+      "attribution": "Source: Die Autobahn GmbH des Bundes (verkehr.autobahn.de) - terms of reuse not stated by the publisher",
+      "minIntervalMinutes": 30,
+      "ttlHours": 48,
+      "requestDelayMs": 250,
+      "notes": "OFF by default: the API publishes no license or terms of use (docs/sources.md, checked 2026-09-26). Chosen by the operator as the German source; rows are marked sourceLicense=ungeklärt. Turn on deliberately with AUTOBAHN_API_ENABLED=true or ROADWORKS_FEEDS_ON=de-autobahn. ~110 requests per pass (one for the road list, one per road; 108 roads on 2026-09-26)."
+    }
+  }
+}

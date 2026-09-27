@@ -1,0 +1,30 @@
+{
+  "regions": {
+    "bayern": {
+      "name": "Bayern",
+      "geofabrikExtractUrl": "https://download.geofabrik.de/europe/germany/bayern-latest.osm.pbf",
+      "geofabrikChecksumUrl": "https://download.geofabrik.de/europe/germany/bayern-latest.osm.pbf.md5",
+      "bbox": [8.975186, 47.26543, 13.84947, 50.56623]
+    },
+    "germany": {
+      "name": "Germany (whole country)",
+      "geofabrikExtractUrl": "https://download.geofabrik.de/europe/germany-latest.osm.pbf",
+      "geofabrikChecksumUrl": "https://download.geofabrik.de/europe/germany-latest.osm.pbf.md5",
+      "bbox": [5.864417, 47.26543, 15.05078, 55.14777]
+    },
+    "norway": {
+      "name": "Norway (official sign plates from NVDB)",
+      "bbox": [4.0, 57.5, 31.5, 71.5],
+      "officialSources": ["nvdb-no"],
+      "skipManifestCrossCheck": true
+    },
+    "europe": {
+      "name": "Europe (whole continent), edition 2026-09-24",
+      "geofabrikExtractUrl": "https://download.geofabrik.de/europe-260924.osm.pbf",
+      "geofabrikChecksumUrl": "https://download.geofabrik.de/europe-260924.osm.pbf.md5",
+      "bbox": [-32.683233, 29.635548, 46.75348, 81.47299],
+      "sections": { "tileDegrees": 10 },
+      "skipManifestCrossCheck": true
+    }
+  }
+}

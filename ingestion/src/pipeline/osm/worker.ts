@@ -1,0 +1,88 @@
+import fs from "node:fs/promises";
+import path from "node:path";
+import type { Logger } from "../../logging.js";
+import type { NormalizedRow, SourceWorker, WorkerContext, WorkerSection } from "../worker.js";
+import { downloadExtract } from "./download.js";
+import { readGeojsonSeq } from "./geojsonseq-reader.js";
+import { IMPLICIT_SPEEDS_SOURCE } from "./implicit-speeds.generated.js";
+import { normalizeFeature } from "./normalize.js";
+import { filterAndSplit, OSM_TAG_FILTER } from "./osmium.js";
+
+async function* rowsOfSection(filePath: string, sectionId: string, logger: Logger): AsyncGenerator<NormalizedRow> {
+  let featureCount = 0;
+  let rowCount = 0;
+  for await (const feature of readGeojsonSeq(filePath)) {
+    featureCount++;
+    for (const row of normalizeFeature(feature, logger)) {
+      rowCount++;
+      yield row;
+    }
+  }
+  logger.debug({ section: sectionId, featureCount, rowCount }, "OSM section normalization complete");
+}
+
+async function* runSections(ctx: WorkerContext): AsyncGenerator<WorkerSection> {
+  const { regionId, region, logger, downloadDir, stateDir, indexDir } = ctx;
+
+  const download = await downloadExtract(regionId, region, downloadDir, logger);
+
+  const workDir = path.join(downloadDir, `${regionId}-osmium-work`);
+  const tileDegrees = region.sections?.tileDegrees ?? null;
+  const result = await filterAndSplit(download.filePath, workDir, { tileDegrees, inputMd5: download.md5, indexDir }, logger);
+
+  // Provenance of what was imported: the exact edition (file, size, checksum, timestamps) and how it
+  // was processed. The server's rows carry only source=osm / ODbL, so this file (and the run report
+  // built from it) is where the edition is recorded. The replication header is also what a later
+  // "apply only the changes" run starts from (docs/europe-feasibility.md §11).
+  await fs.mkdir(stateDir, { recursive: true });
+  const metaPath = path.join(stateDir, "extract-meta.json");
+  // A resumed run that skips osmium has no new peak-RSS numbers — keep the ones the run that really executed osmium recorded.
+  let previousPeakRss: Record<string, number> | undefined;
+  try {
+    previousPeakRss = (JSON.parse(await fs.readFile(metaPath, "utf8")) as { osmiumPeakRssKb?: Record<string, number> }).osmiumPeakRssKb;
+  } catch {
+    previousPeakRss = undefined;
+  }
+  const peakRssKb = Object.keys(result.peakRssKb).length > 0 ? result.peakRssKb : (previousPeakRss ?? {});
+  await fs.writeFile(
+    metaPath,
+    JSON.stringify(
+      {
+        regionId,
+        regionName: region.name,
+        extractUrl: download.url,
+        sizeBytes: download.sizeBytes,
+        md5: download.md5,
+        lastModified: download.lastModified,
+        replication: result.header,
+        osmiumVersion: result.osmiumVersion,
+        osmiumPeakRssKb: peakRssKb,
+        tagFilter: OSM_TAG_FILTER,
+        tileDegrees,
+        sectionCount: result.manifest.sections.length,
+        featureCount: result.manifest.totalFeatures,
+        implicitSpeedsSource: IMPLICIT_SPEEDS_SOURCE,
+        license: "ODbL 1.0 — © OpenStreetMap contributors",
+        recordedAt: new Date().toISOString(),
+      },
+      null,
+      2,
+    ),
+  );
+  logger.info({ regionId, osmiumVersion: result.osmiumVersion, sections: result.manifest.sections.length, features: result.manifest.totalFeatures }, "osmium filter+split complete — importing sections");
+
+  let index = 0;
+  for (const section of result.manifest.sections) {
+    index++;
+    yield { id: section.id, index, total: result.manifest.sections.length, rows: rowsOfSection(path.join(result.sectionsDir, section.file), section.id, logger) };
+  }
+}
+
+export const osmWorker: SourceWorker = {
+  id: "osm",
+  supportsRegion: (region) => (region.geofabrikExtractUrl && region.geofabrikChecksumUrl ? undefined : "the region has no Geofabrik extract (geofabrikExtractUrl / geofabrikChecksumUrl in config/regions.json)"),
+  runSections,
+  async *run(ctx: WorkerContext): AsyncGenerator<NormalizedRow> {
+    for await (const section of runSections(ctx)) yield* section.rows;
+  },
+};

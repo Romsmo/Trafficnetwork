@@ -1,0 +1,21 @@
+{
+  "country": "NO",
+  "source": "nvdb-no",
+  "sourceLicense": "NLOD",
+  "codePrefix": "NO:",
+  "codeSystem": "Official Norwegian sign number (Statens vegvesen, Håndbok N300 Trafikkskilt) as published in NVDB: object type 96 'Skiltplate', property 5530 'Skiltnummer'. The code is stored verbatim after the prefix, e.g. NO:362.50 (speed limit 50), NO:202 (give way), NO:146.1 (moose). Nothing is rewritten; a code this table does not know is passed through unchanged.",
+  "seriesBasis": "The series names are descriptive, derived from the real 'Skiltnummer' entries of NVDB (the examples are verbatim from it), not quoted from Håndbok N300.",
+  "seriesPattern": "^U?([1-9])[0-9]{2}",
+  "series": {
+    "1": { "name": "warning signs", "import": true, "examples": ["146.1 - Elg", "112 - Steinsprut", "134 - Planovergang med bom"] },
+    "2": { "name": "priority signs", "import": true, "examples": ["202 - Vikeplikt", "204 - Stopp", "206 - Forkjørsveg"] },
+    "3": { "name": "prohibitory and regulatory signs, including speed limits (362.xx)", "import": true, "examples": ["362.50 - Fartsgrense 50 km/t", "370 - Stans forbudt"] },
+    "4": { "name": "mandatory signs", "import": true, "examples": ["408 - Påbudt kjøreretning i rundkjøring", "402.2 - Påbudt kjøreretning, til venstre"] },
+    "5": { "name": "information signs", "import": false, "reason": "motorway, lane and parking information: nothing a hazard or speed alert would use", "examples": ["502 - Motorveg", "552 - Parkering", "542 - Slutt på gatetun"] },
+    "6": { "name": "service signs", "import": false, "reason": "service and tourist information", "examples": ["602 - Førstehjelp", "614 - Enklere servering"] },
+    "7": { "name": "direction and wayfinding signs", "import": false, "reason": "by far the largest group and of no use for hazard or speed alerts", "examples": ["711.V90 - Tabellvegviser, Venstre, 90 grader", "723.72 - Kryssnummer for annen flerfeltsveg med planskilte kryss"] },
+    "8": { "name": "supplementary plates and text plates", "import": false, "reason": "a supplementary plate only qualifies the sign it hangs under; NVDB stores it as a separate plate, so on its own it has no meaning", "examples": ["808.101 - Smal bru", "816 - Kryssende tømmertransport"] },
+    "9": { "name": "markers and delineation", "import": false, "reason": "background, direction and obstacle markers, edge posts", "examples": ["902V - Bakgrunnsmarkering, Mot venstre", "908 - Hindermarkering, høyde"] }
+  },
+  "codes": {}
+}

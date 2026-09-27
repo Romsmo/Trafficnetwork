@@ -1,0 +1,340 @@
+{
+ "roads": [
+  "A1",
+  "A2",
+  "A3",
+  "A4"
+ ],
+ "roadworksByRoad": {
+  "A9": [
+   {
+    "identifier": "2026-003224--vi-bs.2026-06-25_23-00-00-000.devi-zus.2026-04-16_08-00-00-000.de11",
+    "icon": "123",
+    "isBlocked": "false",
+    "future": false,
+    "extent": "51.98688767215983,12.535771294841245,51.987990063122176,12.537791540639853",
+    "point": "51.98688767215983,12.535771294841245",
+    "startLcPosition": "119",
+    "impact": {
+     "lower": "Klein Marzehns",
+     "upper": "Rosselquelle",
+     "symbols": [
+      "ARROW_DOWN",
+      "BORDER_LEFT",
+      "ARROW_DOWN",
+      "CLOSED",
+      "CLOSED",
+      "SEPARATE",
+      "ARROW_UP",
+      "ARROW_UP",
+      "CLOSED",
+      "BORDER_RIGHT",
+      "CLOSED"
+     ]
+    },
+    "display_type": "ROADWORKS",
+    "subtitle": " Halle/Leipzig -> Berlin",
+    "title": "A9 | Rosselquelle - Klein Marzehns",
+    "startTimestamp": "2026-06-25T23:00:00+02:00",
+    "coordinate": {
+     "lat": 51.98688767215983,
+     "long": 12.535771294841245
+    },
+    "description": [
+     "Zeitraum dieser Bauphase:",
+     "Beginn: 25.06.26 um 23:00 Uhr",
+     "Ende: 13.11.26 um 18:00 Uhr",
+     "(Ende der Gesamtmaßnahme: 27.11.27)",
+     "",
+     "A9: Halle/Leipzig -> Berlin, zwischen 3.8 km hinter Rosselquelle und 4.3 km vor AS Klein Marzehns",
+     "",
+     "Länge: 0.19 km | Maximale Durchfahrtsbreite: 6.5 m",
+     "",
+     "A9, Fahrbahnerhaltung zwischen AS Brück und LG BB ST (km 24,65-44,87), FR Berlin"
+    ],
+    "routeRecommendation": [],
+    "footer": [],
+    "lorryParkingFeatureIcons": [],
+    "geometry": {
+     "type": "LineString",
+     "coordinates": [
+      [
+       12.535771295,
+       51.986887672
+      ],
+      [
+       12.5369115,
+       51.987485101
+      ],
+      [
+       12.537791541,
+       51.987990063
+      ]
+     ]
+    }
+   },
+   {
+    "identifier": "2026-003224--vi-bs.2026-06-25_23-00-00-000.devi-zus.2026-04-16_08-00-00-000.de9",
+    "icon": "123",
+    "isBlocked": "false",
+    "future": false,
+    "extent": "51.988103814098864,12.537615811108228,51.986986305394886,12.535634644314227",
+    "point": "51.988103814098864,12.537615811108228",
+    "startLcPosition": "120",
+    "impact": {
+     "lower": "Rosselquelle",
+     "upper": "Klein Marzehns",
+     "symbols": [
+      "CLOSED",
+      "BORDER_LEFT",
+      "CLOSED",
+      "ARROW_DOWN",
+      "ARROW_DOWN",
+      "SEPARATE",
+      "CLOSED",
+      "CLOSED",
+      "ARROW_UP",
+      "BORDER_RIGHT",
+      "ARROW_UP"
+     ]
+    },
+    "display_type": "ROADWORKS",
+    "subtitle": " Berlin -> Halle/Leipzig",
+    "title": "A9 | Klein Marzehns - Rosselquelle",
+    "startTimestamp": "2026-06-25T23:00:00+02:00",
+    "coordinate": {
+     "lat": 51.988103814098864,
+     "long": 12.537615811108228
+    },
+    "description": [
+     "Zeitraum dieser Bauphase:",
+     "Beginn: 25.06.26 um 23:00 Uhr",
+     "Ende: 13.11.26 um 18:00 Uhr",
+     "(Ende der Gesamtmaßnahme: 27.11.27)",
+     "",
+     "A9: Berlin -> Halle/Leipzig, zwischen 4.3 km hinter AS Klein Marzehns und 3.8 km vor Rosselquelle",
+     "",
+     "Länge: 0.19 km | Maximale Durchfahrtsbreite: 6.35 m",
+     "",
+     "A9, Fahrbahnerhaltung zwischen AS Brück und LG BB ST (km 24,65-44,87), FR Berlin"
+    ],
+    "routeRecommendation": [],
+    "footer": [],
+    "lorryParkingFeatureIcons": [],
+    "geometry": {
+     "type": "LineString",
+     "coordinates": [
+      [
+       12.537615811,
+       51.988103814
+      ],
+      [
+       12.5366818,
+       51.987542901
+      ],
+      [
+       12.535634644,
+       51.986986305
+      ]
+     ]
+    }
+   },
+   {
+    "identifier": "2026-049043--vi-bs.2026-10-01_21-00-00-000.de0",
+    "icon": "warnkegel",
+    "isBlocked": "false",
+    "future": true,
+    "extent": "49.43858041729939,11.223862877844972,49.42768658758803,11.211715535716339",
+    "point": "49.43858041729939,11.223862877844972",
+    "startLcPosition": "48",
+    "impact": {
+     "lower": "Brunn",
+     "upper": "Nürnberg",
+     "symbols": [
+      "SEPARATE",
+      "ARROW_UP",
+      "CLOSED",
+      "CLOSED",
+      "BORDER_RIGHT",
+      "BREAKDOWN_LANE"
+     ]
+    },
+    "display_type": "SHORT_TERM_ROADWORKS",
+    "subtitle": " Halle/Leipzig -> Nürnberg",
+    "title": "A9 | Nürnberg - Brunn",
+    "coordinate": {
+     "lat": 49.43858041729939,
+     "long": 11.223862877844972
+    },
+    "description": [
+     "Die Baustelle ist zu folgenden Zeiträumen gültig:",
+     "01.10.26 21:00 bis zum 02.10.26 06:00 Uhr.",
+     "",
+     "A9: Halle/Leipzig -> Nürnberg, zwischen 2.7 km hinter AK Nürnberg und 0.7 km vor Brunn",
+     "",
+     "Länge: 1.5 km | Maximale Durchfahrtsbreite: 3.5 m",
+     "",
+     "A9 von Nürnberg (AK) nach Brunn (Rastplatz) Fahrbahninstandsetzung"
+    ],
+    "routeRecommendation": [],
+    "footer": [],
+    "lorryParkingFeatureIcons": [],
+    "geometry": {
+     "type": "LineString",
+     "coordinates": [
+      [
+       11.223862878,
+       49.438580417
+      ],
+      [
+       11.2207126,
+       49.435749501
+      ],
+      [
+       11.218787,
+       49.434025501
+      ],
+      [
+       11.2123842,
+       49.428284401
+      ],
+      [
+       11.211715536,
+       49.427686588
+      ]
+     ]
+    }
+   },
+   {
+    "identifier": "2026-049045--vi-bs.2026-09-28_10-00-00-000.devi-zus.2026-09-28_10-00-00-000_003.de3",
+    "icon": "warnkegel",
+    "isBlocked": "false",
+    "future": true,
+    "extent": "52.133750545939506,12.753464813387964,52.1315542002607,12.750926877239685",
+    "point": "52.133750545939506,12.753464813387964",
+    "startLcPosition": "126",
+    "impact": {
+     "lower": "Niemegk",
+     "upper": "Brück",
+     "symbols": [
+      "CLOSED",
+      "BORDER_LEFT",
+      "ARROW_DOWN",
+      "ARROW_DOWN",
+      "CLOSED",
+      "SEPARATE",
+      "ARROW_UP",
+      "ARROW_UP",
+      "ARROW_UP",
+      "BORDER_RIGHT",
+      "CLOSED"
+     ]
+    },
+    "display_type": "SHORT_TERM_ROADWORKS",
+    "subtitle": " Berlin -> Halle/Leipzig",
+    "title": "A9 | Brück - Niemegk",
+    "coordinate": {
+     "lat": 52.133750545939506,
+     "long": 12.753464813387964
+    },
+    "description": [
+     "Die Baustelle ist zu folgenden Zeiträumen gültig:",
+     "28.09.26 von 10:00 bis 18:00 Uhr",
+     "",
+     "A9: Berlin -> Halle/Leipzig, zwischen 3.3 km hinter AS Brück und 5.7 km vor AS Niemegk",
+     "",
+     "Länge: 0.3 km | Maximale Durchfahrtsbreite: 10 m",
+     "",
+     "A9 von Niemegk (AS) nach Brück (AS) Arbeiten an Schutzeinrichtungen"
+    ],
+    "routeRecommendation": [],
+    "footer": [],
+    "lorryParkingFeatureIcons": [],
+    "geometry": {
+     "type": "LineString",
+     "coordinates": [
+      [
+       12.753464813,
+       52.133750546
+      ],
+      [
+       12.750926877,
+       52.1315542
+      ]
+     ]
+    }
+   }
+  ],
+  "A1": [
+   {
+    "identifier": "2026-048129--vi-bs.2026-09-29_09-00-00-000.devi-bs.2026-09-29_09-00-00-000.de3",
+    "icon": "warnkegel",
+    "isBlocked": "false",
+    "future": true,
+    "extent": "53.38075751875355,9.984878528678085,53.38016840942244,9.975655056828979",
+    "point": "53.38075751875355,9.984878528678085",
+    "startLcPosition": "215",
+    "impact": {
+     "lower": "Hittfeld",
+     "upper": "Horster Dreieck/A7",
+     "symbols": [
+      "SEPARATE",
+      "CLOSED",
+      "ARROW_UP",
+      "BORDER_RIGHT",
+      "BREAKDOWN_LANE"
+     ]
+    },
+    "display_type": "SHORT_TERM_ROADWORKS",
+    "subtitle": " Hamburg -> Bremen",
+    "title": "A1 | Horster Dreieck/A7 - Hittfeld",
+    "coordinate": {
+     "lat": 53.38075751875355,
+     "long": 9.984878528678085
+    },
+    "description": [
+     "Die Baustelle ist zu folgenden Zeiträumen gültig:",
+     "Jeden Dienstag, Mittwoch und Donnerstag zwischen dem 29.09.26 und dem 01.10.26 von 09:00 bis 15:00 Uhr.",
+     "",
+     "A1: Hamburg -> Bremen, zwischen 1.4 km hinter Horster Dreieck/A7 und 1.1 km vor Hittfeld",
+     "",
+     "Länge: 0.62 km | Maximale Durchfahrtsbreite: 5 m",
+     "",
+     "A1 von Hittfeld (Parkplatz) nach Horster DreieckA7 Brückenwartung"
+    ],
+    "routeRecommendation": [],
+    "footer": [],
+    "lorryParkingFeatureIcons": [],
+    "geometry": {
+     "type": "LineString",
+     "coordinates": [
+      [
+       9.984878529,
+       53.380757519
+      ],
+      [
+       9.9811265,
+       53.380517701
+      ],
+      [
+       9.9796256,
+       53.380421801
+      ],
+      [
+       9.9767404,
+       53.380237401
+      ],
+      [
+       9.9760739,
+       53.380194801
+      ],
+      [
+       9.975655057,
+       53.380168409
+      ]
+     ]
+    }
+   }
+  ]
+ }
+}

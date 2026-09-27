@@ -1,3 +1,4 @@
+import { sql } from "drizzle-orm";
 import {
   bigserial,
   index,
@@ -6,6 +7,7 @@ import {
   text,
   timestamp,
   unique,
+  uniqueIndex,
   uuid,
   varchar,
 } from "drizzle-orm/pg-core";
@@ -37,6 +39,16 @@ export const hazardReports = pgTable(
     status: hazardStatusEnum("status").notNull().default("active"),
     source: hazardSourceEnum("source").notNull().default("community"),
     sourceLicense: text("source_license"),
+    /**
+     * Seed reports only (source = 'seed', POST /v1/bulk-import/seed-reports): which import feed produced
+     * the row and that feed's own id for it. Together they are the row's identity for upserts, so a
+     * periodic import updates instead of duplicating, and one feed's rows can be found (or retired) in a
+     * single query — the provenance requirement of docs/concept.md section 3.2. NULL for community reports.
+     */
+    sourceFeed: text("source_feed"),
+    externalId: text("external_id"),
+    /** The import run (client-generated id) that last saw this row — a run that finished complete retires every active row of its feed that it did not see. */
+    lastSeenRun: text("last_seen_run"),
     confirmCount: integer("confirm_count").notNull().default(0),
     denyCount: integer("deny_count").notNull().default(0),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
@@ -47,6 +59,9 @@ export const hazardReports = pgTable(
     index("hazard_reports_tile_status_idx").on(t.regionTile, t.status),
     index("hazard_reports_status_expires_idx").on(t.status, t.expiresAt),
     index("hazard_reports_type_idx").on(t.type),
+    uniqueIndex("hazard_reports_seed_identity_uq")
+      .on(t.sourceFeed, t.externalId)
+      .where(sql`${t.sourceFeed} is not null`),
   ],
 );
 

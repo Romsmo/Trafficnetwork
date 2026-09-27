@@ -233,9 +233,12 @@ disagree about which votes count.
 ## Migrations that take a heavy lock
 
 **Migration 0007 (community corrections) needs a maintenance window on a node that already holds
-a lot of data.** It is the only such migration so far; 0008 (static packages) only creates new,
-empty tables and is instant. Everything else in this section is why, what to expect and how to
-avoid it.
+a lot of data.** It is the only migration so far that is heavy on a *large* table; 0008 (static
+packages) only creates new, empty tables and is instant, and 0010 (seed reports, add-on Q) adds a
+partial unique index to `hazard_reports` — technically the same kind of lock, but on a table of user
+reports rather than bulk-imported segments, so expected to be sub-second even on a busy node (see
+that migration's own `lock-ok` comment). Everything else in this section is why, what to expect and
+how to avoid it, for the one migration where it actually matters.
 
 **What happens.** 0007 adds a *stored generated column* (`speed_limit_segments.geometry_key`) and an
 index over it. Adding a stored generated column rewrites the whole table, and drizzle's migrator applies

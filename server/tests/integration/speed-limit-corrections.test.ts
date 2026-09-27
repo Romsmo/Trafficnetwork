@@ -41,7 +41,17 @@ describe("community speed-limit corrections (K-A)", () => {
   let app: FastifyInstance;
   let env: Env;
 
-  const baseEnv = () => ({ DATABASE_URL: testDb.container.getConnectionUri(), JWT_SECRET: "a".repeat(32), LOG_LEVEL: "silent" });
+  const baseEnv = () => ({
+    DATABASE_URL: testDb.container.getConnectionUri(),
+    JWT_SECRET: "a".repeat(32),
+    LOG_LEVEL: "silent",
+    // This suite's test builder calls the correction endpoints as web callers (`sub: web:…`), which now also
+    // count against the web-UI write limits (docs/status.md, "Kopplung mit K-A") — raise them here so the
+    // many calls in this file don't trip WEB_REPORT_LIMIT_PER_IP_PER_HOUR (default 10) and come back 429.
+    WEB_REPORT_LIMIT_PER_SESSION: "100000",
+    WEB_REPORT_LIMIT_PER_IP_PER_HOUR: "100000",
+    WEB_REPORT_LIMIT_NODE_PER_HOUR: "100000",
+  });
 
   async function startApp(overrides: Record<string, string> = {}): Promise<{ app: FastifyInstance; env: Env }> {
     resetEnvCache();

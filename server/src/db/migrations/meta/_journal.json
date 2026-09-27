@@ -71,6 +71,13 @@
       "when": 1790433506774,
       "tag": "0009_persistent_enforcement_devices",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1790504193494,
+      "tag": "0010_seed_reports",
+      "breakpoints": true
     }
   ]
 }
