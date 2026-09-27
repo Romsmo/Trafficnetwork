@@ -39,7 +39,7 @@ export interface SnapshotResult {
  *
  * `includeStaticData: false` (client-lib P2.0) omits the three static-entity
  * reads entirely — for a client that already has them all via the partition/
- * manifest endpoints (modules/static-data/manifest.service.ts) and just wants
+ * manifest endpoints (modules/static-data/package-service.ts) and just wants
  * the current snapshotSequence plus tile-filtered hazard reports.
  */
 export async function generateSnapshot(

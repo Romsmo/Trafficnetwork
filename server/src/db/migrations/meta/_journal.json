@@ -57,6 +57,13 @@
       "when": 1790270510461,
       "tag": "0007_speed_limit_corrections",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1790343238467,
+      "tag": "0008_static_packages",
+      "breakpoints": true
     }
   ]
 }

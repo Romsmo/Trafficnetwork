@@ -100,7 +100,14 @@ Nutzer können ein falsches Tempolimit melden und einen Wert vorschlagen. Die Ko
 - Endpunkte: `POST /v1/speed-limit-segments/:id/corrections`, `POST /v1/speed-limit-corrections/:id/confirmations`, `GET /v1/speed-limit-corrections` — siehe [`docs/api.md`](docs/api.md).
 - Entwurf und Begründung jeder Entscheidung (Schwelle, Gleichstand, Einheit, „zu prüfen" nach Importänderung, Föderation): [`docs/speed-limit-corrections.md`](docs/speed-limit-corrections.md).
 - Betreiber: `npm run corrections -- list | show | reset | restore | ban | unban | orphans` (Zurücksetzen mit **einem Befehl**: `reset --all`), Funktion abschalten mit `COMMUNITY_CORRECTIONS_ENABLED=false` — siehe [`docs/operating.md`](docs/operating.md).
-- **Upgrade-Hinweis:** Migration 0007 schreibt die Tabelle `speed_limit_segments` einmalig um (neue berechnete Spalte `geometry_key`), ca. 20 s pro Million Segmente unter exklusivem Lock — vor dem Start des neuen Servers ausführen.
+- **Upgrade-Hinweis:** Migration 0007 schreibt die Tabelle `speed_limit_segments` einmalig um (neue berechnete Spalte `geometry_key`), ca. 20 s pro Million Segmente unter exklusivem Lock — vor dem Start des neuen Servers ausführen. Auf einem Knoten mit Nutzern und großem Datenbestand braucht das ein **Wartungsfenster** (Begründung, warum es keine Online-Variante gibt, und die Regeln für künftige Migrationen: [`docs/operating.md`](docs/operating.md), „Migrations that take a heavy lock"); der Migrationsschritt warnt vorher mit Tabelle und Zeilenzahl.
+
+## Europa-Maßstab: vorgebaute Pakete, Limits, Messung (Zusatz E-B)
+
+Statische Daten werden nicht mehr pro Anfrage berechnet, sondern als **vorab erzeugte, komprimierte, inhaltsadressierte Dateien** (`STATIC_PACKAGES_DIR`, in Docker ein Volume) ausgeliefert — `ETag`/304, brotli/gzip, `Range` (Download fortsetzen), unveränderliche URL `…/packages/<tile>/<hash>` (optional öffentlich für CDN: `STATIC_PACKAGES_PUBLIC`). Der Bau streamt Kachel für Kachel (Speicher unabhängig von der Datenmenge), baut nach Änderungen nur die betroffenen Kacheln neu (Worker mit Ruhezeit, Lease, fortsetzbar); Bulk-Import ist ein Batch-Statement pro Aufruf und schreibt weiterhin **keine** Ereignisprotokoll-Zeilen; `GET /v1/snapshot` lehnt zu große Datenmengen mit 413 ab.
+
+- Betreiber: `npm run static-packages -- status | build [--full] | verify`, `npm run measure-scale`, Standard `STATIC_DATA_PARTITION_H3_RESOLUTION=4` (gleich auf allen Knoten eines Netzes; im Manifest als `partitionResolution`) — siehe [`docs/operating.md`](docs/operating.md) ("Running a node with Europe-sized data").
+- Entwurf, Messwerte und was noch auf den echten Daten nachzumessen ist: [`docs/europe-scale.md`](docs/europe-scale.md).
 
 ## Aktuell online (Zusatz O-A)
 

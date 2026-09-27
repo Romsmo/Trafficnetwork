@@ -8,3 +8,4 @@ export * from "./sync-state.js";
 export * from "./node-identity.js";
 export * from "./network-peers.js";
 export * from "./corrections.js";
+export * from "./static-packages.js";

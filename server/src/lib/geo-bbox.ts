@@ -56,3 +56,12 @@ export function bboxPrefilter(column: SQL, lat: number, lng: number, radiusM: nu
   if (!env) return sql``;
   return sql`${column} && ST_MakeEnvelope(${env.west}, ${env.south}, ${env.east}, ${env.north}, 4326) and `;
 }
+
+/**
+ * SQL predicate "column && any of these envelopes" (parenthesised). Used to find a
+ * partition tile's candidate rows through the GiST index; exactness is the caller's job.
+ */
+export function envelopeOverlap(column: SQL, envelopes: readonly Envelope[]): SQL {
+  const parts = envelopes.map((e) => sql`${column} && ST_MakeEnvelope(${e.west}, ${e.south}, ${e.east}, ${e.north}, 4326)`);
+  return sql`(${sql.join(parts, sql` or `)})`;
+}

@@ -633,6 +633,13 @@ snapshot's `snapshotSequence` as a starting point.
 
 ### `GET /v1/snapshot?tiles=<comma-separated H3 ids>&types=<comma-separated>`
 
+**Size guard (add-on E-B):** a snapshot with static data reads every static row
+into memory (about 2.5 KB of process memory per row, measured). When the server
+holds more than `SNAPSHOT_STATIC_MAX_ROWS` (default 1,000,000; `0` disables) it
+answers `413 STATIC_DATA_TOO_LARGE_FOR_SNAPSHOT` instead, pointing at
+`/v1/snapshot?staticData=false` and the manifest/packages. The check uses the
+planner's row estimate, so it costs nothing.
+
 ```json
 {
   "snapshotSequence": 1234,
@@ -676,32 +683,66 @@ snapshot's `snapshotSequence` as a starting point.
   through regardless of `types` — that filter only ever restricts
   hazard/camera-type events, matched against each event's payload.
 
-## Static data packages (client-lib P2.0)
+## Static data packages (client-lib P2.0, pre-built and cacheable since add-on E-B)
 
 Partitioned, versioned alternative to fetching all static data through
 `/v1/snapshot` in one response — for large datasets, lets a client download
 only the partitions covering the regions it cares about, and re-download only
-what actually changed.
+what actually changed. The packages are **pre-built files on disk**
+(`STATIC_PACKAGES_DIR`), rebuilt in the background after static data changes, so
+a request never computes anything and a reverse proxy or CDN can serve them.
+Design, measurements and sizing: [`europe-scale.md`](europe-scale.md).
 
-### `GET /v1/static-data/manifest`
+### `GET /v1/static-data/manifest[?since=<version>]`
 
 ```json
 {
   "staticDataVersion": 7,
+  "partitionResolution": 4,
   "generatedAt": "2026-01-01T00:00:00.000Z",
-  "partitions": [ { "tile": "<h3 id>", "hash": "<sha256 hex>", "sizeBytes": 1234 } ]
+  "partitions": [
+    { "tile": "<h3 id>", "hash": "<sha256 hex of the uncompressed JSON>", "sizeBytes": 1234,
+      "gzipBytes": 300, "brotliBytes": 290, "path": "/v1/static-data/packages/<tile>/<hash>" }
+  ]
 }
 ```
 
-Partitions are keyed by a coarse H3 cell (`STATIC_DATA_PARTITION_H3_RESOLUTION`,
-default 2 — much coarser than the resolution-7 tiles used for dynamic data),
-computed from each entity's geometry, not stored. Only partitions that
-actually contain data are listed; a `LineString` segment that straddles a
-partition boundary is listed (and returned) under every partition one of its
-vertices falls into. `staticDataVersion` bumps on every `StaticDataUpdated`/
-`StaticDataRemoved` event (fixed-camera create/removal) and on every
-successful bulk import — compare it against what a client last saw before
-even fetching the manifest.
+`tile`, `hash`, `sizeBytes` are what this endpoint has always returned;
+`gzipBytes`, `brotliBytes` (what a compressed download costs) and `path` (the
+immutable location of exactly this content) are additive.
+
+Partitions are keyed by an H3 cell at `partitionResolution` — **4 by default**
+(`STATIC_DATA_PARTITION_H3_RESOLUTION`; ≈ 1,770 km² per tile, packages of a few MB at
+Europe density; it was 2 before the Europe add-on, whose tiles were hundreds of MB), computed
+from each entity's geometry, not stored. **Every node of a network must use the same
+resolution** — tile ids and packages of different resolutions are incompatible and a client would
+download everything twice. The value is in every manifest (`partitionResolution`) and in
+`GET /v1/config` (`staticDataPartitionH3Resolution`): **a client compares it with the resolution of
+the packages it holds and, if it differs, discards them and downloads again instead of merging** (a
+tile id at resolution 2 never equals one at resolution 4). Changing the resolution of a running node
+therefore forces a full re-bootstrap on every device — decide it once. It was fixed at 4 on
+2026-09-25, while there are no real users. Only partitions that actually contain data are listed; a `LineString`
+segment that straddles a partition boundary is listed (and returned) under every
+partition one of its vertices falls into. The `hash` is stable: rebuilding
+unchanged data yields the same hash (rows are ordered by id), so comparing hashes
+tells a client exactly what to re-download.
+
+`staticDataVersion` is the static-data version the listed packages correspond
+to; it bumps on every `StaticDataUpdated`/`StaticDataRemoved` event and on
+every successful bulk import.
+
+* **`?since=<version>`** — only the partitions built after that version, plus
+  `"removed": ["<tile>", …]` for tiles that no longer have data (drop them) and
+  `"since"`. A client that already holds version *V* asks for `?since=V`
+  instead of downloading a manifest that lists every tile of Europe.
+* **Caching:** `ETag` (revalidate with `If-None-Match` → `304`), gzip when the
+  client accepts it, `Cache-Control: private, no-cache`.
+* **503 `PACKAGES_BUILDING`** (+ `Retry-After: 30`): the packages of a large
+  dataset have not been built yet (first start after an import, or after
+  changing a setting that shapes them). Datasets up to
+  `STATIC_PACKAGES_INLINE_BUILD_MAX_ROWS` (200,000) are built by the first
+  request instead, as before. Once a complete set exists it keeps being served
+  while newer writes wait for the next background build.
 
 ### `GET /v1/static-data/partitions/:tile`
 
@@ -709,9 +750,29 @@ even fetching the manifest.
 { "tile": "<h3 id>", "speedLimitSegments": [...], "staticSigns": [...], "fixedSpeedCameras": [...] }
 ```
 
-404 if `tile` isn't in the current manifest (no data for it). Compare a
-partition's `hash` from the manifest against what's already stored locally to
-decide whether it's worth re-fetching at all.
+404 if `tile` has no data. Streamed from the pre-built file; the content and
+`hash` are what they have always been. `Accept-Encoding: br` / `gzip` gets the
+stored compressed file (the `Content-Encoding` says which; a client that accepts
+neither gets the JSON decompressed on the fly). Each representation has its own
+strong `ETag` (`"<hash>-br"`, `"<hash>-gzip"`, `"<hash>"`), `If-None-Match`
+answers `304`, and `Vary: Accept-Encoding` is set. **`Range: bytes=…`** (single
+range, also `a-` and `-n`, with `If-Range`) resumes an interrupted download of a
+compressed representation → `206` + `Content-Range`, `416` when unsatisfiable;
+the plain-JSON response is produced on the fly and ignores `Range`. `503
+PACKAGE_MISSING` (+ `Retry-After`) if the file is gone from disk — the tile is
+queued for rebuild.
+
+### `GET /v1/static-data/packages/:tile/:hash`
+
+The same bytes, at a **content-addressed** URL (the `path` from the manifest):
+`Cache-Control: private, max-age=31536000, immutable` — a hash names exactly one
+content, so it never has to be revalidated. Same encodings, `ETag`s and `Range`
+handling as above. `404` if that content is no longer stored (a replaced file is
+kept for `STATIC_PACKAGES_KEEP_MINUTES`, default two hours, for downloads that
+are already running) — fetch the manifest again. With `STATIC_PACKAGES_PUBLIC=true`
+(off by default) **this route alone needs no `Authorization` header** and is
+`public`, so a reverse proxy or CDN can cache and serve it; everything else,
+including the manifest, still requires a credential.
 
 ## Client config
 
@@ -773,12 +834,16 @@ holding this scope may call these.
 { "rows": [ { "...": "entity-specific fields, see below" } ] }
 ```
 
-Response: `{ "inserted": <count> }`. Capped at 5000 rows per call.
+Response: `{ "inserted": <count> }`. Capped at `BULK_IMPORT_MAX_ROWS` rows per call
+(default 5000). One batched statement per call, and the partition tiles the rows
+touch are marked for a package rebuild in the same transaction (which also bumps
+`staticDataVersion`).
 
 **Bulk-imported rows do not append event-log entries** (deliberate — a
 single call inserting thousands of rows would otherwise dominate the log's
 size and drown out everything else during that retention window). Clients
-only see bulk-imported static data via their **next snapshot**, not via
+only see bulk-imported static data via their **next snapshot** (small servers) or
+the **package manifest** (`/v1/static-data/manifest`, the way at Europe scale), not via
 delta. This is fine for static data, and consistent with bulk-import being
 an infrequent, largely one-time operation rather than a steady stream.
 

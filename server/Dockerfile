@@ -28,6 +28,13 @@ COPY --from=prod-deps /app/node_modules ./node_modules
 COPY --from=build /app/dist ./dist
 COPY package.json ./
 
+# Pre-built static-data packages (add-on E-B, docs/europe-scale.md) live on a volume: they are
+# derived data, but rebuilding a Europe-sized set takes long, so they should survive a redeploy.
+# Created here (owned by the runtime user) so a fresh named volume inherits the ownership.
+RUN mkdir -p /app/data/static-packages && chown -R trafficnetwork:trafficnetwork /app/data
+ENV STATIC_PACKAGES_DIR=/app/data/static-packages
+VOLUME ["/app/data/static-packages"]
+
 USER trafficnetwork
 EXPOSE 3000
 

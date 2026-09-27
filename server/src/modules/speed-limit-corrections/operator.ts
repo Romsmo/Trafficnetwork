@@ -43,7 +43,7 @@ async function recomputeAndAnnounce(
     await lockSegmentKey(tx, segmentKey);
     if (before) await before(tx);
     const changes = await recomputeSegment(tx, env, segmentKey);
-    const events = env.COMMUNITY_CORRECTIONS_ENABLED ? await announceChanges(tx, changes, true) : [];
+    const events = env.COMMUNITY_CORRECTIONS_ENABLED ? await announceChanges(tx, changes, true, env.STATIC_DATA_PARTITION_H3_RESOLUTION) : [];
     return { changes, events };
   });
 }

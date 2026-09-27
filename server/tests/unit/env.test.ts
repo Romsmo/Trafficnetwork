@@ -97,6 +97,31 @@ describe("loadEnv", () => {
     expect(env.FEDERATION_OVERLOAD_MAX_CONCURRENT_PUSHES).toBe(20);
   });
 
+  describe("static-data partition resolution (E-B)", () => {
+    it("defaults to 4 in code — every node must agree, so it must not depend on an environment variable being set", () => {
+      resetEnvCache();
+      expect(loadEnv(validEnv).STATIC_DATA_PARTITION_H3_RESOLUTION).toBe(4);
+    });
+
+    it("can still be overridden, within the valid H3 range", () => {
+      resetEnvCache();
+      expect(loadEnv({ ...validEnv, STATIC_DATA_PARTITION_H3_RESOLUTION: "3" }).STATIC_DATA_PARTITION_H3_RESOLUTION).toBe(3);
+      resetEnvCache();
+      expect(() => loadEnv({ ...validEnv, STATIC_DATA_PARTITION_H3_RESOLUTION: "16" })).toThrow(/STATIC_DATA_PARTITION_H3_RESOLUTION/);
+    });
+
+    it("applies the package and Europe-scale defaults", () => {
+      resetEnvCache();
+      const env = loadEnv(validEnv);
+      expect(env.STATIC_PACKAGES_DIR).toBe("./data/static-packages");
+      expect(env.STATIC_PACKAGES_WORKER_ENABLED).toBe(true);
+      expect(env.STATIC_PACKAGES_PUBLIC).toBe(false);
+      expect(env.STATIC_PACKAGES_INLINE_BUILD_MAX_ROWS).toBe(200_000);
+      expect(env.SNAPSHOT_STATIC_MAX_ROWS).toBe(1_000_000);
+      expect(env.BULK_IMPORT_MAX_ROWS).toBe(5000);
+    });
+  });
+
   describe("community speed-limit corrections (K-A)", () => {
     it("is on by default, with the operator-decided threshold of 3 and a stricter rate limit than reports", () => {
       resetEnvCache();
