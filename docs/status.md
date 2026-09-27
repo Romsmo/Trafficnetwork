@@ -115,10 +115,41 @@ Der unten dokumentierte rote CI-Befund ist behoben:
 
 ---
 
-- **Client-Bibliothek-Instanz, Abschluss-Auftrag — Zwischenstand 2026-09-26 (NICHT abgeschlossen, Usage-Limit erreicht):** Arbeitsbranch `rework/client-lib-europe-scale` (enthält F-C0–F-C3, O-C, K-C, E-C; `rework/client-lib-online-counter` ist hineingemergt), letzter Commit `e69a78d`, **PR nicht geöffnet**. CI-Stand: bis `8ea239b` grün; die Commits danach (Öffentliche API, C-ABI, Python-Binding, Konformitätsszenarien) waren beim Abbruch **noch nicht als grün bestätigt** (CI-Läufe zu `6c4f364`/`e69a78d` prüfen; `rustfmt` ist jetzt ein eigener Job).
-  - **Fertig:** E-C (Messbericht `client-lib/docs/bootstrap-measurements.md`: echtes Bayern 204 MB roh / 149 MB Datenbank / 258 MB Speicherspitze / 25 s; synthetisch bis 20 Mio. Segmente: Verarbeitung nicht linear, 41 min bei 20 Mio.; 16-MB-Seitencache ≈ 27 % schneller → Standard), `SqliteStore` mit R*Tree für Segmente und Schilder, wiederaufnehmbarer Bootstrap, `SyncError::StorageFull`, Paket-Hashprüfung, `partitionResolution`-Abgleich (E-B-Wunsch), gzip/brotli + Timeouts nativ, `HazardType::Unknown` (leniente Dekodierung, D-Wunsch), Stimmen auf Meldungen/Kameras im Schreibpuffer, 429 bei Meldungen bleibt in der Warteschlange (offener Punkt behoben), Fund F-C2: das antwortende Seed wurde nicht in den Pool aufgenommen (Kaltstart nur mit Seed → leerer Pool) und ein einzelner Server sperrte sich nach einem Fehler selbst aus — beides behoben. Neu: öffentliche API `core/src/api` (`TrafficNetworkClient`, `call(method, json)`), C-ABI (`tn_client_*`), Python-Binding (ctypes), gemeinsame Konformitätsszenarien (`client-lib/conformance/`, Mock-Server + Python-Runner, CI-Job `conformance-python`).
-  - **Offen (F-C4/F-C5):** WASM-Binding (+ Browser-Speicher; `InMemoryStore` ist bei Regionsgröße nutzbar, aber `upsert` ist O(n) je Element), Node/Dart/Kotlin/Swift-Wrapper und deren Konformitätsläufe, React-Native-Modul, Android-AAR/iOS-XCFramework-Pakete, Mehrknoten-Integrationstests gegen echte Server-Knoten (F-C5), `client-lib/docs/api.md` + Plattform-Guides + „Netzwerk & Datenschutz", README/`.env`-Hinweise, `docs/todo.md`-Häkchen, WebSocket-Standardimplementierung (nur Protokolltreiber vorhanden), Europa-Messung gegen den echten `tn-europe`-Knoten (braucht E-B-Server-Code dort), Bench-Ergebnisse „Europa-Form/Seitencache" in den Messbericht eintragen (Läufe `client-lib-bench`, Abschnitt `@@EXPERIMENTS@@` im Bericht ist noch Platzhalter).
-  - **Risiken:** Berichte aus mehreren Servern können sich doppeln (je Server eigene IDs; die API blendet Dubletten beim Lesen aus, der Speicher hält sie); Cargo.lock ist nicht eingecheckt.
+### Abschluss Client-Bibliothek-Instanz (Stand 2026-09-27) — E-C fertig, F-C4/F-C5 bewusst offen
+
+```
+BEREICH:        client-lib
+BRANCH:         rework/client-lib-europe-scale       LETZTER COMMIT: 628346b (Merge von main)
+CI:             grün (client-lib-ci.yml: fmt, native build+test+clippy, wasm32-Build,
+                Cross-Language-Krypto-Vektor, cbindgen-Header, Python-Konformitätslauf;
+                zuletzt bestätigt an 3ebe1da/56a75ec, Merge-Commit läuft gerade nach)
+PULL REQUEST:   https://github.com/Romsmo/Trafficnetwork/pull/10 (offen, mergeable,
+                nicht selbst gemergt)
+```
+
+**Fertig:**
+- F-C0–F-C3 (Kryptografie, Discovery/Failover, Sync-Engine, Schreibpuffer, Map-Matching, Verfall, Stichproben-Prüfung) — unverändert seit den früheren Meilensteinen, jetzt erstmals per PR nach `main` vorgeschlagen (vorher lag der gesamte Code nur auf Feature-Branches, `main` hatte außer dem README noch keinen Client-Bibliothek-Code).
+- Zusatz O-C, K-C — wie zuvor gemeldet, jetzt Teil desselben PR.
+- **Zusatz E, Teil C** (dieser Auftrag): vollständiger Messbericht `client-lib/docs/bootstrap-measurements.md` — echtes Bayern über einen echten Server (204,4 MB roh / 149 MB Datenbank / 258 MB Speicherspitze / 25,3 s), Abbruch-und-Fortsetzen-Test, synthetisch bis 20 Mio. Segmente (Verarbeitung wächst nicht linear: 34→99 µs/Objekt), Seitencache-Experiment (16 MB ≈ 26 % schneller als SQLite-Standard 2 MB → jetzt Standard in `SqliteStore`), und — inzwischen nachgetragen — die tatsächliche Server-Partitionsform (Auflösung 4, ≈ 1 MB/Kachel): bei 13,6 Mio. Objekten blieb die Speicherspitze dabei unter 100 MB, kostete aber ≈ 37 Minuten Verarbeitung. **Nichts an „alles auf jedem Gerät" wurde umgestellt** — der Bericht liefert Zahlen und Optionen (A–E), die Entscheidung bleibt beim Nutzer.
+- Robustheit: `SqliteStore` (R*Tree für Segmente und Schilder), wiederaufnehmbarer Bootstrap (Partition+Hash atomar), `SyncError::StorageFull` + `plan_static_bootstrap` als Vorab-Prüfung, Paket-Hashprüfung gegen das Manifest (mit Verwerfen + Abwertung des Servers bei Abweichung), `partitionResolution`-Abgleich (verwirft und lädt neu statt zu vermischen — E-B-Wunsch), gzip/brotli + Timeouts im nativen Transport.
+- Zwei echte Fehler in F-C2 gefunden und behoben: ein Verzeichnis nennt nie sich selbst (Kaltstart mit nur einem Seed → leerer Pool, nichts synchronisierbar); ein einzelner Server sperrte sich nach einem Fehlschlag für sein ganzes Backoff-Fenster selbst aus, obwohl kein anderer Server zur Verfügung stand.
+- **F-C4, angefangen:** öffentliche API (`core/src/api`, `TrafficNetworkClient` + `call(methode, json)`), C-ABI (`tn_client_new/call/call_async/free`, App-eigener sicherer Speicher, Event-Callback), Python-Binding (`bindings/python`, reines `ctypes`), Konformitätsrahmen (`client-lib/conformance`: geteilte Szenarien + geskripteter Mock-Server + Python-Runner, CI-Job `conformance-python`). Doku: `client-lib/docs/api.md` (Methodenreferenz + „Network & privacy"-Abschnitt).
+- `Cargo.lock` erstmals eingecheckt (aus einem CI-Artefakt, da keine Session hier lokales Rust hat) — vorher trotz gegenteiligem `.gitignore`-Kommentar nie geschehen.
+
+**Offen (F-C4-Rest/F-C5 — bewusst nicht in diesem PR):**
+- WASM-Binding + Browser-Speicher (`InMemoryStore` ist die einzige heute WASM-taugliche Implementierung, ihr `upsert` ist O(n) je Element — für Regionsgröße nutzbar, nicht für einen vollen Grundstock).
+- Node-, Dart-, Kotlin-, Swift-Wrapper samt eigener Konformitätsläufe; React-Native-Modul; Android-AAR-/iOS-XCFramework-Paketierung.
+- Echte WebSocket-Anbindung für eine Host-App (nur der Protokolltreiber aus F-C3 existiert; ein echter Client ist eine Plattformentscheidung).
+- Mehrknoten-Integrationstests gegen echte Server-Knoten (F-C5).
+- Europa-Messung gegen den echten `tn-europe`-Knoten selbst (braucht E-Bs Server-Code dort erreichbar; die vorliegenden Zahlen sind Bayern + synthetisch).
+- Plattform-Integrationsguides (ein Guide pro Zielplattform, wie im ursprünglichen Phase-2-Auftrag vorgesehen) — erst sinnvoll, sobald es die jeweiligen Bindings gibt.
+
+**Risiken:**
+- Meldungen von zwei Servern können sich doppeln (jeder Server vergibt eigene Zeilen-IDs); die öffentliche API blendet das beim Lesen aus (`merge_duplicate_hazards`), der Speicher hält beide Zeilen.
+- Der PR (#10) bringt das **gesamte** `client-lib/`-Ergebnis seit F-C0 auf einmal nach `main` (main hatte vorher nur das README) — entsprechend groß (65 Dateien). Ein `main`↔Branch-Merge-Konflikt in `docs/todo.md` (zwei unabhängig gewachsene Fassungen desselben Absatzes) wurde bereits im Branch aufgelöst, der PR ist sauber mergebar.
+- Der neue Workflow `client-lib-bench.yml` läuft nur mit explizitem Trigger (`client-lib/bench/trigger.txt` anfassen) und ist kein Teil der normalen CI-Pflicht — falls das nicht gewünscht ist, bitte sagen.
+
+**BESTÄTIGUNG:** Ich bestätige, dass in meinem Bereich alle Tests in CI grün sind (bis auf den gerade laufenden letzten Merge-Commit-Lauf, dessen Vorgänger-Commits alle grün waren), die Doku dem Code entspricht und keine Geheimnisse im Repo liegen. Einschränkung: F-C4 ist nur teilweise fertig und F-C5 nicht begonnen — siehe „Offen" oben; das ist bewusst so gemeldet, nicht verschwiegen.
 
 ## Launch L — lokaler Test (`launch/local-test`, Nutzer-PC, Windows+Docker)
 
