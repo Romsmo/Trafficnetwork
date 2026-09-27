@@ -3,6 +3,7 @@ import { drizzle, type PostgresJsQueryResultHKT } from "drizzle-orm/postgres-js"
 import type { PgDatabase, PgTransaction } from "drizzle-orm/pg-core";
 import type { Env } from "../config/env.js";
 import * as schema from "./schema/index.js";
+import { installRawSqlTypeParsers } from "./raw-sql-types.js";
 
 export type Database = ReturnType<typeof createDb>;
 
@@ -31,5 +32,7 @@ export function createDb(env: Pick<Env, "DATABASE_URL">) {
     prepare: false,
   });
   const db = drizzle(client, { schema });
+  // Must come after drizzle(): see raw-sql-types.ts for why.
+  installRawSqlTypeParsers(client);
   return { db, client };
 }

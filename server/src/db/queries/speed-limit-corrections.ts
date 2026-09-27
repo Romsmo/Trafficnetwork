@@ -2,7 +2,6 @@ import { sql } from "drizzle-orm";
 import type { Queryable } from "../client.js";
 import type { CorrectionReason, CorrectionStatus, CorrectionVoteKind, SpeedLimitUnit } from "../../config/constants.js";
 import { pgArray } from "../pg-array.js";
-import { isoTimestamp } from "../sql-iso.js";
 import type { VoteInput } from "../../modules/speed-limit-corrections/tally.js";
 
 /**
@@ -94,7 +93,7 @@ export interface VoteLogEntry {
 export async function listVoteLog(db: Queryable, segmentKey: string): Promise<VoteLogEntry[]> {
   const rows = await db.execute<Record<string, unknown>>(sql`
     select v.seq, v.id, v.reporter_id, v.submitted_by, v.kind, v.value, v.unit, v.reason,
-           ${isoTimestamp("v.vote_timestamp")} as vote_timestamp, ${isoTimestamp("v.received_at")} as received_at,
+           v.vote_timestamp, v.received_at,
            (v.envelope is not null) as signed, v.origin_node_id,
            exists (select 1 from speed_limit_correction_bans b where b.reporter_id = v.reporter_id) as banned
     from speed_limit_correction_votes v
@@ -102,7 +101,7 @@ export async function listVoteLog(db: Queryable, segmentKey: string): Promise<Vo
     order by v.vote_timestamp, v.id
   `);
   return rows.map((r) => ({
-    seq: Number(r.seq),
+    seq: r.seq as number,
     id: r.id as string,
     reporterId: r.reporter_id as string,
     submittedBy: (r.submitted_by as string | null) ?? null,
@@ -135,13 +134,13 @@ export interface VotePage {
 /** The federation pull stream (GET /v1/federation/speed-limit-votes): signed votes only, in local insertion order. */
 export async function getSignedVotesSince(db: Queryable, after: number, limit: number): Promise<VotePage> {
   const rows = await db.execute<{ seq: number; id: string; envelope: unknown; received_at: string } & Record<string, unknown>>(sql`
-    select seq, id, envelope, ${isoTimestamp("received_at")} as received_at
+    select seq, id, envelope, received_at
     from speed_limit_correction_votes
     where seq > ${after} and envelope is not null
     order by seq asc
     limit ${limit}
   `);
-  const votes = rows.map((r) => ({ sequence: Number(r.seq), voteId: r.id, envelope: r.envelope, receivedAt: r.received_at }));
+  const votes = rows.map((r) => ({ sequence: r.seq, voteId: r.id, envelope: r.envelope, receivedAt: r.received_at }));
   return { votes, nextAfter: votes.at(-1)?.sequence ?? null };
 }
 
@@ -171,7 +170,7 @@ export async function deleteBan(db: Queryable, reporterId: string): Promise<bool
 
 export async function listBans(db: Queryable): Promise<{ reporterId: string; reason: string | null; bannedAt: string }[]> {
   const rows = await db.execute<Record<string, unknown>>(sql`
-    select reporter_id, reason, ${isoTimestamp("banned_at")} as banned_at from speed_limit_correction_bans order by banned_at
+    select reporter_id, reason, banned_at from speed_limit_correction_bans order by banned_at
   `);
   return rows.map((r) => ({ reporterId: r.reporter_id as string, reason: (r.reason as string | null) ?? null, bannedAt: r.banned_at as string }));
 }
@@ -235,8 +234,7 @@ function toCorrectionRow(r: CorrectionRowRaw): CorrectionRow {
 
 const CORRECTION_ROW_COLUMNS = sql`
   id, segment_key, unit, value, reason, status, support_count, deny_count,
-  ${isoTimestamp("applied_at")} as applied_at, base_value,
-  ${isoTimestamp("blocked_at")} as blocked_at, blocked_reason
+  applied_at, base_value, blocked_at, blocked_reason
 `;
 
 /** Locks and returns every materialised row of one segment (call after lockSegmentKey). */
@@ -443,8 +441,7 @@ export async function listCorrections(db: Queryable, filter: CorrectionListFilte
 
   const rows = await db.execute<CorrectionApiRaw>(sql`
     select c.id, c.segment_key, seg.id as segment_id, c.value, c.unit, c.status, c.reason, c.support_count, c.deny_count,
-           ${isoTimestamp("c.first_proposed_at")} as first_proposed_at, ${isoTimestamp("c.last_vote_at")} as last_vote_at,
-           ${isoTimestamp("c.applied_at")} as applied_at,
+           c.first_proposed_at, c.last_vote_at, c.applied_at,
            seg.speed_limit as imported_speed_limit, needs.review as needs_review,
            ST_AsGeoJSON(seg.geometry)::json as geometry_geojson
     from speed_limit_corrections c
@@ -470,8 +467,7 @@ export async function listCorrections(db: Queryable, filter: CorrectionListFilte
 export async function findCorrectionApiById(db: Queryable, id: string): Promise<CorrectionApi | null> {
   const rows = await db.execute<CorrectionApiRaw>(sql`
     select c.id, c.segment_key, seg.id as segment_id, c.value, c.unit, c.status, c.reason, c.support_count, c.deny_count,
-           ${isoTimestamp("c.first_proposed_at")} as first_proposed_at, ${isoTimestamp("c.last_vote_at")} as last_vote_at,
-           ${isoTimestamp("c.applied_at")} as applied_at,
+           c.first_proposed_at, c.last_vote_at, c.applied_at,
            seg.speed_limit as imported_speed_limit,
            (c.status = 'applied' and c.base_value is not null and exists (
              select 1 from speed_limit_segments s2
@@ -494,8 +490,7 @@ export async function findCorrectionApiById(db: Queryable, id: string): Promise<
 export async function listOrphanCorrections(db: Queryable, limit: number): Promise<CorrectionApi[]> {
   const rows = await db.execute<CorrectionApiRaw>(sql`
     select c.id, c.segment_key, null::uuid as segment_id, c.value, c.unit, c.status, c.reason, c.support_count, c.deny_count,
-           ${isoTimestamp("c.first_proposed_at")} as first_proposed_at, ${isoTimestamp("c.last_vote_at")} as last_vote_at,
-           ${isoTimestamp("c.applied_at")} as applied_at,
+           c.first_proposed_at, c.last_vote_at, c.applied_at,
            null::int as imported_speed_limit, false as needs_review, null::json as geometry_geojson
     from speed_limit_corrections c
     where not exists (select 1 from speed_limit_segments s where s.geometry_key = c.segment_key)

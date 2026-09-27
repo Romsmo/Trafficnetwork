@@ -1,7 +1,6 @@
 import { sql, type SQL } from "drizzle-orm";
 import type { Queryable } from "../client.js";
 import type { SpeedLimitUnit } from "../../config/constants.js";
-import { isoTimestamp } from "../sql-iso.js";
 import { bboxPrefilter, envelopeOverlap, type Envelope } from "../../lib/geo-bbox.js";
 
 /**
@@ -73,7 +72,7 @@ const COLUMNS = sql`
   coalesce(c.value, s.speed_limit) as speed_limit, s.speed_limit_unit,
   s.source, s.source_license, s.imported_at, s.last_confirmed_at,
   s.speed_limit as imported_speed_limit,
-  c.id as correction_id, c.support_count, c.deny_count, ${isoTimestamp("c.applied_at")} as correction_applied_at,
+  c.id as correction_id, c.support_count, c.deny_count, c.applied_at as correction_applied_at,
   (c.id is not null and c.base_value is not null and s.speed_limit <> c.base_value) as needs_review
 `;
 
