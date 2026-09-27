@@ -29,9 +29,9 @@ use crate::sync::{
     bind_device_key, confirm_hazard_report, confirm_speed_limit_correction,
     effective_camera_namespace_enabled, exchange_client_secret, fetch_corrections, flush_pending,
     haversine_distance_meters, nearby_hazard_reports, register_device, report_camera_removed,
-    report_wrong_speed_limit, run_realtime as run_realtime_protocol, speed_limit_at,
-    submit_report, ClientConfig, Correction, CorrectionTarget, FlushOutcome, HazardType,
-    NetworkConfigPayload, ReportSubmission, SegmentRef, SyncEngine, WrongSpeedLimitReport,
+    report_wrong_speed_limit, run_realtime as run_realtime_protocol, speed_limit_at, submit_report,
+    ClientConfig, Correction, CorrectionTarget, FlushOutcome, HazardType, NetworkConfigPayload,
+    ReportSubmission, SegmentRef, SyncEngine, WrongSpeedLimitReport,
 };
 
 use super::error::{code, ApiError};
@@ -910,15 +910,13 @@ impl TrafficNetworkClient {
             };
 
             let tiles = self.state().tiles.clone();
-            match self.engine.sync_dynamic(&token, &tiles).await {
-                // The one gap-close failure worth stopping the whole loop
-                // for — everything else is best-effort (the WebSocket
-                // connection itself, about to run, will catch up on
-                // whatever it can from here).
-                Err(crate::sync::SyncError::StorageFull) => {
-                    return Err(ApiError::new(code::STORAGE_FULL, "the local store is out of space"))
-                }
-                _ => {}
+            // The one gap-close failure worth stopping the whole loop for —
+            // everything else is best-effort (the WebSocket connection
+            // itself, about to run, will catch up on whatever it can).
+            if let Err(crate::sync::SyncError::StorageFull) =
+                self.engine.sync_dynamic(&token, &tiles).await
+            {
+                return Err(ApiError::new(code::STORAGE_FULL, "the local store is out of space"));
             }
 
             match run_realtime_protocol(connection.as_mut(), &self.engine, &token, &tiles).await {

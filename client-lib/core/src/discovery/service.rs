@@ -392,7 +392,10 @@ impl DiscoveryService {
     /// an earlier failure and folds `latency_ms` into its running average,
     /// exactly like a successful HTTP request would.
     pub fn record_ws_success(&self, node_id: &str, latency_ms: f64) {
-        self.pool.lock().unwrap().record_success(node_id, latency_ms);
+        self.pool
+            .lock()
+            .unwrap()
+            .record_success(node_id, latency_ms);
     }
 
     fn record_failure(&self, node_id: &str) {

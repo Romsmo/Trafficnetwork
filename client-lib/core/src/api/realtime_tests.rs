@@ -176,7 +176,12 @@ impl Sleep for RecordingSleep {
 
 const START_MS: i64 = 1_800_000_000_000;
 
-fn client(options: ClientOptions, ws: Arc<ScriptedWs>, sleep: Arc<RecordingSleep>, now: Arc<AtomicI64>) -> TrafficNetworkClient {
+fn client(
+    options: ClientOptions,
+    ws: Arc<ScriptedWs>,
+    sleep: Arc<RecordingSleep>,
+    now: Arc<AtomicI64>,
+) -> TrafficNetworkClient {
     TrafficNetworkClient::new(
         options,
         Platform {
@@ -216,8 +221,14 @@ async fn failures_do_not_stop_the_loop_until_a_server_finally_connects() {
         let stop = stop.clone();
         move || Ok(auth_ok_then_close(stop.clone()))
     }));
-    ws.script("https://a.example/v1/ws", Err(WsError::Connect("refused".to_string())));
-    ws.script("https://b.example/v1/ws", Err(WsError::Connect("refused".to_string())));
+    ws.script(
+        "https://a.example/v1/ws",
+        Err(WsError::Connect("refused".to_string())),
+    );
+    ws.script(
+        "https://b.example/v1/ws",
+        Err(WsError::Connect("refused".to_string())),
+    );
     let sleep = Arc::new(RecordingSleep::new(now.clone()));
     let client = client(
         fixed_nodes_options(&["https://a.example", "https://b.example"]),
@@ -232,18 +243,34 @@ async fn failures_do_not_stop_the_loop_until_a_server_finally_connects() {
     assert_eq!(ws.attempts.load(Ordering::SeqCst), 3);
     let status = client.get_network_status().unwrap();
     let backed_off = status.known_nodes.iter().filter(|n| n.backed_off).count();
-    assert_eq!(backed_off, 1, "the server that never got a working attempt: {status:?}");
+    assert_eq!(
+        backed_off, 1,
+        "the server that never got a working attempt: {status:?}"
+    );
 }
 
 #[tokio::test]
 async fn a_successful_connection_clears_an_earlier_backoff() {
     let stop = Arc::new(AtomicBool::new(false));
     let now = Arc::new(AtomicI64::new(START_MS));
-    let ws = Arc::new(ScriptedWs::new(|| Err(WsError::Connect("unused".to_string()))));
-    ws.script("https://a.example/v1/ws", Err(WsError::Connect("refused".to_string())));
-    ws.script("https://a.example/v1/ws", Ok(auth_ok_then_close(stop.clone())));
+    let ws = Arc::new(ScriptedWs::new(|| {
+        Err(WsError::Connect("unused".to_string()))
+    }));
+    ws.script(
+        "https://a.example/v1/ws",
+        Err(WsError::Connect("refused".to_string())),
+    );
+    ws.script(
+        "https://a.example/v1/ws",
+        Ok(auth_ok_then_close(stop.clone())),
+    );
     let sleep = Arc::new(RecordingSleep::new(now.clone()));
-    let client = client(fixed_nodes_options(&["https://a.example"]), ws.clone(), sleep, now);
+    let client = client(
+        fixed_nodes_options(&["https://a.example"]),
+        ws.clone(),
+        sleep,
+        now,
+    );
 
     client.run_realtime(&stop).await.unwrap();
 
@@ -259,10 +286,24 @@ async fn a_successful_connection_clears_an_earlier_backoff() {
 async fn the_only_server_is_retried_after_its_backoff_instead_of_being_abandoned() {
     let stop = Arc::new(AtomicBool::new(false));
     let now = Arc::new(AtomicI64::new(START_MS));
-    let ws = Arc::new(ScriptedWs::new(|| Err(WsError::Connect("unused".to_string()))));
-    ws.script("https://a.example/v1/ws", Err(WsError::Connect("refused".to_string())));
-    let sleep = Arc::new(RecordingSleep::stopping_after_calls(now.clone(), 1, stop.clone()));
-    let client = client(fixed_nodes_options(&["https://a.example"]), ws.clone(), sleep.clone(), now);
+    let ws = Arc::new(ScriptedWs::new(|| {
+        Err(WsError::Connect("unused".to_string()))
+    }));
+    ws.script(
+        "https://a.example/v1/ws",
+        Err(WsError::Connect("refused".to_string())),
+    );
+    let sleep = Arc::new(RecordingSleep::stopping_after_calls(
+        now.clone(),
+        1,
+        stop.clone(),
+    ));
+    let client = client(
+        fixed_nodes_options(&["https://a.example"]),
+        ws.clone(),
+        sleep.clone(),
+        now,
+    );
 
     client.run_realtime(&stop).await.unwrap();
 
@@ -279,8 +320,14 @@ async fn the_only_server_is_retried_after_its_backoff_instead_of_being_abandoned
 async fn with_no_known_server_it_waits_the_fixed_retry_delay_without_connecting() {
     let stop = Arc::new(AtomicBool::new(false));
     let now = Arc::new(AtomicI64::new(START_MS));
-    let ws = Arc::new(ScriptedWs::new(|| Err(WsError::Connect("unused".to_string()))));
-    let sleep = Arc::new(RecordingSleep::stopping_after_calls(now.clone(), 1, stop.clone()));
+    let ws = Arc::new(ScriptedWs::new(|| {
+        Err(WsError::Connect("unused".to_string()))
+    }));
+    let sleep = Arc::new(RecordingSleep::stopping_after_calls(
+        now.clone(),
+        1,
+        stop.clone(),
+    ));
     // discovery: true, but no seed ever answers (TokenOnlyHttp 404s
     // everything else) and no fixed nodes — an empty pool, a valid state.
     let options = ClientOptions {
@@ -303,7 +350,9 @@ async fn with_no_known_server_it_waits_the_fixed_retry_delay_without_connecting(
 async fn a_client_with_no_credentials_fails_at_once_rather_than_looping_forever() {
     let stop = Arc::new(AtomicBool::new(false));
     let now = Arc::new(AtomicI64::new(START_MS));
-    let ws = Arc::new(ScriptedWs::new(|| Err(WsError::Connect("unused".to_string()))));
+    let ws = Arc::new(ScriptedWs::new(|| {
+        Err(WsError::Connect("unused".to_string()))
+    }));
     let sleep = Arc::new(RecordingSleep::new(now.clone()));
     let mut options = fixed_nodes_options(&["https://a.example"]);
     options.credentials = None;
@@ -320,7 +369,9 @@ async fn a_client_with_no_credentials_fails_at_once_rather_than_looping_forever(
 async fn a_closed_client_refuses_to_start() {
     let stop = Arc::new(AtomicBool::new(false));
     let now = Arc::new(AtomicI64::new(START_MS));
-    let ws = Arc::new(ScriptedWs::new(|| Err(WsError::Connect("unused".to_string()))));
+    let ws = Arc::new(ScriptedWs::new(|| {
+        Err(WsError::Connect("unused".to_string()))
+    }));
     let sleep = Arc::new(RecordingSleep::new(now.clone()));
     let client = client(fixed_nodes_options(&["https://a.example"]), ws, sleep, now);
     client.close();
@@ -334,9 +385,16 @@ async fn a_closed_client_refuses_to_start() {
 async fn stop_set_before_starting_means_it_returns_at_once() {
     let stop = Arc::new(AtomicBool::new(true));
     let now = Arc::new(AtomicI64::new(START_MS));
-    let ws = Arc::new(ScriptedWs::new(|| Err(WsError::Connect("unused".to_string()))));
+    let ws = Arc::new(ScriptedWs::new(|| {
+        Err(WsError::Connect("unused".to_string()))
+    }));
     let sleep = Arc::new(RecordingSleep::new(now.clone()));
-    let client = client(fixed_nodes_options(&["https://a.example"]), ws.clone(), sleep, now);
+    let client = client(
+        fixed_nodes_options(&["https://a.example"]),
+        ws.clone(),
+        sleep,
+        now,
+    );
 
     client.run_realtime(&stop).await.unwrap();
 

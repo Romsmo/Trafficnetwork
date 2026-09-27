@@ -510,7 +510,10 @@ fn starting_and_stopping_realtime_does_not_crash_and_is_idempotent() {
     assert_eq!(status_again, 0);
 
     // NULL is documented as safe for both.
-    assert_eq!(unsafe { tn_client_start_realtime(std::ptr::null_mut()) }, -1);
+    assert_eq!(
+        unsafe { tn_client_start_realtime(std::ptr::null_mut()) },
+        -1
+    );
     unsafe { tn_client_stop_realtime(std::ptr::null_mut()) };
 
     unsafe { tn_client_stop_realtime(client) };
