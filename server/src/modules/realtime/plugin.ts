@@ -43,10 +43,16 @@ export async function registerRealtimeModule(app: FastifyInstance): Promise<Subs
 
         if (parsed.type === "auth") {
           try {
-            await verifyToken(parsed.token, app.deps.env);
+            const claims = await verifyToken(parsed.token, app.deps.env);
+            // The socket can close while the token is being verified; its "close"
+            // event has already fired by then, so registering it now would leave
+            // a connection nothing ever removes (and the online counter would
+            // count a client that is long gone).
+            if (socket.readyState !== socket.OPEN) return;
             authenticated = true;
             clearTimeout(authTimer);
             registry.addConnection(socket);
+            app.online.wsConnected(socket, claims);
             socket.send(JSON.stringify({ type: "auth_ok" }));
           } catch {
             socket.send(JSON.stringify({ type: "error", message: "Invalid token" }));
@@ -73,6 +79,7 @@ export async function registerRealtimeModule(app: FastifyInstance): Promise<Subs
     socket.on("close", () => {
       clearTimeout(authTimer);
       registry.removeConnection(socket);
+      app.online.wsDisconnected(socket);
     });
 
     req.log.debug("WebSocket connection opened, awaiting auth");

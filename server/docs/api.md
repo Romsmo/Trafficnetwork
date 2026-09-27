@@ -2,7 +2,8 @@
 
 Base path: `/v1`. All responses are JSON. All routes require authentication
 (`Authorization: Bearer <token>`) except `GET /v1/health`, `POST /v1/auth/token`,
-`POST /v1/auth/device-token`, `GET /v1/network/node-info`, the `/v1/federation/*`
+`POST /v1/auth/device-token`, `GET /v1/network/node-info`,
+`GET /v1/network/directory`, `GET /v1/stats/online`, the `/v1/federation/*`
 endpoints (F-S3, only registered when `FEDERATION_ENABLED=true` — see
 "Federation" below; each authenticates itself via a signed envelope, not a
 client Bearer token), and the `/v1/ws` WebSocket upgrade (which authenticates
@@ -168,6 +169,81 @@ itself; see `server/docs/threat-model.md` and
 list — a new server stays discoverable without being able to flood the
 directory with unproven identities.
 
+## Stats
+
+### `GET /v1/stats/online` (add-on O-A)
+
+How many clients are online at this node right now, plus an *estimated* total
+for the whole federation. Public (no auth), always registered, like
+`GET /v1/network/node-info`. **Numbers only**: nothing about a person is
+stored, logged or returned — see "What counts as online" and "Privacy" below.
+
+```json
+{
+  "enabled": true,
+  "node":    { "online": 12, "windowSeconds": 300 },
+  "network": { "online": 87, "nodes": 4, "estimated": true, "asOf": "2026-09-24T12:00:00.000Z" },
+  "minDisplayThreshold": 5
+}
+```
+
+- **`enabled`** — always present. `{ "enabled": false }` (HTTP 200, nothing
+  else) means `ONLINE_COUNTER_ENABLED=false`: the feature is off and nothing is
+  tracked. A node that predates this endpoint answers 404 instead — a client
+  should treat both the same way ("no figure available").
+- **`node.online`** — distinct clients online at *this* node. `windowSeconds`
+  is the activity window (`ONLINE_WINDOW_SECONDS`).
+- **`network`** — only present when the node federates
+  (`FEDERATION_ENABLED=true`); absent otherwise (there is no network to
+  estimate). `estimated` is always `true`: the figure is this node's own count
+  plus what other nodes *claimed* about themselves. `nodes` is how many nodes
+  the total is made of (this one included), `asOf` when it was computed.
+- **Below the threshold** the exact number is withheld. A figure under
+  `minDisplayThreshold` (`ONLINE_MIN_DISPLAY_THRESHOLD`, default 5) is printed as
+  `{ "online": null, "below": 5 }` — read as "fewer than 5". Exactly one of a
+  number or `below` is ever present, never both. This applies to `node` and to
+  `network` independently (`"nodes"`, `"windowSeconds"` and `"asOf"` are
+  unaffected). A threshold of 0 disables the masking.
+- Cached for `ONLINE_CACHE_SECONDS` (default 10) and sent with
+  `Cache-Control: public, max-age=<that>`; concurrent requests share one
+  computation. No per-route rate limit, like the other public read endpoints —
+  the cache is what keeps it cheap.
+
+**What counts as online.** A client counts once, however many connections or
+requests it makes, if either
+
+1. it has an authenticated WebSocket (`GET /v1/ws`) open right now, or
+2. it made a *successful sync or write request* within the last
+   `windowSeconds`: `GET /v1/snapshot`, `GET /v1/delta`,
+   `GET /v1/static-data/manifest`, `GET /v1/static-data/partitions/:tile`,
+   `POST /v1/hazard-reports`, `POST /v1/hazard-reports/:id/confirmations`,
+   `POST /v1/speed-cameras/:id/removal-reports`. This is what makes a client
+   that only polls visible. Plain lookups (`…/nearby`, `…/by-tile`,
+   `/v1/config`), failed requests and token exchanges do not count.
+
+Only tokens with the `client` scope count; a `bulk-import` or
+`device-registration` credential is a service, not a user. "Same client" means
+the same token subject (one client credential per device).
+
+**How the network figure is built.** Every node puts its own count into the
+signed heartbeats it already sends (`onlineCount`, see
+`server/docs/federation-protocol.md` §4.2). A node adds up the last figure of
+each peer that (a) is `active` or `trusted` in *its own* reputation view —
+never `probation`, (b) is not in the signed network config's `excludedNodeIds`,
+and (c) sent a heartbeat within `ONLINE_PEER_STALE_SECONDS` (default 300). Peer
+figures are claims this node cannot check, which is why the result is labelled
+an estimate and why per-peer figures are never published — only the sum.
+
+**Privacy.** The count is kept in process memory only: a salted hash of each
+online client's token subject (the salt is random per process and never leaves
+it) so a device is not counted twice, and the last figure per peer. No IP
+address, position, user agent or timestamp of anything but "last seen" is
+kept, nothing is written to the database, and nothing is logged for this
+feature. Up to `ONLINE_MAX_TRACKED` (default 100 000) distinct clients are
+remembered for the window; beyond that new ones are not added (a bounded
+undercount rather than unbounded memory). Restarting the node resets the count
+to what is connected again.
+
 ## Federation (F-S3, reputation signals added in F-S4)
 
 Only registered when `FEDERATION_ENABLED=true` — with the default `false`,
@@ -221,13 +297,18 @@ key for that `nodeId` (unlike join, a heartbeat doesn't get to assert its own
 identity) — the sender must already be a known peer.
 
 ```
-Request:  SignedEnvelope<{ nodeId, address, version, capacityHint?, timestamp }>
+Request:  SignedEnvelope<{ nodeId, address, version, capacityHint?, onlineCount?, timestamp }>
 Response: { "acknowledged": true }
 ```
 
 404 if `nodeId` isn't a known peer (join first). 400 if the signature doesn't
 verify against the stored key, or `timestamp` is more than 5 minutes stale.
 Updates the peer's `address` (a peer may move) and `lastSeenAt`.
+
+`onlineCount` (add-on O-A, optional) is the sender's own head count of online
+clients — see `GET /v1/stats/online`. A value that isn't a plausible head count
+(negative, fractional, not a number, above 1 000 000) is ignored; it never
+gets the heartbeat itself rejected.
 
 ### `POST /v1/federation/events`
 
@@ -579,6 +660,10 @@ in that H3 k-ring — the same `gridDisk` expansion used by the REST `by-tile`
 endpoints — so REST and WebSocket share identical "nearby tiles" semantics.
 Events with no `regionTile` (static-data updates) are pushed to every
 authenticated connection, not just subscribed ones.
+
+An authenticated connection also counts its client as online in
+`GET /v1/stats/online` for as long as it stays open — clients need to send
+nothing extra for that.
 
 This is single-instance in Phase 1 — the subscription registry lives in
 process memory. Horizontal scaling would need it backed by something shared

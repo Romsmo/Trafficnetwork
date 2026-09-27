@@ -1,5 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { FastifyInstance } from "fastify";
+import { sql } from "drizzle-orm";
+import WebSocket from "ws";
 import { buildApp } from "../../src/app.js";
 import { loadEnv, resetEnvCache, type Env } from "../../src/config/env.js";
 import { startTestDatabase, type TestDatabase } from "./setup.js";
@@ -55,7 +57,7 @@ describe("multi-node federation network (F-S5)", () => {
     });
     const app = await buildApp({ env, db: testDb.db });
     await app.listen({ port, host: "127.0.0.1" });
-    const workerDeps: FederationWorkerDeps = { db: testDb.db, env, nodeIdentity: app.nodeIdentity, realtime: app.realtime, log: app.log };
+    const workerDeps: FederationWorkerDeps = { db: testDb.db, env, nodeIdentity: app.nodeIdentity, realtime: app.realtime, log: app.log, online: app.online };
     return { testDb, app, env, address, workerDeps };
   }
 
@@ -100,7 +102,11 @@ describe("multi-node federation network (F-S5)", () => {
   let a: Node, b: Node, c: Node;
 
   beforeAll(async () => {
-    [a, b, c] = await Promise.all([startNode(PORT_A), startNode(PORT_B), startNode(PORT_C)]);
+    // ONLINE_*: no answer caching, and a peer's reported figure goes stale after
+    // a few seconds (instead of 5 minutes) so the "stale heartbeat" case fits in
+    // a test — see PEER_STALE_SECONDS in the online-counter describe below.
+    const online = { ONLINE_CACHE_SECONDS: "0", ONLINE_PEER_STALE_SECONDS: "4" };
+    [a, b, c] = await Promise.all([startNode(PORT_A, online), startNode(PORT_B, online), startNode(PORT_C, online)]);
 
     // Full mesh: B joins A; C joins both A and B. A never initiates a join
     // itself (it's the "first" node in this topology) — its peers arrive
@@ -202,7 +208,7 @@ describe("multi-node federation network (F-S5)", () => {
     // listening on the same address again.
     const cRestarted = await buildApp({ env: c.env, db: c.testDb.db });
     await cRestarted.listen({ port: PORT_C, host: "127.0.0.1" });
-    const restartedDeps: FederationWorkerDeps = { db: c.testDb.db, env: c.env, nodeIdentity: cRestarted.nodeIdentity, realtime: cRestarted.realtime, log: cRestarted.log };
+    const restartedDeps: FederationWorkerDeps = { db: c.testDb.db, env: c.env, nodeIdentity: cRestarted.nodeIdentity, realtime: cRestarted.realtime, log: cRestarted.log, online: cRestarted.online };
 
     // Confirm the gap actually exists before healing it.
     const beforePull = await cRestarted.inject({
@@ -309,5 +315,150 @@ describe("multi-node federation network (F-S5)", () => {
       payload: { type: "traffic", lat: 60, lng: 60 },
     });
     expect(onB.statusCode).toBe(201);
+  });
+
+  /**
+   * Add-on O-A: each node reports its own head count in the signed heartbeats it
+   * already sends; a node adds up what qualifying peers reported into an
+   * *estimated* network total. Real WebSocket clients connected to real
+   * listening nodes, real heartbeats over the network.
+   *
+   * Earlier tests in this file left some request-based "online" clients behind
+   * on the nodes (anyone who made a sync/write request within the 5 minute
+   * window), so every expectation is relative to a baseline taken beforehand.
+   */
+  describe("online counter across the network (add-on O-A)", () => {
+    const CLIENTS = { a: 6, b: 7, c: 8 };
+    let base = { a: 0, b: 0, c: 0 };
+    let sockets: WebSocket[] = [];
+
+    const depsOf = (node: Node): FederationWorkerDeps => ({
+      db: node.testDb.db,
+      env: node.env,
+      nodeIdentity: node.app.nodeIdentity,
+      realtime: node.app.realtime,
+      log: node.app.log,
+      online: node.app.online,
+    });
+    const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+    /** Matches ONLINE_PEER_STALE_SECONDS above; waits until everything reported so far has gone stale. */
+    const PEER_STALE_SECONDS = 4;
+    const waitUntilStale = () => sleep((PEER_STALE_SECONDS + 0.3) * 1000);
+
+    async function connectClients(node: Node, prefix: string, count: number): Promise<WebSocket[]> {
+      const opened: WebSocket[] = [];
+      for (let i = 0; i < count; i++) {
+        const ws = await new Promise<WebSocket>((resolve, reject) => {
+          const socket = new WebSocket(`${node.address.replace("http://", "ws://")}/v1/ws`);
+          socket.once("open", () => resolve(socket));
+          socket.once("error", reject);
+        });
+        const authOk = new Promise<void>((resolve) => ws.once("message", () => resolve()));
+        ws.send(JSON.stringify({ type: "auth", token: await testToken(node.env, { sub: `${prefix}-${i}` }) }));
+        await authOk; // the server has registered the connection before it answers
+        opened.push(ws);
+      }
+      return opened;
+    }
+
+    interface Stats {
+      node: { online: number | null; below?: number };
+      network?: { online: number | null; nodes: number; estimated: boolean; asOf: string };
+    }
+    async function statsOf(node: Node): Promise<Stats> {
+      return (await node.app.inject({ method: "GET", url: "/v1/stats/online" })).json() as Stats;
+    }
+
+    /** What node `viewer` thinks of `peer`: promoted to active, or knocked back to a fresh probation entry. */
+    async function setStanding(viewer: Node, peer: Node, standing: "active" | "probation") {
+      const nodeId = peer.app.nodeIdentity.nodeId;
+      if (standing === "active") {
+        await viewer.testDb.db.execute(
+          sql`update network_peers set joined_at = now() - interval '48 hours', successful_health_checks = 10 where node_id = ${nodeId}`,
+        );
+      } else {
+        await viewer.testDb.db.execute(sql`update network_peers set joined_at = now(), successful_health_checks = 0 where node_id = ${nodeId}`);
+      }
+    }
+
+    beforeAll(async () => {
+      base = { a: a.app.online.nodeCount(), b: b.app.online.nodeCount(), c: c.app.online.nodeCount() };
+      sockets = [...(await connectClients(a, "net-a", CLIENTS.a)), ...(await connectClients(b, "net-b", CLIENTS.b)), ...(await connectClients(c, "net-c", CLIENTS.c))];
+      await setStanding(a, b, "active");
+      await setStanding(a, c, "active");
+    }, 30_000);
+
+    afterAll(() => {
+      for (const s of sockets) s.terminate();
+    });
+
+    it("counts the connected clients on its own node", async () => {
+      expect((await statsOf(a)).node.online).toBe(base.a + CLIENTS.a);
+      expect((await statsOf(b)).node.online).toBe(base.b + CLIENTS.b);
+      expect((await statsOf(c)).node.online).toBe(base.c + CLIENTS.c);
+    });
+
+    it("the network total is just the node's own figure until peers have reported theirs", async () => {
+      // Nobody has sent a heartbeat carrying a figure yet in this describe block:
+      // the estimate is this node's own, from one node.
+      await waitUntilStale(); // let anything reported by earlier tests go stale
+      expect((await statsOf(a)).network).toMatchObject({ online: base.a + CLIENTS.a, nodes: 1, estimated: true });
+    });
+
+    it("adds up the figures qualifying peers reported in their signed heartbeats, labelled as an estimate", async () => {
+      await sendHeartbeats(depsOf(b));
+      await sendHeartbeats(depsOf(c));
+
+      const { network } = await statsOf(a);
+      expect(network).toMatchObject({
+        online: base.a + CLIENTS.a + (base.b + CLIENTS.b) + (base.c + CLIENTS.c),
+        nodes: 3,
+        estimated: true,
+      });
+      expect(Number.isNaN(Date.parse(network!.asOf))).toBe(false);
+    });
+
+    it("stops counting a peer whose last heartbeat is stale, and counts it again after a fresh one", async () => {
+      await sendHeartbeats(depsOf(b));
+      await sendHeartbeats(depsOf(c));
+      expect((await statsOf(a)).network).toMatchObject({ nodes: 3 }); // both reported just now
+
+      await waitUntilStale(); // both reports are now stale
+      expect((await statsOf(a)).network).toMatchObject({ online: base.a + CLIENTS.a, nodes: 1 });
+
+      await sendHeartbeats(depsOf(b)); // only B is heard from again
+      expect((await statsOf(a)).network).toMatchObject({ online: base.a + CLIENTS.a + (base.b + CLIENTS.b), nodes: 2 });
+    });
+
+    it("leaves out a peer that is still on probation, however large its figure", async () => {
+      await sendHeartbeats(depsOf(b));
+      await sendHeartbeats(depsOf(c));
+      expect((await statsOf(a)).network).toMatchObject({ nodes: 3 });
+
+      await setStanding(a, c, "probation");
+      expect((await statsOf(a)).network).toMatchObject({ online: base.a + CLIENTS.a + (base.b + CLIENTS.b), nodes: 2 });
+
+      await setStanding(a, c, "active");
+      expect((await statsOf(a)).network).toMatchObject({ nodes: 3 });
+    });
+
+    it("a heartbeat with an unusable figure is still accepted, but the figure is not counted", async () => {
+      await waitUntilStale(); // everything reported so far is stale
+      for (const onlineCount of [-5, 2.5, "many", 999_999_999]) {
+        const heartbeat = signEnvelope(
+          { nodeId: b.app.nodeIdentity.nodeId, address: b.address, version: "1", onlineCount, timestamp: new Date().toISOString() },
+          b.app.nodeIdentity,
+        );
+        const res = await a.app.inject({ method: "POST", url: "/v1/federation/heartbeat", payload: heartbeat });
+        expect(res.statusCode).toBe(200);
+      }
+      expect((await statsOf(a)).network).toMatchObject({ online: base.a + CLIENTS.a, nodes: 1 });
+    });
+
+    it("a node with the counter switched off sends no figure, so peers cannot count it", async () => {
+      await waitUntilStale();
+      await sendHeartbeats({ ...depsOf(b), online: undefined });
+      expect((await statsOf(a)).network).toMatchObject({ online: base.a + CLIENTS.a, nodes: 1 });
+    });
   });
 });

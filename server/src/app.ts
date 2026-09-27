@@ -22,6 +22,8 @@ import { registerNetworkRoutes } from "./modules/network/routes.js";
 import { applyNetworkConfigCameraOverride, loadSignedNetworkConfig, type NetworkConfigPayload } from "./modules/network/config.js";
 import type { SignedEnvelope } from "./modules/crypto/envelope.js";
 import { registerFederationRoutes } from "./modules/federation/routes.js";
+import { OnlineTracker } from "./modules/online/tracker.js";
+import { registerOnlineModule } from "./modules/online/plugin.js";
 
 export interface AppDependencies {
   env: Env;
@@ -33,6 +35,8 @@ declare module "fastify" {
     deps: AppDependencies;
     realtime: SubscriptionRegistry;
     nodeIdentity: NodeIdentity;
+    /** "Currently online" head count (numbers only, in memory) — see modules/online/. */
+    online: OnlineTracker;
     /** Full signed envelope (not just the payload) so /v1/config can expose the raw signature for independent client verification. */
     networkConfig: SignedEnvelope<NetworkConfigPayload> | null;
   }
@@ -90,7 +94,20 @@ export async function buildApp(deps: AppDependencies): Promise<FastifyInstance> 
 
   app.decorate("nodeIdentity", await loadOrCreateNodeIdentity(deps.db));
 
+  app.decorate(
+    "online",
+    new OnlineTracker({
+      enabled: deps.env.ONLINE_COUNTER_ENABLED,
+      windowSeconds: deps.env.ONLINE_WINDOW_SECONDS,
+      maxTracked: deps.env.ONLINE_MAX_TRACKED,
+      peerStaleSeconds: deps.env.ONLINE_PEER_STALE_SECONDS,
+    }),
+  );
+
   await registerAuthHook(app);
+  // After the auth hook (reads req.auth) and before the routes it observes
+  // (a hook only covers routes registered after it).
+  await registerOnlineModule(app);
   app.decorate("realtime", await registerRealtimeModule(app));
 
   await registerHealthRoutes(app);

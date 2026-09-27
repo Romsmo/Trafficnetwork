@@ -136,6 +136,17 @@ away from their defaults:
   and how tolerant you are of transient failures before demoting to
   `probation`. Purely local to your own view; changing these never affects
   how other servers see you.
+- **`ONLINE_*`** — the "currently online" figure (`GET /v1/stats/online`, see
+  `api.md`). It is numbers only and kept in memory, so there is nothing to
+  back up or purge; a restart just starts counting again. Set
+  `ONLINE_COUNTER_ENABLED=false` to switch it off entirely (the endpoint then
+  answers `{ "enabled": false }` and your node stops sending its figure to
+  peers). `ONLINE_MIN_DISPLAY_THRESHOLD` (default 5) is the privacy floor —
+  below it the endpoint says "fewer than N"; lower it only if you are sure the
+  exact small number can't identify anyone on your node. In the network total
+  your node only counts peers it has itself seen as `active`/`trusted`, so a
+  brand-new peer's figure shows up once it has earned that standing, not
+  immediately.
 - **`FEDERATION_OVERLOAD_MAX_CONCURRENT_PUSHES`** — raise it if your server
   has real headroom and you're seeing unnecessary 503s under legitimate
   replication load; lower it if a burst of pushes is visibly affecting your
