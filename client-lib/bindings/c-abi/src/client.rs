@@ -26,9 +26,7 @@ use std::sync::{Arc, OnceLock};
 
 use serde_json::{json, Value};
 use tokio::runtime::Runtime;
-use trafficnetwork_core::api::{
-    code, ApiError, ClientEvent, ClientOptions, Platform, SecureStore, TrafficNetworkClient,
-};
+use trafficnetwork_core::api::{code, ApiError, ClientOptions, Platform, SecureStore, TrafficNetworkClient};
 
 fn runtime() -> &'static Runtime {
     static RUNTIME: OnceLock<Runtime> = OnceLock::new();
@@ -425,7 +423,7 @@ pub unsafe extern "C" fn tn_client_set_event_callback(
     let handle = unsafe { &*client.cast::<Handle>() };
     let user_data = user_data as usize;
     let listener = callback.map(|callback| {
-        let listener: Arc<dyn Fn(&ClientEvent) + Send + Sync> = Arc::new(move |event| {
+        let listener: trafficnetwork_core::api::EventListener = Arc::new(move |event| {
             let Ok(text) = serde_json::to_string(event) else {
                 return;
             };

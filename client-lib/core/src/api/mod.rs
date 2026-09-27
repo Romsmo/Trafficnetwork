@@ -17,7 +17,7 @@ mod types;
 pub use client::{Platform, TrafficNetworkClient};
 pub use dispatch::API_VERSION;
 pub use error::{code, ApiError};
-pub use events::{ClientEvent, EventHub};
+pub use events::{ClientEvent, EventHub, Listener as EventListener};
 pub use options::{ClientOptions, Credentials, DEFAULT_NETWORK_ROOT_KEY, DEFAULT_SEEDS};
 #[cfg(not(target_arch = "wasm32"))]
 pub use secure_store::FileSecureStore;

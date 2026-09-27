@@ -49,7 +49,10 @@ pub enum ClientEvent {
     StorageFull,
 }
 
-type Listener = Arc<dyn Fn(&ClientEvent) + Send + Sync>;
+/// A callback registered for every event as it happens — named so its type
+/// need not be spelled out (and re-spelled identically) at every call site
+/// that takes one, such as [`super::TrafficNetworkClient::set_event_listener`].
+pub type Listener = Arc<dyn Fn(&ClientEvent) + Send + Sync>;
 
 #[derive(Default)]
 pub struct EventHub {

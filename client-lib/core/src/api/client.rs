@@ -877,7 +877,7 @@ impl TrafficNetworkClient {
 
     /// Calls `listener` for every event as it happens (in addition to the
     /// queue `poll_events` drains). `None` removes it.
-    pub fn set_event_listener(&self, listener: Option<Arc<dyn Fn(&ClientEvent) + Send + Sync>>) {
+    pub fn set_event_listener(&self, listener: Option<super::events::Listener>) {
         self.events.set_listener(listener);
     }
 
