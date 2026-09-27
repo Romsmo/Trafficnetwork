@@ -173,10 +173,36 @@ Kein privater Schlüssel, kein reales Passwort, kein API-Token im Repo oder in d
 
 ---
 
-## Zusammenfassung für R2/R3
+## 11. Nachtrag (2026-09-27, nach deiner Freigabe) — Branch-Aufräumung, Nachzügler-PR, `.env.example`-Fix, client-lib-Status
 
-Der Merge (R2) ist abgeschlossen, `main` ist grün, dieser Bericht ist der geforderte Nachweis **nach** dem Merge (mit deiner Zustimmung so umsortiert, siehe Sitzungsverlauf). Bevor ich zu R3 (Prompts auslagern, Doku entrümpeln, Domain ersetzen) übergehe, brauche ich von dir:
+**Branches gelöscht**, jeder einzeln vorher per `git rev-list --count origin/main..origin/<branch>` auf `0` geprüft (Ankündigung vorher in `docs/status.md`, Commit `6d8d947`):
 
-1. Freigabe, die gemergten/überholten Branches zu löschen (Liste in Abschnitt 8).
-2. Entscheidung zu `launch/local-test` (Nachzügler-PR oder bewusst auslassen).
-3. Zur Kenntnis: der `.env.example`-`DATABASE_URL`-Stolperstein (Abschnitt 6) — soll ich den beheben, oder der Server-Instanz/dir überlassen?
+| Branch | Commits ggü. `main` vor dem Löschen | Beleg |
+|---|---|---|
+| `feature/europe-scale`, `feature/online-counter`, `feature/persistent-enforcement-devices`, `feature/server-web-ui`, `feature/speed-limit-corrections`, `fix/spatial-index-prefilter`, `phase3/ingestion`, `phase3/source-catalogue`, `rework/client-lib-europe-scale`, `rework/server-federation` | je `0` | gemergte PR-Branches (#1–#10) |
+| `rework/client-lib-federation`, `rework/client-lib-online-counter`, `rework/client-lib-speed-corrections` | je `0` | vollständig in `rework/client-lib-europe-scale` (PR #10) aufgegangen |
+| `launch/ingestion-fix-maxspeed-zero` | **1** (`ce5c457`, per Ahnenkette nicht in `main`) | inhaltlich **nachweislich** in `main`: `ingestion/src/pipeline/osm/normalize.ts` enthält denselben Kommentar und dieselbe `numeric <= 0`-Prüfung wortgleich, unter einem anderen, unabhängig entstandenen Commit — Diff verglichen, kein Unterschied in der Logik |
+
+Alle 13 gelöscht. Verifiziert: `gh api repos/Romsmo/Trafficnetwork/branches` zeigt danach nur noch `main` und `rework/client-lib-bindings` (aktive Arbeit der Client-Bibliothek-Instanz, unangetastet) — bis `launch/local-test` per Nachzügler-PR aufging (nächster Punkt), dann auch das gelöscht.
+
+**`launch/local-test` → PR #12, gemergt, CI grün:** Testwerkzeug (`tools/test-client/`), Docker-Fix-Skript (mit Begründungssatz ergänzt), Zwei-Knoten-Compose-Beispiel und die bereits bestandene 9-Punkte-Abnahme (`docs/launch-checklist.md`, mit Nachtrag zum aktuellen Stand) sind jetzt in `main`. Neuer `tools/README.md`, minimale `tools-ci.yml` (Install-Smoke, da das Werkzeug kein eigenes TS/Lint/Test-Setup hat). Danach `launch/local-test` selbst gelöscht — Differenz zu `main` geprüft: nur noch meine eigenen Ergänzungen (Nachtrag, README, Begründungssatz), kein einziger inhaltlicher Unterschied mehr.
+
+**`.env.example`-Fix, Commit `2200995`:** `server/.env.example`s `DATABASE_URL` war mit einem ausgefüllten, aber nicht funktionierenden Platzhalter vorbelegt — jetzt auskommentiert, wie die übrigen optionalen Variablen in derselben Datei. Alle anderen `.env.example`/`*.example`-Dateien im Repo geprüft (`ingestion/.env.example`, `server/Caddyfile.example`, `server/deploy/Caddyfile.example`, `tools/test-client/local.config.example.json`) — keine hat dasselbe Muster (leere Felder oder offensichtlich unechte Platzhalter statt einem funktional aussehenden falschen Wert). Den Compose-Schnellstart aus `server/README.md` danach **wörtlich** noch einmal durchgespielt (frisches `.env`, nur `POSTGRES_PASSWORD` + `JWT_SECRET` gesetzt, `docker compose up -d`) → `GET /v1/health` → `{"status":"ok","database":"ok"}`.
+
+**PR #11 gemergt** (client-lib B1+B2: echter WebSocket-Transport mit Reconnect/Lückenschluss, Mehrknoten-Integrationstests gegen echte Server-Prozesse) — 13 Commits, konfliktfrei, alle Checks grün vor dem Merge, `client-lib-ci` und `server-ci` auf `main` danach grün geblieben.
+
+**client-lib ist damit weiterhin nicht fertig — Korrektur zu Abschnitt 1/7 dieses Berichts:** B0–B2 sind jetzt abgeschlossen; **B3 (WASM + JS/TS), B4 (Kotlin, Swift, Dart), B5 (React Native, Paketierung, Konformitätstests über die Anbindungen) bleiben offen**, Arbeit läuft weiter auf `rework/client-lib-bindings` nach `docs/prompt-client-lib-finish.md`. Die 176/176 Tests in Abschnitt 1 waren vor PR #11 gezählt — nach dem Merge sind es mehr (neue Mehrknoten- und Realtime-Tests), CI bestätigt weiterhin grün, ich habe keinen erneuten vollen lokalen `cargo test`-Lauf nach PR #11 gemacht (Zeitbudget; CI ist hier ausreichend, siehe Abschnitt 1s Begründung für "CI statt lokal").
+
+**Zwei echte Server-Fehler**, gefunden von den neuen Mehrknoten-Integrationstests (B2), **unabhängig im Server-Code nachvollzogen, nicht nur aus dem Lagebericht übernommen:**
+1. `reportedAt`/`expiresAt`/`occurredAt` kommen als Postgres-`timestamptz`-Textformat zurück (z. B. `"2026-09-27 14:45:15.923718+00"`), nicht als das dokumentierte RFC 3339.
+2. `event_log.sequence` kommt als JSON-*String* statt Zahl zurück, überall wo roh per `sql\`...\`` gelesen wird (`server/src/db/queries/event-log.ts` — TypeScript-Typannotation `sequence: number` ist dort nur eine Behauptung, keine Laufzeit-Garantie; `postgres.js` liefert eine solche Spalte ohne expliziten Cast als String).
+
+Beide sind serverseitige Bugs, in `client-lib` nur toleranzhalber abgefangen (Krücke, kein Fix, so von der Client-Bibliothek-Instanz selbst benannt). **Eine eigene Server-PR (`fix/api-serialization`) steht noch aus** — vor deren Merge sollte kein Release geschnitten werden, da sonst jeder andere Client (nicht nur `client-lib`) potenziell auf dieselbe Falle läuft.
+
+**Versionierung (deine Entscheidung, hier nur festgehalten):** kein gemeinsames `v1.0.0`. `server/` und die Weboberfläche dürfen `1.0.0` werden — dieser Bericht deckt das inhaltlich (Abschnitte 1–7 sind ohne Einschränkung grün, offene Punkte sind Betreiber-/Rechtsfragen, keine Code-Mängel), vorbehaltlich `fix/api-serialization`. `client-lib/` bleibt `0.x`, solange B3–B5 fehlen.
+
+---
+
+## Zusammenfassung — Stand nach diesem Nachtrag
+
+R1 (Prüfbericht) und der aufräumende Teil von R2 (Branches) sind abgeschlossen. Vor R4 (Release `v1.0.0`) fehlt noch `fix/api-serialization` auf dem Server. Weiter mit R3 (Domain-Platzhalter ersetzen, Prompts auslagern, Doku entrümpeln).
