@@ -1,4 +1,4 @@
-import Fastify, { type FastifyError, type FastifyInstance } from "fastify";
+import Fastify, { type FastifyError, type FastifyInstance, type FastifyServerOptions } from "fastify";
 import cors from "@fastify/cors";
 import rateLimit from "@fastify/rate-limit";
 import type { Env } from "./config/env.js";
@@ -26,6 +26,10 @@ import { registerSpeedLimitCorrectionRoutes } from "./modules/speed-limit-correc
 import { syncCorrectionsOverlaySwitch } from "./modules/speed-limit-corrections/switch.js";
 import { OnlineTracker } from "./modules/online/tracker.js";
 import { registerOnlineModule } from "./modules/online/plugin.js";
+import { registerWebGuard } from "./modules/web/guard.js";
+import { registerWebModule } from "./modules/web/plugin.js";
+import { parseTrustProxy } from "./lib/trust-proxy.js";
+import { privacyRequestSerializer } from "./lib/log-serializers.js";
 
 export interface AppDependencies {
   env: Env;
@@ -45,9 +49,15 @@ declare module "fastify" {
 }
 
 export async function buildApp(deps: AppDependencies): Promise<FastifyInstance> {
-  const app = Fastify({
-    logger: { level: deps.env.LOG_LEVEL },
-  });
+  const options: FastifyServerOptions = {
+    logger: {
+      level: deps.env.LOG_LEVEL,
+      ...(deps.env.LOG_PRIVACY_MODE ? { serializers: { req: privacyRequestSerializer } } : {}),
+    },
+    // A hop count (number) is supported at runtime; the type definitions just don't list it.
+    trustProxy: parseTrustProxy(deps.env.TRUST_PROXY) as FastifyServerOptions["trustProxy"],
+  };
+  const app = Fastify(options);
 
   app.decorate("deps", deps);
 
@@ -110,6 +120,8 @@ export async function buildApp(deps: AppDependencies): Promise<FastifyInstance> 
   // After the auth hook (reads req.auth) and before the routes it observes
   // (a hook only covers routes registered after it).
   await registerOnlineModule(app);
+  // Must come after the auth hook (it reads req.auth) and before any route it is meant to guard.
+  await registerWebGuard(app);
   app.decorate("realtime", await registerRealtimeModule(app));
 
   await registerHealthRoutes(app);
@@ -130,6 +142,8 @@ export async function buildApp(deps: AppDependencies): Promise<FastifyInstance> 
   if (deps.env.COMMUNITY_CORRECTIONS_ENABLED) {
     await registerSpeedLimitCorrectionRoutes(app);
   }
+  // Web UI pages/files + POST /v1/web/session; only when WEB_UI_ENABLED (docs/web-ui.md).
+  await registerWebModule(app);
   // Only registered when federating (F-S3) — an isolated server (the
   // default) has no join/heartbeat/push/pull endpoints at all, exactly like
   // before this milestone, rather than exposing them but rejecting every

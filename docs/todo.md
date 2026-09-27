@@ -89,22 +89,23 @@ Mehrknoten-Integrationstests, Abschluss-PR) steht aus — Einzelheiten in
 
 ## Zusatz W — Weboberfläche des Servers (Karte, Melden, Anleitung)
 - [x] Claude-Code-Prompt erstellt (`docs/prompt-server-web-ui.md`) — reine Ergänzung, API bleibt unverändert
-- [ ] W1: Auslieferung durch den Server (`WEB_UI_ENABLED`), Grundgerüst, GitHub-Link in der Fußzeile, Deutsch/Englisch
-- [ ] W2: Karte (OpenStreetMap) mit Meldungen und Tempolimit-Abfrage, Live-Aktualisierung
-- [ ] W3: Melden und Bestätigen aus dem Browser, ohne Geheimnis im Quelltext, mit eigener Begrenzung
-- [ ] W4: Seiten „Verbinden" (App, eigener Knoten, API) und „Über das Projekt"
-- [ ] W5: E2E-Tests, `server/docs/web-ui.md`, Pull Request
+- [x] W1: Auslieferung durch den Server (`WEB_UI_ENABLED`), Grundgerüst, GitHub-Link in der Fußzeile, Deutsch/Englisch
+- [x] W2: Karte (OpenStreetMap) mit Meldungen und Tempolimit-Abfrage, Live-Aktualisierung
+- [x] W3: Melden und Bestätigen aus dem Browser, ohne Geheimnis im Quelltext, mit eigener Begrenzung
+- [x] W4: Seiten „Verbinden" (App, eigener Knoten, API) und „Über das Projekt"
+- [x] W5: E2E-Tests (Playwright), `server/docs/web-ui.md`, `docs/privacy.md` (Entwurf) — Branch `feature/server-web-ui`
+- [x] W-PR: Pull Request #8 offen (CI grün, Lauf #30), Merge-Hinweise im PR; der Performance-Fix ist PR #4 (Stapel der Server-Instanz)
 
 ## Zusatz O — Anzeige „aktuell online" (Server + Web + Client-Bibliothek)
 - [x] Zusatz-Prompts erstellt (`docs/prompt-addon-online-counter.md`)
 - [x] O-A Server: `GET /v1/stats/online`, eigene Zahl im Heartbeat (`onlineCount`), Schwellenwert gegen Rückschlüsse (Branch `feature/online-counter`, lokal 295/295, PR wartet auf Freigabe; Antwortformat entspricht dem von O-B/O-C erwarteten)
-- [ ] O-B Web: Anzeige unten rechts, Aktualisierung, Textfall unter dem Schwellenwert
+- [x] O-B Web: Anzeige unten rechts, Aktualisierung, Textfall unter dem Schwellenwert — gebaut und getestet (Branch `feature/server-web-ui`, Unit + Playwright), gegen den echten O-A-Endpunkt geprüft (Trial-Merge-Prüfung siehe `docs/status.md`, Abschnitt "Server-Weboberfläche (W)")
 - [x] O-C Client-Bibliothek: `NetworkStatus`-Felder `onlineNode`/`onlineNetwork`/`onlineEstimated`/`onlineAsOf` + `OnlineStatusService` (Branch `rework/client-lib-online-counter`, CI grün; gegen das vorgeschlagene Format gebaut, O-A steht noch aus; `getNetworkStatus()` als Fassade jetzt Teil der öffentlichen API in `rework/client-lib-europe-scale`, siehe Zusatz E unten)
 
 ## Zusatz K — Falsche Tempolimits melden und korrigieren
 - [x] Zusatz-Prompts erstellt (`docs/prompt-addon-speed-limit-corrections.md`)
 - [x] K-A Server: Korrektur als überlagernder Datensatz (Import bleibt erhalten), Schwellenwert, Widerspruch, Verteilung über Pakete/Events und Föderation, Betreiber kann zurücksetzen (Branch `feature/speed-limit-corrections`, lokal 339 Tests grün (Gesamtlauf 338/339, der eine Fehler war eine veraltete Testerwartung, behoben und nachgelaufen), PR wartet auf Freigabe; Plan: `server/docs/speed-limit-corrections.md`; **Migration 0007 schreibt `speed_limit_segments` einmalig um, ~20 s pro Mio. Segmente** — Backup + Wartungsfenster einplanen)
-- [ ] K-B Web: „Stimmt nicht?"-Formular, Herkunft des Werts sichtbar (Allowlist der Web-Sitzungen um die vier Korrektur-Pfade erweitern; Hinweise im Status-Abschnitt "Zusatz K-A")
+- [ ] K-B Web: „Stimmt nicht?"-Formular, Herkunft des Werts sichtbar (Hinweise im Status-Abschnitt "Zusatz K-A") — **Allowlist-Seite erledigt** (`feature/server-web-ui`: die vier Korrektur-Pfade sind für Web-Sitzungen offen, unsigniert und knotenlokal); Formular und Herkunftsanzeige stehen aus
 - [x] K-C Client-Bibliothek: `report_wrong_speed_limit`/`confirm_speed_limit_correction` über den Offline-Puffer (beim Senden signiert), Überlagerung statt Überschreiben, Herkunft in `speed_limit_at()` (Branch `rework/client-lib-speed-corrections`, CI grün; gegen den dokumentierten Server-Vertrag gebaut; öffentliche Fassade `getSpeedLimitAt()`/`reportWrongSpeedLimit()` jetzt Teil der öffentlichen API in `rework/client-lib-europe-scale`, siehe Zusatz E unten)
 - [x] Schwellenwert entschieden: **3 verschiedene Geräte** (Konfigurationswert, Standard 3)
 - [x] Wertebereich für Korrekturen festgelegt: ganzzahlig, **5–150 km/h bzw. 5–85 mph**, nur Vielfache von **5**, in der Einheit des Segments (alles per Umgebungsvariable änderbar); Gleichstand ⇒ kein Gewinner; Importänderung ⇒ Korrektur bleibt, Markierung „zu prüfen"

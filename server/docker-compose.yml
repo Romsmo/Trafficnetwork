@@ -78,6 +78,29 @@ services:
       STATIC_PACKAGES_INLINE_BUILD_MAX_ROWS: ${STATIC_PACKAGES_INLINE_BUILD_MAX_ROWS:-200000}
       SNAPSHOT_STATIC_MAX_ROWS: ${SNAPSHOT_STATIC_MAX_ROWS:-1000000}
       BULK_IMPORT_MAX_ROWS: ${BULK_IMPORT_MAX_ROWS:-5000}
+      # Web UI (docs/web-ui.md). Defaults mirror src/config/env.ts.
+      # Compose cannot hold "{z}" inside a default value, so an unset/empty MAP_TILE_URL is passed through as
+      # empty and the server substitutes its default (OpenStreetMap); "none" switches the map background off.
+      WEB_UI_ENABLED: ${WEB_UI_ENABLED:-true}
+      PROJECT_REPO_URL: ${PROJECT_REPO_URL:-https://github.com/Romsmo/Trafficnetwork}
+      MAP_TILE_URL: ${MAP_TILE_URL:-}
+      MAP_TILE_ATTRIBUTION_TEXT: ${MAP_TILE_ATTRIBUTION_TEXT:-© OpenStreetMap contributors}
+      MAP_TILE_ATTRIBUTION_URL: ${MAP_TILE_ATTRIBUTION_URL:-https://www.openstreetmap.org/copyright}
+      MAP_TILE_MAX_ZOOM: ${MAP_TILE_MAX_ZOOM:-19}
+      # Behind Caddy/nginx/Apache set this (e.g. to the proxy's address or hop count) — otherwise every visitor
+      # looks like the proxy and shares one rate-limit budget. Empty = trust no proxy.
+      TRUST_PROXY: ${TRUST_PROXY:-}
+      LOG_PRIVACY_MODE: ${LOG_PRIVACY_MODE:-true}
+      WEB_SESSION_TTL_SECONDS: ${WEB_SESSION_TTL_SECONDS:-900}
+      WEB_SESSION_MINT_LIMIT_PER_MINUTE: ${WEB_SESSION_MINT_LIMIT_PER_MINUTE:-20}
+      WEB_REPORT_LIMIT_PER_SESSION: ${WEB_REPORT_LIMIT_PER_SESSION:-3}
+      WEB_REPORT_LIMIT_PER_IP_PER_HOUR: ${WEB_REPORT_LIMIT_PER_IP_PER_HOUR:-10}
+      WEB_REPORT_LIMIT_NODE_PER_HOUR: ${WEB_REPORT_LIMIT_NODE_PER_HOUR:-300}
+      WEB_READ_LIMIT_PER_IP_PER_MINUTE: ${WEB_READ_LIMIT_PER_IP_PER_MINUTE:-120}
+      WEB_HEAVY_READ_LIMIT_PER_IP_PER_MINUTE: ${WEB_HEAVY_READ_LIMIT_PER_IP_PER_MINUTE:-30}
+      WEB_MAX_SEGMENT_RADIUS_M: ${WEB_MAX_SEGMENT_RADIUS_M:-1500}
+      WEB_MAX_HAZARD_RADIUS_M: ${WEB_MAX_HAZARD_RADIUS_M:-25000}
+      WEB_WS_MAX_TILES_PER_CONNECTION: ${WEB_WS_MAX_TILES_PER_CONNECTION:-60}
     volumes:
       - static-packages:/app/data/static-packages
     ports:

@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>Trafficnetwork</title>
+<link rel="icon" href="/web/img/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/web/vendor/leaflet/leaflet.css">
+<link rel="stylesheet" href="/web/css/app.css">
+</head>
+<body class="page-map">
+<a class="skip-link" href="#main" data-i18n="a11y.skip">Zum Inhalt springen</a>
+<header id="site-header"></header>
+<noscript><p class="safety-banner" data-i18n="noscript">Diese Seite braucht JavaScript. This page needs JavaScript.</p></noscript>
+
+<main id="main" class="map-layout">
+  <section id="map-panel">
+    <div id="map"></div>
+    <div class="map-overlay">
+      <span id="live-chip" class="chip bad"></span>
+      <span id="area-chip" class="chip" hidden></span>
+      <span id="pick-chip" class="chip" hidden></span>
+      <button id="pick-cancel" type="button" class="small" hidden data-i18n="reportDialog.cancel">Abbrechen</button>
+      <button id="locate" type="button" class="small" data-i18n="map.locate" data-i18n-attr="title:map.locate.title">Mein Standort</button>
+    </div>
+    <button id="report-open" type="button" class="fab" data-i18n="map.report.open">Gefahr melden</button>
+    <div id="map-status" class="visually-hidden" role="status" aria-live="polite"></div>
+  </section>
+
+  <aside class="side-panel" data-i18n-attr="aria-label:map.list.title">
+    <fieldset id="filters" class="filters"></fieldset>
+    <h2 data-i18n="map.layers.title">Karten-Ebenen</h2>
+    <label class="layer-toggle"><input id="layer-limits" type="checkbox"><span data-i18n="map.layer.speedlimits">Tempolimits als Straßenfarben zeigen</span></label>
+    <p id="limits-hint" class="hint" aria-live="polite"></p>
+    <p id="limits-note" class="hint" data-i18n="map.layer.speedlimits.note" hidden></p>
+    <h2 data-i18n="map.list.title">Meldungen in diesem Ausschnitt</h2>
+    <p id="list-status" class="hint" role="status" aria-live="polite"></p>
+    <ul id="report-list" class="report-list"></ul>
+  </aside>
+</main>
+
+<footer id="site-footer"></footer>
+<dialog id="report-dialog"></dialog>
+
+<script src="/web/vendor/leaflet/leaflet.js"></script>
+<script type="module" src="/web/js/map-page.js"></script>
+</body>
+</html>
