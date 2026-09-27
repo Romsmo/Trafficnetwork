@@ -78,9 +78,22 @@ Vorbereitung und Messung für den Europa-Grundstock ("alles auf jedem Gerät"). 
 - **Fortschritt:** `SyncEngine::with_observer(Arc<dyn SyncObserver>)` meldet nach jeder Partition `BootstrapProgress { partitions_total, partitions_done, bytes_total, bytes_done }`. `SyncEngine::sync_static_data(token)` führt nur den statischen Teil aus (der reguläre `sync` ruft ihn ebenfalls).
 - **Messwerkzeug:** `core/examples/measure_bootstrap.rs` — misst gegen einen echten Server (`--server URL --client-id … --client-secret …`) oder gegen synthetische, an die echte Bayern-Form angelehnte Daten (`--synthetic-segments N`): übertragene Bytes, gzip-Schätzung, Dauer (Transport vs. Verarbeitung), Datenbankgröße, Speicherspitze des Prozesses, Zeit bis zur ersten Abfrage, Latenzverteilung der Ortsabfragen nach Neustart. Ein Windows-Build liegt als Artefakt des Workflows `client-lib-bench.yml` (siehe unten).
 
+## Öffentliche API, C-ABI, erstes Binding (Zusatz F-C4, angefangen)
+
+`core/src/api/` ist die eine öffentliche Fassade, die jedes Binding freigibt: `TrafficNetworkClient` (Rust) bzw. `call(methode, argumenteJson) -> ergebnisJson` (jedes andere Binding) über `bindings/c-abi/src/client.rs`s C-ABI (`tn_client_new`/`tn_client_call`/`tn_client_call_async`/`tn_client_free`, plus `tn_client_new_with_secure_store` für einen App-eigenen sicheren Speicher und `tn_client_set_event_callback`). Vollständige Methodenreferenz: [`docs/api.md`](docs/api.md).
+
+- **Init-Optionen** (`ClientOptions`): `nodes`/`discovery`/`seeds` wie im F-C0-Plan skizziert, dazu `networkRootKey` (Netzwerk-Konfiguration nur mit Schlüssel verifizierbar, ohne Schlüssel wird sie ignoriert — nie blind vertraut), `credentials` (fertiges `client`-Credential oder App-Schlüssel, der das Gerät beim ersten Gebrauch selbst registriert und das Ergebnis in den sicheren Speicher legt), `cameraNamespaceEnabled`, `syncIntervalSeconds`.
+- **Lesend, nie netzwerkgebunden:** `getSpeedLimitAt`/`getNearby` beantworten sich ausschließlich aus dem lokalen Speicher (Sub-Millisekunde, siehe `bootstrap-measurements.md`); `getNearby` dedupliziert dieselbe Meldung von zwei Servern (unterschiedliche Zeilen-IDs) und zeigt eigene, noch nicht gesendete Meldungen sofort (`pending: true`).
+- **Schreibend:** `submitReport`/`confirmReport`/`reportCameraRemoved` reihen nur ein; `reportWrongSpeedLimit`/`confirmSpeedLimitCorrection` nutzen dieselbe Überlagerung wie K-C. Gesendet wird ausschließlich durch `sync()`/`tick()` — nichts läuft von selbst.
+- **Blitzer-Namensraum:** dreifaches Ja (Server-Flag **und** verifizierte Netzwerk-Konfiguration **und** `cameraNamespaceEnabled` der Host-App) — die Netzwerk-Konfiguration kann nur einschränken, nie freigeben.
+- **`sync()`** trennt den statischen vom dynamischen Teil (ein unterbrochener Grundstock-Download blockiert nie frische Meldungen) und lässt einen ausgefallenen Pool-Server die anderen nicht aufhalten; scheitert nur bei fehlenden Zugangsdaten, keinem erreichbaren Server oder vollem Speicher (`storageFull`) — jeder Teilfehler steht im zurückgegebenen `SyncReport`, wird nicht geworfen.
+- **Gefundene und behobene Lücken in F-C2 beim Aufbau der Fassade:** ein Verzeichnis nennt nur die *anderen* Knoten, nie sich selbst — ein Kaltstart mit nur einem Seed landete deshalb mit leerem Pool; jetzt trägt sich der antwortende Server selbst ein. Und: geriet der (einzige) Server in Backoff, blieb der Pool leer und nichts wurde je wieder versucht — jetzt wird bei leerem Pool der Server mit der nächsten Erholungszeit trotzdem versucht.
+- **Erstes Binding:** `bindings/python/` (reines `ctypes`, keine Abhängigkeiten). **Konformität:** `client-lib/conformance/` — ein Satz Szenarien (`scenarios.json`) gegen einen geskripteten Server (`mock-server.mjs`, echtes Ed25519/RFC 8785, unabhängig vom echten Server-Code), aktuell mit einem Python-Runner, CI-Job `conformance-python`.
+- **Bewusst noch offen** (siehe Meilensteine): WASM/Browser-Speicher, Node/Dart/Kotlin/Swift-Wrapper samt eigener Konformitätsläufe, React-Native-Modul, Android-AAR/iOS-XCFramework-Paketierung, eine WebSocket-Standardimplementierung (nur der Protokolltreiber aus F-C3 existiert), Mehrknoten-Integrationstests gegen echte Server (F-C5).
+
 ## Bauen & Testen
 
-Rust ist auf der Entwicklungsmaschine dieser Session nicht installiert — Verifikation ausschließlich über `.github/workflows/client-lib-ci.yml` (native build+test+clippy+fmt, `wasm32-unknown-unknown`-Build, Cross-Language-Krypto-Vektor, cbindgen-Header-Generierung). Mit lokalem Rust: `cargo build --workspace`, `cargo test --workspace` in `client-lib/`.
+Rust ist auf der Entwicklungsmaschine dieser Session nicht installiert — Verifikation ausschließlich über `.github/workflows/client-lib-ci.yml` (native build+test+clippy+fmt als eigener Job, `wasm32-unknown-unknown`-Build, Cross-Language-Krypto-Vektor, cbindgen-Header-Generierung, `conformance-python` gegen den geskripteten Server). Mit lokalem Rust: `cargo build --workspace`, `cargo test --workspace` in `client-lib/`.
 
 ## Meilensteine
 
@@ -90,5 +103,5 @@ Rust ist auf der Entwicklungsmaschine dieser Session nicht installiert — Verif
 | F-C1 | Kryptografie im Kern + gerätesignierte Datenstrukturen, Cargo-Workspace, C-ABI-Skelett, CI-Matrix | ✅ |
 | F-C2 | Discovery-Modul + Mehrserver-Transport-Pool + Failover | ✅ |
 | F-C3 | Sync-Engine (Bootstrap/Delta/Pakete/WebSocket, pro-Server-Cursor), Offline-Schreibpuffer, Map-Matching, Verfallsberechnung, Stichproben-Prüfung | ✅ |
-| F-C4 | Bindings für alle Zielplattformen + Konformitätstests | 🔜 |
+| F-C4 | Öffentliche API + C-ABI + Python-Binding + Konformitätsrahmen fertig; **WASM, Node, Dart, Kotlin, Swift, React Native, Paketierung offen** | 🟡 |
 | F-C5 | Mehrknoten-Integrationstests grün, Doku, Pull Request — **Abschluss** | |
