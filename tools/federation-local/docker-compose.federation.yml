@@ -1,0 +1,76 @@
+# Launch L, check 8: two federating nodes on one PC. Use together with the base files:
+#   docker compose -f docker-compose.yml -f docker-compose.override.yml -f docker-compose.federation.yml up -d   # copy this file into server/ first; needs JWT_SECRET_B in .env
+#
+# Federation peers must be reachable at an https:// address, except http://localhost / http://127.0.0.1
+# (loopback exception, modules/federation/address.ts). Two containers can't both be "localhost" for each
+# other, so both nodes share ONE network namespace, held by the tiny "netns" container - that way
+# http://localhost:3000 (node A) and http://localhost:3001 (node B) resolve for the nodes AND for the host
+# (netns publishes both ports). Stopping either node leaves the other one running.
+services:
+  netns:
+    image: alpine:3
+    command: ["sleep", "infinity"]
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+      - "3001:3001"
+    networks:
+      default:
+        aliases: [server]
+
+  server:
+    network_mode: "service:netns"
+    ports: !reset []
+    depends_on:
+      postgres:
+        condition: service_healthy
+      netns:
+        condition: service_started
+    environment:
+      FEDERATION_ENABLED: "true"
+      FEDERATION_PUBLIC_ADDRESS: http://localhost:3000
+      FEDERATION_HEARTBEAT_INTERVAL_SECONDS: "10"
+      FEDERATION_ANTI_ENTROPY_INTERVAL_SECONDS: "20"
+
+  postgres-b:
+    image: postgis/postgis:16-3.4
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-trafficnetwork}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}
+      POSTGRES_DB: ${POSTGRES_DB:-trafficnetwork}
+    volumes:
+      - postgres-b-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-trafficnetwork} -d ${POSTGRES_DB:-trafficnetwork}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  server-b:
+    image: trafficnetwork-server-server
+    restart: unless-stopped
+    network_mode: "service:netns"
+    depends_on:
+      postgres-b:
+        condition: service_healthy
+      server:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:-trafficnetwork}:${POSTGRES_PASSWORD}@postgres-b:5432/${POSTGRES_DB:-trafficnetwork}
+      JWT_SECRET: ${JWT_SECRET_B:?JWT_SECRET_B must be set}
+      PORT: "3001"
+      HOST: 0.0.0.0
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      NETWORK_CONFIG_PATH: /run/secrets/network-config.json
+      NETWORK_ROOT_PUBLIC_KEY: daRnQFTNZq6B6novGVEhekWmm0Wo5pI6K7Yq6TjOCQw
+      FEDERATION_ENABLED: "true"
+      FEDERATION_PUBLIC_ADDRESS: http://localhost:3001
+      FEDERATION_SEEDS: http://localhost:3000
+      FEDERATION_HEARTBEAT_INTERVAL_SECONDS: "10"
+      FEDERATION_ANTI_ENTROPY_INTERVAL_SECONDS: "20"
+    volumes:
+      - ./local-secrets/network-config.json:/run/secrets/network-config.json:ro
+
+volumes:
+  postgres-b-data:

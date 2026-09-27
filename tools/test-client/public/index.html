@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<title>Trafficnetwork Testclient</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  :root { --bg:#f6f7f9; --panel:#fff; --line:#d9dde3; --ink:#1c2330; --mute:#667085; --ok:#12805c; --warn:#b54708; --bad:#b42318; --acc:#175cd3; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#12151b; --panel:#1b2029; --line:#2d3441; --ink:#e6e9ef; --mute:#98a2b3; --ok:#47cd89; --warn:#fdb022; --bad:#f97066; --acc:#84adff; } }
+  * { box-sizing: border-box; }
+  body { margin:0; font: 14px/1.4 system-ui, sans-serif; background:var(--bg); color:var(--ink); display:grid; grid-template-columns: 1fr 380px; height:100vh; }
+  #mapwrap { position:relative; min-width:0; }
+  canvas { width:100%; height:100%; display:block; cursor:crosshair; background:var(--bg); }
+  #hud { position:absolute; left:12px; top:12px; background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:8px 12px; }
+  #limit { font-size:34px; font-weight:700; line-height:1; }
+  #attrib { position:absolute; right:6px; bottom:4px; font-size:11px; color:var(--mute); }
+  aside { overflow:auto; border-left:1px solid var(--line); background:var(--panel); padding:12px; }
+  h2 { font-size:12px; text-transform:uppercase; letter-spacing:.06em; color:var(--mute); margin:16px 0 6px; }
+  h2:first-child { margin-top:0; }
+  button { font:inherit; padding:4px 9px; border:1px solid var(--line); border-radius:6px; background:var(--bg); color:var(--ink); cursor:pointer; }
+  button:hover { border-color:var(--acc); }
+  button.on { background:var(--acc); color:#fff; border-color:var(--acc); }
+  input[type=number], input[type=text] { font:inherit; width:100%; padding:3px 6px; border:1px solid var(--line); border-radius:6px; background:var(--bg); color:var(--ink); }
+  .row { display:flex; gap:6px; flex-wrap:wrap; align-items:center; margin:4px 0; }
+  .row > label { display:flex; gap:4px; align-items:center; }
+  .pill { display:inline-block; padding:1px 8px; border-radius:99px; font-size:12px; border:1px solid var(--line); }
+  .ok { color:var(--ok); } .warn { color:var(--warn); } .bad { color:var(--bad); }
+  ul { list-style:none; margin:0; padding:0; } li { padding:3px 0; border-bottom:1px solid var(--line); font-size:13px; }
+  small, .mute { color:var(--mute); }
+  code { font-size:12px; }
+</style>
+</head>
+<body>
+<div id="mapwrap">
+  <canvas id="map"></canvas>
+  <div id="hud"><div id="limit">–</div><div class="mute" id="limitinfo">Position setzen (Klick auf die Karte)</div></div>
+  <div id="attrib"></div>
+</div>
+<aside>
+  <h2>Verbindung</h2>
+  <div id="conn"></div>
+
+  <h2>Sync / lokaler Speicher</h2>
+  <div id="sync"></div>
+  <div class="row"><button id="btnSync">Umgebung neu laden</button><button id="btnFlush">Outbox senden</button></div>
+
+  <h2>Position</h2>
+  <div class="row"><input id="lat" type="number" step="any" placeholder="lat"><input id="lng" type="number" step="any" placeholder="lng"><button id="btnSet">Setzen</button></div>
+  <div class="row"><button id="btnMunich">München</button><button id="btnNuremberg">Nürnberg</button><button id="btnRegensburg">Regensburg</button></div>
+  <div class="row">
+    <button id="btnRoute">Route zeichnen</button><button id="btnGo">▶ Fahren</button><button id="btnClearRoute">Route löschen</button>
+  </div>
+  <div class="row"><label>Tempo <input id="speed" type="number" value="50" min="5" max="250" style="width:70px"> km/h</label></div>
+
+  <h2>Meldung an aktueller Position</h2>
+  <div class="row" id="types"></div>
+  <div class="row"><label><input type="checkbox" id="signed"> geräte-signiert (föderationsfähig)</label><button id="btnBind">Schlüssel binden</button></div>
+
+  <h2>Meldungen in der Umgebung</h2>
+  <ul id="hazards"></ul>
+
+  <h2>Outbox (gepuffert)</h2>
+  <ul id="outbox"></ul>
+
+  <h2>Push-Ereignisse</h2>
+  <ul id="events"></ul>
+
+  <h2>Karte</h2>
+  <div class="row"><label><input type="checkbox" id="osm"> OSM-Hintergrund laden (Internet, tile.openstreetmap.org)</label></div>
+  <div class="row mute"><span id="msg"></span></div>
+</aside>
+<script src="/app.js"></script>
+</body>
+</html>
