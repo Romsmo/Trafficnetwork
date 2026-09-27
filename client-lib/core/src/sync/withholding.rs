@@ -33,11 +33,11 @@ pub fn should_sample(roll: f64, sample_rate: f64) -> bool {
 }
 
 fn is_older_than_tolerance(event: &EventLogEntry, now_unix_ms: i64) -> bool {
-    match chrono::DateTime::parse_from_rfc3339(&event.occurred_at) {
-        Ok(dt) => now_unix_ms - dt.timestamp_millis() > TOLERANCE_WINDOW_MS,
+    match super::server_time::parse_unix_ms(&event.occurred_at) {
+        Some(ms) => now_unix_ms - ms > TOLERANCE_WINDOW_MS,
         // Can't tell how old it is — treat as not old enough to count,
         // rather than false-flagging a healthy server over a parse edge case.
-        Err(_) => false,
+        None => false,
     }
 }
 

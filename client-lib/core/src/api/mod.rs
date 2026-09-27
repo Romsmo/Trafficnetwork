@@ -29,4 +29,6 @@ pub use types::{
 };
 
 #[cfg(test)]
+mod realtime_tests;
+#[cfg(test)]
 mod tests;

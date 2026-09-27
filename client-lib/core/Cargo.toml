@@ -54,6 +54,21 @@ rusqlite = { version = "0.37", features = ["bundled"] }
 # already does it): the server stores its static packages compressed, and a
 # Europe-sized bootstrap is about four times smaller on the wire that way.
 reqwest = { version = "0.13", default-features = false, features = ["gzip", "brotli"] }
+# `platform::ws`'s native WebSocket transport (add-on B1). `rustls-tls-webpki-roots`
+# matches reqwest's own TLS choice above (rustls + bundled Mozilla roots, no
+# second TLS stack, no system OpenSSL) — confirmed against the crate's actual
+# feature list (crates.io metadata for 0.30.0), not assumed. Default features
+# (`connect` + `handshake`) are kept: without a TLS feature `connect_async`
+# has no backend for `wss://` at all.
+tokio-tungstenite = { version = "0.30", features = ["rustls-tls-webpki-roots"] }
+# For the `StreamExt`/`SinkExt` trait methods (`.next()`/`.send()`) used
+# directly on the WebSocket stream — already a transitive dependency of
+# tokio-tungstenite, named here because this crate's own code calls them.
+futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
+# `platform::Sleep`'s native implementation (`TokioSleeper`) — only the `time`
+# feature, not a runtime: an ambient one (the host app's, or the C-ABI's own)
+# is expected to already be running wherever this is awaited, same as reqwest.
+tokio = { version = "1", features = ["time"] }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }

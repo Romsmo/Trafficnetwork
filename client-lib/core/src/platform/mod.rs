@@ -8,6 +8,7 @@
 
 pub mod clock;
 pub mod http;
+pub mod sleep;
 pub mod ws;
 
 pub use clock::Clock;
@@ -16,4 +17,9 @@ pub use clock::SystemClock;
 pub use http::{
     HttpError, HttpMethod, HttpRequest, HttpResponse, HttpTransport, ReqwestHttpTransport,
 };
+pub use sleep::Sleep;
+#[cfg(not(target_arch = "wasm32"))]
+pub use sleep::TokioSleeper;
+#[cfg(not(target_arch = "wasm32"))]
+pub use ws::TokioTungsteniteWsTransport;
 pub use ws::{WsConnection, WsError, WsTransport};

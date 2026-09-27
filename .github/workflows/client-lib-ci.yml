@@ -5,10 +5,12 @@ on:
     branches: [main, "rework/client-lib-*"]
     paths:
       - "client-lib/**"
+      - "server/tests/support/**"
       - ".github/workflows/client-lib-ci.yml"
   pull_request:
     paths:
       - "client-lib/**"
+      - "server/tests/support/**"
       - ".github/workflows/client-lib-ci.yml"
 
 defaults:
@@ -197,3 +199,50 @@ jobs:
       - name: Scripted server log
         if: failure()
         run: cat mock.log
+
+  # Add-on B2: TrafficNetworkClient against real server processes (real
+  # Postgres via Testcontainers, real federation), controlled through
+  # server/tests/support/multi-node-harness.ts's admin API — see
+  # client-lib/core/tests/multi_node.rs's module doc. Docker is already
+  # available on this runner without extra setup, same as server-ci.yml's
+  # own integration-test job.
+  multi-node:
+    name: multi-node integration tests (real servers)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: client-lib
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: "npm"
+          cache-dependency-path: server/package-lock.json
+
+      - name: Install server dependencies
+        working-directory: server
+        run: npm ci
+
+      - name: Start the multi-node harness
+        working-directory: server
+        run: |
+          npm run test:support:multi-node > multi-node-harness.log 2>&1 &
+          for i in $(seq 1 60); do
+            curl -sf http://127.0.0.1:4100/health > /dev/null && break
+            sleep 1
+          done
+          curl -sf http://127.0.0.1:4100/health
+
+      - name: Run the multi-node integration tests
+        run: cargo test -p trafficnetwork-core --test multi_node -- --test-threads=1
+
+      - name: Multi-node harness log
+        if: always()
+        working-directory: server
+        run: cat multi-node-harness.log

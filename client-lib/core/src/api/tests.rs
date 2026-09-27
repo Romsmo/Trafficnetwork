@@ -10,7 +10,10 @@ use sha2::{Digest, Sha256};
 
 use super::*;
 use crate::crypto::{generate_ed25519_keypair, sign_envelope};
-use crate::platform::{Clock, HttpError, HttpMethod, HttpRequest, HttpResponse, HttpTransport};
+use crate::platform::{
+    Clock, HttpError, HttpMethod, HttpRequest, HttpResponse, HttpTransport, Sleep, WsConnection,
+    WsError, WsTransport,
+};
 use crate::storage::{InMemoryStore, Store};
 use crate::sync::NetworkConfigPayload;
 
@@ -22,6 +25,23 @@ impl Clock for FixedClock {
     fn now_unix_ms(&self) -> i64 {
         self.0.load(Ordering::SeqCst)
     }
+}
+
+/// None of the tests in this file exercise realtime push — a `Platform`
+/// still needs a `ws`/`sleep` to construct, so these two are never-used
+/// stand-ins. `run_realtime` has its own test doubles in `realtime_tests.rs`.
+struct NeverWs;
+#[async_trait::async_trait]
+impl WsTransport for NeverWs {
+    async fn connect(&self, _url: &str) -> Result<Box<dyn WsConnection>, WsError> {
+        Err(WsError::Connect("not used by these tests".to_string()))
+    }
+}
+
+struct NoopSleep;
+#[async_trait::async_trait]
+impl Sleep for NoopSleep {
+    async fn sleep_ms(&self, _duration_ms: u64) {}
 }
 
 /// A server that answers by method and path (the query string is ignored)
@@ -223,6 +243,8 @@ fn client_on(
             secure_store: Arc::new(MemorySecureStore::new()),
             http: server,
             clock: Arc::new(FixedClock(AtomicI64::new(NOW_MS))),
+            ws: Arc::new(NeverWs),
+            sleep: Arc::new(NoopSleep),
         },
     )
     .unwrap()
@@ -528,6 +550,8 @@ async fn an_app_key_registers_the_device_once_and_keeps_the_credential() {
                 secure_store: secure,
                 http: server.clone(),
                 clock: Arc::new(FixedClock(AtomicI64::new(NOW_MS))),
+                ws: Arc::new(NeverWs),
+                sleep: Arc::new(NoopSleep),
             },
         )
         .unwrap()
@@ -645,6 +669,8 @@ fn a_client_with_no_way_to_find_a_server_is_refused_at_the_start() {
             secure_store: Arc::new(MemorySecureStore::new()),
             http: Arc::new(ScriptedServer::default()),
             clock: Arc::new(FixedClock(AtomicI64::new(NOW_MS))),
+            ws: Arc::new(NeverWs),
+            sleep: Arc::new(NoopSleep),
         },
     );
 

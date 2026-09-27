@@ -22,7 +22,8 @@
 
 use std::ffi::{c_char, c_void, CStr, CString};
 use std::panic::{catch_unwind, AssertUnwindSafe};
-use std::sync::{Arc, OnceLock};
+use std::sync::atomic::AtomicBool;
+use std::sync::{Arc, Mutex, OnceLock};
 
 use serde_json::{json, Value};
 use tokio::runtime::Runtime;
@@ -85,6 +86,10 @@ unsafe fn read_str(ptr: *const c_char) -> Option<String> {
 /// What a handle points at.
 struct Handle {
     client: Arc<TrafficNetworkClient>,
+    /// Set while `tn_client_start_realtime` has a background task running;
+    /// `tn_client_stop_realtime`/a second `start` flips it and replaces it
+    /// with a fresh one for any later restart.
+    realtime_stop: Mutex<Option<Arc<AtomicBool>>>,
 }
 
 // -------------------------------------------------------------- secure store
@@ -194,6 +199,7 @@ fn create(
     let client = TrafficNetworkClient::new(options, platform)?;
     Ok(Handle {
         client: Arc::new(client),
+        realtime_stop: Mutex::new(None),
     })
 }
 
@@ -436,6 +442,72 @@ pub unsafe extern "C" fn tn_client_set_event_callback(
         listener
     });
     handle.client.set_event_listener(listener);
+}
+
+// -------------------------------------------------------------- realtime
+
+/// Starts (add-on B1) a background task that keeps a WebSocket connection
+/// to the network open and applies pushed events as they arrive, spawned on
+/// this crate's own runtime — the host app does not need one of its own.
+/// Events surface exactly like any other (`pollEvents`/the event callback);
+/// there is no separate realtime-specific callback. A no-op if realtime is
+/// already running on this handle. Returns 0 on success, -1 for a NULL
+/// handle.
+///
+/// # Safety
+/// `client` must be NULL or a live handle from `tn_client_new*`.
+#[no_mangle]
+pub unsafe extern "C" fn tn_client_start_realtime(client: *mut c_void) -> i32 {
+    if client.is_null() {
+        return -1;
+    }
+    // Every other function here that touches a `Handle` is wrapped the same
+    // way (see `tn_client_call`/`tn_client_free`) — unwinding a panic across
+    // an `extern "C"` boundary is undefined behavior, not just an ugly crash,
+    // so a poisoned `Mutex` (or anything else panicking below) must never be
+    // allowed past this point uncaught.
+    let outcome = catch_unwind(AssertUnwindSafe(|| {
+        // Safety: a live handle, per the contract.
+        let handle = unsafe { &*client.cast::<Handle>() };
+        let mut stop_slot = handle.realtime_stop.lock().unwrap();
+        if stop_slot.is_some() {
+            return; // already running
+        }
+        let stop = Arc::new(AtomicBool::new(false));
+        *stop_slot = Some(stop.clone());
+        drop(stop_slot);
+        let client_arc = handle.client.clone();
+        runtime().spawn(async move {
+            let _ = client_arc.run_realtime(&stop).await;
+        });
+    }));
+    match outcome {
+        Ok(()) => 0,
+        Err(_) => -1,
+    }
+}
+
+/// Signals a running realtime task to stop and returns at once — it stops
+/// between connection attempts, not by force-closing a connection already
+/// open (see `run_realtime`'s own documentation). A no-op if none is
+/// running, or `client` is NULL.
+///
+/// # Safety
+/// `client` must be NULL or a live handle from `tn_client_new*`.
+#[no_mangle]
+pub unsafe extern "C" fn tn_client_stop_realtime(client: *mut c_void) {
+    if client.is_null() {
+        return;
+    }
+    // See `tn_client_start_realtime`'s comment on why this must not let a
+    // panic unwind across the FFI boundary.
+    let _ = catch_unwind(AssertUnwindSafe(|| {
+        // Safety: a live handle, per the contract.
+        let handle = unsafe { &*client.cast::<Handle>() };
+        if let Some(stop) = handle.realtime_stop.lock().unwrap().take() {
+            stop.store(true, std::sync::atomic::Ordering::Relaxed);
+        }
+    }));
 }
 
 /// The library's version, as a string to free with `tn_free_string`.

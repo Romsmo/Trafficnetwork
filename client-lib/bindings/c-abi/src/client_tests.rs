@@ -496,6 +496,37 @@ fn the_hosts_own_secret_store_holds_the_device_credential_and_key() {
 }
 
 #[test]
+fn starting_and_stopping_realtime_does_not_crash_and_is_idempotent() {
+    let server = start_server(working_routes());
+    let dir = temp_dir("realtime");
+    let client = new_client(&options(&server, &dir, device_credentials()));
+
+    // Safety: a live handle.
+    let status = unsafe { tn_client_start_realtime(client) };
+    assert_eq!(status, 0);
+    // A second start while one is already running is a no-op, not a leak
+    // of a second background task.
+    let status_again = unsafe { tn_client_start_realtime(client) };
+    assert_eq!(status_again, 0);
+
+    // NULL is documented as safe for both.
+    assert_eq!(
+        unsafe { tn_client_start_realtime(std::ptr::null_mut()) },
+        -1
+    );
+    unsafe { tn_client_stop_realtime(std::ptr::null_mut()) };
+
+    unsafe { tn_client_stop_realtime(client) };
+    // Stopping twice is also a no-op.
+    unsafe { tn_client_stop_realtime(client) };
+
+    // The background task (if it got that far) holds its own reference to
+    // the client — freeing the handle right away must still be safe.
+    unsafe { tn_client_free(client) };
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn the_library_version_is_a_string() {
     let version = tn_library_version();
     // Safety: a string this library returned.
