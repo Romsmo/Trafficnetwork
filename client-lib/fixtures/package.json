@@ -1,0 +1,9 @@
+{
+  "name": "trafficnetwork-client-lib-fixtures",
+  "private": true,
+  "type": "module",
+  "description": "Cross-language crypto test fixtures for client-lib/core — not part of the published library.",
+  "dependencies": {
+    "canonicalize": "^5.0.0"
+  }
+}

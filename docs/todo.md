@@ -2,20 +2,22 @@
 
 ## Koordination laufender Sessions
 
-Zwei Claude-Code-Sessions arbeiten gleichzeitig im selben Checkout (F-S und
-F-C laufen parallel, siehe "Überarbeitung F" unten) — dieser Abschnitt ist
-der gemeinsame Status, damit keine Session im Dunkeln tappt oder der anderen
-in die Quere kommt. **Jede Session aktualisiert nur ihren eigenen Block**,
-committet das für sich (kleine, isolierte Doku-Änderung) und pusht sofort,
-um Konflikte mit der anderen Session zu vermeiden.
+Mehrere Claude-Code-Sessions arbeiten gleichzeitig im selben Checkout auf
+getrennten Branches (Server/Föderation, Client-Bibliothek, Ingestion). Der
+laufende, detaillierte Stand jeder Session lebt in
+[`docs/status.md`](status.md) (bewusst auf `main`, nicht auf einem
+Feature-Branch, damit er immer ohne Branch-Wechsel sichtbar ist) — dieser
+Abschnitt hier wird nicht mehr laufend aktualisiert, siehe dortige Historie
+für den Verlauf.
 
 **Veraltet (Stand 2026-09-17, hier nur noch als Historie stehen gelassen):**
-beide Abschnitte gingen davon aus, dass F-C auf F-S wartet und noch keinen
-Code hat. Tatsächlicher Stand seither: F-S0–F-S5 sind fertig und auf `main`
-gemergt (PR #1); F-C0–F-C3 sind fertig, F-C4 ist angefangen (öffentliche API,
-C-ABI, Python-Binding, Konformitätsrahmen), F-C5 (weitere Bindings,
-Mehrknoten-Integrationstests, Abschluss-PR) steht aus — Einzelheiten in
-`client-lib/README.md`s Meilenstein-Tabelle und in [`docs/status.md`](status.md).
+frühere Fassungen dieses Abschnitts gingen davon aus, dass F-C auf F-S
+wartet und noch keinen Code hat. Tatsächlicher Stand seither: F-S0–F-S5 sind
+fertig und auf `main` gemergt (PR #1); F-C0–F-C3 sind fertig, F-C4 ist
+angefangen (öffentliche API, C-ABI, Python-Binding, Konformitätsrahmen),
+F-C5 (weitere Bindings, Mehrknoten-Integrationstests, Abschluss-PR) steht
+aus — Einzelheiten in `client-lib/README.md`s Meilenstein-Tabelle und in
+[`docs/status.md`](status.md).
 
 ## Vor der Prompt-Erstellung — offene Entscheidungen
 - [x] GitHub-Repo-Struktur: ein Monorepo für Server, Client-Bibliothek, Ingestion

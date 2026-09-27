@@ -1,0 +1,5 @@
+Touching this file (on a rework/client-lib-* branch) runs .github/workflows/client-lib-bench.yml:
+the bootstrap measurement tool at synthetic sizes (page-cache experiment, Europe-shaped run).
+It never runs on ordinary pushes.
+
+run 2

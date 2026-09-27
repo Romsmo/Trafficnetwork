@@ -1,0 +1,198 @@
+{
+  "description": "The conformance scenarios: every language binding runs exactly these through its own wrapper of the C ABI (or the WASM module) against conformance/mock-server.mjs. See conformance/README.md for the format.",
+  "scenarios": [
+    {
+      "name": "offline-first basics: sync, local reads, a report made offline, votes, errors, close",
+      "servers": { "main": {} },
+      "options": {
+        "nodes": ["${main}"],
+        "discovery": false,
+        "credentials": { "type": "client", "clientId": "conformance", "clientSecret": "secret" }
+      },
+      "steps": [
+        { "call": "version", "expect": { "apiVersion": 1 } },
+        { "call": "getSyncStatus", "expect": { "connection": "never", "pendingWrites": 0 } },
+        { "call": "getSpeedLimitAt", "args": { "lat": 52.0, "lng": 13.005 }, "expect": null },
+        { "call": "sync", "expect": { "ok": true, "skipped": false, "pendingWrites": 0 } },
+        {
+          "call": "getSpeedLimitAt",
+          "args": { "lat": 52.0, "lng": 13.005 },
+          "expect": { "value": 50, "unit": "kmh", "segmentId": "seg1", "origin": { "kind": "imported" } }
+        },
+        {
+          "call": "getNearby",
+          "args": { "lat": 52.0, "lng": 13.0, "radiusMeters": 200, "categories": ["signs"] },
+          "expect": { "items": [{ "kind": "sign", "id": "sign1", "signType": "DE:274" }] }
+        },
+        { "call": "getSyncStatus", "expect": { "connection": "online", "staticDataVersion": 1 } },
+        { "call": "submitReport", "args": { "type": "ice", "lat": 52.0, "lng": 13.0 }, "expectKeys": ["localId"] },
+        {
+          "call": "getNearby",
+          "args": { "lat": 52.0, "lng": 13.0, "radiusMeters": 300, "categories": ["hazards"] },
+          "expect": { "items": [{ "kind": "hazard", "hazardType": "ice", "pending": true }] }
+        },
+        { "call": "getSyncStatus", "expect": { "pendingWrites": 1 } },
+        { "call": "sync", "expect": { "submitted": 1, "pendingWrites": 0 } },
+        {
+          "mockLog": {
+            "server": "main",
+            "route": "POST /v1/hazard-reports",
+            "count": 1,
+            "bodyIncludes": { "type": "ice" },
+            "signatureValid": true
+          }
+        },
+        { "call": "sync", "expect": { "ok": true } },
+        {
+          "call": "getNearby",
+          "args": { "lat": 52.0, "lng": 13.0, "radiusMeters": 300, "categories": ["hazards"] },
+          "expect": { "items": [{ "kind": "hazard", "id": "hz-1", "hazardType": "ice", "pending": false }] }
+        },
+        { "call": "confirmReport", "args": { "reportId": "hz-1", "stillThere": true }, "expectKeys": ["localId"] },
+        { "call": "sync", "expect": { "submitted": 1 } },
+        {
+          "mockLog": {
+            "server": "main",
+            "route": "POST /v1/hazard-reports/hz-1/confirmations",
+            "count": 1,
+            "bodyIncludes": { "kind": "stillThere" }
+          }
+        },
+        {
+          "call": "updatePosition",
+          "args": { "lat": 52.52, "lng": 13.405 },
+          "expect": { "changed": true, "tiles": ["871f1d488ffffff", "871f1d489ffffff", "871f1d48bffffff", "871f1d48dffffff", "871f1d4d4ffffff", "871f1d4d6ffffff", "871f1d4f2ffffff"] }
+        },
+        { "call": "updatePosition", "args": { "lat": 52.5201, "lng": 13.4051 }, "expect": { "changed": false } },
+        {
+          "call": "pollEvents",
+          "expectSome": { "path": "events", "match": { "type": "syncCompleted" } }
+        },
+        { "call": "noSuchMethod", "expectError": "invalidArgument" },
+        { "call": "getSpeedLimitAt", "args": { "lat": "north" }, "expectError": "invalidArgument" },
+        { "call": "submitReport", "args": { "type": "dragons", "lat": 52.0, "lng": 13.0 }, "expectError": "invalidArgument" },
+        { "call": "getNearby", "args": { "lat": 52.0, "lng": 13.0, "radiusMeters": 0 }, "expectError": "invalidArgument" },
+        { "call": "close" },
+        { "call": "getSyncStatus", "expectError": "closed" }
+      ]
+    },
+    {
+      "name": "a report survives a server that fails and goes out on a later sync",
+      "servers": { "main": {} },
+      "options": {
+        "nodes": ["${main}"],
+        "discovery": false,
+        "credentials": { "type": "client", "clientId": "conformance", "clientSecret": "secret" }
+      },
+      "steps": [
+        { "call": "sync", "expect": { "ok": true } },
+        { "mockFail": { "server": "main", "route": "POST /v1/hazard-reports", "status": 503, "times": 1 } },
+        { "call": "submitReport", "args": { "type": "traffic", "lat": 52.0, "lng": 13.0 }, "expectKeys": ["localId"] },
+        { "call": "sync", "expect": { "submitted": 0, "pendingWrites": 1 } },
+        { "call": "sync", "expect": { "submitted": 1, "pendingWrites": 0 } }
+      ]
+    },
+    {
+      "name": "failover: one of the two configured servers is dead",
+      "servers": { "main": {} },
+      "options": {
+        "nodes": ["http://127.0.0.1:9", "${main}"],
+        "discovery": false,
+        "credentials": { "type": "client", "clientId": "conformance", "clientSecret": "secret" }
+      },
+      "steps": [
+        { "call": "sync", "expect": { "ok": true } },
+        {
+          "call": "getSpeedLimitAt",
+          "args": { "lat": 52.0, "lng": 13.005 },
+          "expect": { "value": 50 }
+        },
+        { "call": "getNetworkStatus", "expect": { "knownNodes": [{}, {}] } }
+      ]
+    },
+    {
+      "name": "cold start with only a seed: the directory brings the rest of the network",
+      "servers": { "b": {}, "a": { "peers": ["${b}"] } },
+      "options": {
+        "discovery": true,
+        "seeds": ["${a}"],
+        "credentials": { "type": "client", "clientId": "conformance", "clientSecret": "secret" }
+      },
+      "steps": [
+        { "call": "sync", "expect": { "ok": true } },
+        {
+          "call": "getNetworkStatus",
+          "expect": { "knownNodes": [{}, {}], "directoryGeneratedAt": "2027-01-01T00:00:00.000Z" }
+        },
+        { "mockLog": { "server": "a", "route": "GET /v1/network/directory", "count": 1 } },
+        { "call": "getSpeedLimitAt", "args": { "lat": 52.0, "lng": 13.005 }, "expect": { "value": 50 } }
+      ]
+    },
+    {
+      "name": "a network with no reachable server is a valid state: reads work, sync says network",
+      "servers": {},
+      "options": {
+        "discovery": true,
+        "seeds": ["http://127.0.0.1:9"],
+        "credentials": { "type": "client", "clientId": "conformance", "clientSecret": "secret" }
+      },
+      "steps": [
+        { "call": "getSpeedLimitAt", "args": { "lat": 52.0, "lng": 13.005 }, "expect": null },
+        { "call": "getNearby", "args": { "lat": 52.0, "lng": 13.0, "radiusMeters": 500 }, "expect": { "items": [] } },
+        { "call": "sync", "expectError": "network" },
+        { "call": "getSyncStatus", "expect": { "connection": "offline" } },
+        { "call": "submitReport", "args": { "type": "traffic", "lat": 52.0, "lng": 13.0 }, "expectKeys": ["localId"] },
+        { "call": "getSyncStatus", "expect": { "pendingWrites": 1 } }
+      ]
+    },
+    {
+      "name": "no credentials: sync says notConfigured",
+      "servers": { "main": {} },
+      "options": { "nodes": ["${main}"], "discovery": false },
+      "steps": [{ "call": "sync", "expectError": "notConfigured" }]
+    },
+    {
+      "name": "the camera namespace needs the host app's opt-in as well as the server",
+      "servers": { "main": { "cameraNamespace": true } },
+      "options": {
+        "nodes": ["${main}"],
+        "discovery": false,
+        "credentials": { "type": "client", "clientId": "conformance", "clientSecret": "secret" }
+      },
+      "steps": [
+        { "call": "sync", "expect": { "ok": true } },
+        { "call": "getNetworkStatus", "expect": { "cameraNamespaceEnabled": false, "configVersion": null } }
+      ]
+    },
+    {
+      "name": "a signed network configuration can switch the camera namespace off",
+      "servers": { "main": { "cameraNamespace": true, "networkConfig": { "version": 3, "blitzerEnabled": false } } },
+      "options": {
+        "nodes": ["${main}"],
+        "discovery": false,
+        "networkRootKey": "${main.rootKey}",
+        "cameraNamespaceEnabled": true,
+        "credentials": { "type": "client", "clientId": "conformance", "clientSecret": "secret" }
+      },
+      "steps": [
+        { "call": "sync", "expect": { "ok": true } },
+        { "call": "getNetworkStatus", "expect": { "cameraNamespaceEnabled": false, "configVersion": 3 } }
+      ]
+    },
+    {
+      "name": "a network configuration signed with the wrong key is ignored",
+      "servers": { "main": { "cameraNamespace": true, "networkConfig": { "version": 3, "blitzerEnabled": false }, "signWith": "impostor" } },
+      "options": {
+        "nodes": ["${main}"],
+        "discovery": false,
+        "networkRootKey": "${main.rootKey}",
+        "cameraNamespaceEnabled": true,
+        "credentials": { "type": "client", "clientId": "conformance", "clientSecret": "secret" }
+      },
+      "steps": [
+        { "call": "sync", "expect": { "ok": true } },
+        { "call": "getNetworkStatus", "expect": { "cameraNamespaceEnabled": true, "configVersion": null } }
+      ]
+    }
+  ]
+}

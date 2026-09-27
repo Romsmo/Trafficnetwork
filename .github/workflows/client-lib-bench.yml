@@ -1,0 +1,119 @@
+name: client-lib-bench
+
+# Not one of the normal checks. Builds the bootstrap measurement tool
+# (client-lib/core/examples/measure_bootstrap.rs) and runs it against an
+# in-process synthetic server shaped like real Bayern data; the Windows
+# executable (for measuring against a real server) is built only when the
+# commit message contains "[windows]".
+#
+# Runs only when client-lib/bench/trigger.txt (or this file) changes on a
+# rework/client-lib-* branch, so ordinary pushes never start it. The one-off
+# large runs (10 M and 20 M segments, about an hour) are not repeated here;
+# their command lines are in client-lib/docs/bootstrap-measurements.md.
+
+on:
+  push:
+    branches: ["rework/client-lib-*"]
+    paths:
+      - "client-lib/bench/trigger.txt"
+      - ".github/workflows/client-lib-bench.yml"
+
+defaults:
+  run:
+    working-directory: client-lib
+
+jobs:
+  synthetic-baseline:
+    name: synthetic baseline, 1 M segments (linux)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: client-lib
+          key: bench
+      - name: Runner
+        run: |
+          nproc
+          free -m
+          df -h /
+      - name: Build (release)
+        run: cargo build --release -p trafficnetwork-core --example measure_bootstrap
+      - name: 1 M segments (with the gzip estimate)
+        run: ./target/release/examples/measure_bootstrap --synthetic-segments 1000000 --label "synthetic 1M"
+
+  # The 5 M run of the first measurement took 330 s, 51 us per entity against
+  # 34 us at 1 M: the cost per entity grows with the database. This checks
+  # whether SQLite's page cache (default about 2 MB) is the reason.
+  page-cache:
+    name: 5 M segments, page cache ${{ matrix.cache_mb }} MB (linux)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        cache_mb: [2, 16, 64, 256]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: client-lib
+          key: bench
+      - name: Build (release)
+        run: cargo build --release -p trafficnetwork-core --example measure_bootstrap
+      - name: Run
+        run: >
+          ./target/release/examples/measure_bootstrap
+          --synthetic-segments 5000000 --no-gzip-estimate
+          --cache-mb ${{ matrix.cache_mb }}
+          --label "synthetic 5M, page cache ${{ matrix.cache_mb }} MB"
+
+  # What the server's default partitioning (H3 resolution 4) means for the
+  # client: about 5,400 partitions of about 2,500 entities each, instead of
+  # a few hundred partitions of 100 MB. 10.9 M segments + 2.7 M signs is the
+  # size of the real Europe import (12.1 M segments + 1.55 M signs).
+  europe-shaped:
+    name: Europe-shaped, many small partitions, page cache ${{ matrix.cache_mb }} MB (linux)
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        cache_mb: [2, 64]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: client-lib
+          key: bench
+      - name: Build (release)
+        run: cargo build --release -p trafficnetwork-core --example measure_bootstrap
+      - name: Run
+        run: >
+          ./target/release/examples/measure_bootstrap
+          --synthetic-segments 10900000 --partition-segments 2000
+          --no-gzip-estimate --cache-mb ${{ matrix.cache_mb }}
+          --label "synthetic Europe-shaped, 2000 segments per partition, page cache ${{ matrix.cache_mb }} MB"
+
+  windows-tool:
+    name: measurement tool (windows executable)
+    if: contains(github.event.head_commit.message, '[windows]')
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: client-lib
+          key: bench-windows
+      - name: Build (release)
+        run: cargo build --release -p trafficnetwork-core --example measure_bootstrap
+      - uses: actions/upload-artifact@v4
+        with:
+          name: measure_bootstrap-windows
+          path: client-lib/target/release/examples/measure_bootstrap.exe
+          retention-days: 14

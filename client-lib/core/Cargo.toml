@@ -1,0 +1,63 @@
+[package]
+name = "trafficnetwork-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lib]
+name = "trafficnetwork_core"
+crate-type = ["rlib"]
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+serde_json_canonicalizer = "0.3"
+# Pinned to the 2.x line, not the just-released 3.0.0 (same-day release as of
+# writing) — the from_bytes/sign/verify surface this crate uses has been
+# stable across 1.x-3.x, so 2.x gets the same functionality with a much
+# longer track record for a security-critical dependency.
+ed25519-dalek = "2"
+getrandom = "0.4"
+base64 = "0.23"
+sha2 = "0.10"
+hex = "0.4"
+chrono = "0.4"
+# default-features off: skips default-tls (native-tls/openssl) in favor of
+# rustls (no system OpenSSL dependency), with webpki-roots for bundled
+# Mozilla root certs rather than depending on each target platform's own
+# cert store. Both are a no-op on wasm32, where reqwest delegates TLS to the
+# browser's own fetch() instead. Feature named "rustls-tls" in older
+# reqwest releases — renamed to "rustls" as of 0.13 (confirmed against the
+# actual available-features list in a CI failure, not assumed).
+reqwest = { version = "0.13", default-features = false, features = ["rustls", "webpki-roots"] }
+# HttpTransport/Clock (platform/) need dyn-dispatchable async trait methods
+# for host-app-supplied implementations — native async-fn-in-trait isn't
+# object-safe as of this Rust version, async-trait remains the standard
+# workaround (see docs.rs/async-trait).
+async-trait = "0.1"
+# H3 cells (BSD-3-Clause, pure Rust, also builds for wasm32): the region tiles
+# a position maps to — the same cells the server's h3-js computes, checked
+# against vectors made with h3-js (api/tiles.rs).
+h3o = "0.11"
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+getrandom = { version = "0.4", features = ["wasm_js"] }
+
+# Persistent store (`storage::SqliteStore`), native targets only — a browser
+# build brings its own `Store` with the WASM binding (F-C4). `bundled` compiles
+# SQLite (with its R*Tree module) into the library, so no system SQLite is
+# needed on any platform.
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+rusqlite = { version = "0.37", features = ["bundled"] }
+# Transparent gzip/brotli for downloads (native only — a browser's fetch()
+# already does it): the server stores its static packages compressed, and a
+# Europe-sized bootstrap is about four times smaller on the wire that way.
+reqwest = { version = "0.13", default-features = false, features = ["gzip", "brotli"] }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+# Only for `examples/measure_bootstrap.rs`: compressed size of what crosses the
+# wire, and a process-memory sampler that works on Linux and Windows alike.
+flate2 = "1"
+memory-stats = "1"

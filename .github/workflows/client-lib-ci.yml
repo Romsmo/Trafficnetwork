@@ -1,0 +1,199 @@
+name: client-lib-ci
+
+on:
+  push:
+    branches: [main, "rework/client-lib-*"]
+    paths:
+      - "client-lib/**"
+      - ".github/workflows/client-lib-ci.yml"
+  pull_request:
+    paths:
+      - "client-lib/**"
+      - ".github/workflows/client-lib-ci.yml"
+
+defaults:
+  run:
+    working-directory: client-lib
+
+jobs:
+  # Its own job (rather than the first step of `test`) so that a formatting
+  # slip does not hide the compiler's and the tests' answer behind it.
+  fmt:
+    name: rustfmt
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+
+      - name: Format check
+        run: cargo fmt --all -- --check
+
+  test:
+    name: build, test, lint (native)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: client-lib
+
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: Build
+        run: cargo build --workspace
+
+      - name: Test
+        run: cargo test --workspace
+
+      # Cargo.lock is meant to be committed here (see the .gitignore comment:
+      # client-lib ships as prebuilt per-platform artifacts, not as a source
+      # dependency, so the usual "libraries don't commit their lockfile"
+      # advice doesn't apply) — but no session in this project has local
+      # Rust, so it can only ever be produced here. Uploaded on every run;
+      # download and commit it whenever this differs from what's checked in.
+      - uses: actions/upload-artifact@v4
+        with:
+          name: client-lib-cargo-lock
+          path: client-lib/Cargo.lock
+          retention-days: 14
+
+  wasm-build:
+    name: build (wasm32-unknown-unknown)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: client-lib
+          key: wasm32
+
+      # bindings/c-abi is cdylib/staticlib (native-linking crate-types) and
+      # isn't meaningful on wasm32 — only core needs to prove it's WASM-clean
+      # at this milestone (no platform-specific WASM binding crate exists
+      # yet, that's F-C4).
+      - name: Build core for wasm32
+        run: cargo build -p trafficnetwork-core --target wasm32-unknown-unknown
+
+  crypto-cross-lang-vector:
+    name: cross-language crypto vector (Rust -> Node)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: client-lib
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install fixture dependencies
+        working-directory: client-lib/fixtures
+        run: npm install
+
+      - name: Generate vector with the Rust core and verify it with the server's own crypto stack (canonicalize + node:crypto)
+        run: cargo run -p trafficnetwork-core --example gen_vector | node fixtures/verify-vector.mjs
+
+  c-abi-header:
+    name: cbindgen header generation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: client-lib
+
+      - name: Install cbindgen
+        run: cargo install --locked cbindgen
+
+      - name: Build c-abi crate
+        run: cargo build -p trafficnetwork-c-abi
+
+      - name: Generate C header
+        working-directory: client-lib/bindings/c-abi
+        run: cbindgen --config cbindgen.toml --output trafficnetwork.h
+
+      - name: Header sanity check (non-empty, declares expected symbols)
+        working-directory: client-lib/bindings/c-abi
+        run: |
+          test -s trafficnetwork.h
+          grep -q "tn_generate_keypair" trafficnetwork.h
+          grep -q "tn_sign_envelope" trafficnetwork.h
+          grep -q "tn_verify_envelope" trafficnetwork.h
+          grep -q "tn_free_string" trafficnetwork.h
+          grep -q "tn_client_new" trafficnetwork.h
+          grep -q "tn_client_call" trafficnetwork.h
+          grep -q "tn_client_call_async" trafficnetwork.h
+          grep -q "tn_client_new_with_secure_store" trafficnetwork.h
+          grep -q "tn_client_set_event_callback" trafficnetwork.h
+          grep -q "tn_client_free" trafficnetwork.h
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: trafficnetwork-c-header
+          path: client-lib/bindings/c-abi/trafficnetwork.h
+          retention-days: 14
+
+  # The conformance scenarios (conformance/scenarios.json) through each binding,
+  # against the scripted server (conformance/mock-server.mjs). Every binding
+  # runs the same scenarios and has to give the same answers.
+  conformance-python:
+    name: conformance (Python over the C ABI)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: client-lib
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Build the native library
+        run: cargo build -p trafficnetwork-c-abi
+
+      - name: Start the scripted server
+        run: |
+          node conformance/mock-server.mjs --port 18990 > mock.log 2>&1 &
+          for i in $(seq 1 50); do
+            curl -sf -X POST http://127.0.0.1:18990/__instances -d '{}' > /dev/null && break
+            sleep 0.2
+          done
+
+      - name: Run the scenarios
+        env:
+          MOCK_URL: http://127.0.0.1:18990
+          TRAFFICNETWORK_LIB: ${{ github.workspace }}/client-lib/target/debug/libtrafficnetwork.so
+        run: python conformance/run_python.py
+
+      - name: Scripted server log
+        if: failure()
+        run: cat mock.log
