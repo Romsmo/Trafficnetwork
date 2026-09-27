@@ -916,7 +916,10 @@ impl TrafficNetworkClient {
             if let Err(crate::sync::SyncError::StorageFull) =
                 self.engine.sync_dynamic(&token, &tiles).await
             {
-                return Err(ApiError::new(code::STORAGE_FULL, "the local store is out of space"));
+                return Err(ApiError::new(
+                    code::STORAGE_FULL,
+                    "the local store is out of space",
+                ));
             }
 
             match run_realtime_protocol(connection.as_mut(), &self.engine, &token, &tiles).await {
