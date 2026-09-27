@@ -10,6 +10,56 @@ use serde::{Deserialize, Serialize};
 
 use crate::crypto::SignedEnvelope;
 
+/// `event_log.sequence` is a Postgres `bigserial`, and the endpoints that
+/// expose it (`getDeltaPage`/`getFederationEventsSince`,
+/// `server/src/db/queries/event-log.ts`) read it through a raw `sql`
+/// query rather than Drizzle's schema-typed query builder — so unlike
+/// columns read the typed way (which get Drizzle's `mode: "number"`
+/// conversion, e.g. `sizeBytes`), it comes back as whatever the database
+/// driver's own default for a 64-bit integer is, which is a JSON *string*
+/// (`"1"`, not `1`) — confirmed directly against a real server in
+/// `client-lib/core/tests/multi_node.rs` (add-on B2), where it was silently
+/// making every sync fail with `SyncError::InvalidResponse` (a snapshot
+/// bootstrap that fails before reaching `set_cursor` retries forever
+/// instead of ever advancing to an incremental delta). A real server-side
+/// inconsistency worth fixing at the source, but this milestone makes no
+/// server changes (`docs/status.md`'s B2 note) — so every sequence-shaped
+/// field here accepts either form instead.
+fn deserialize_sequence<'de, D>(deserializer: D) -> Result<u64, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    LenientU64::deserialize(deserializer)?
+        .into_u64()
+        .map_err(serde::de::Error::custom)
+}
+
+fn deserialize_sequence_opt<'de, D>(deserializer: D) -> Result<Option<u64>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    Option::<LenientU64>::deserialize(deserializer)?
+        .map(LenientU64::into_u64)
+        .transpose()
+        .map_err(serde::de::Error::custom)
+}
+
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum LenientU64 {
+    Number(u64),
+    Text(String),
+}
+
+impl LenientU64 {
+    fn into_u64(self) -> Result<u64, std::num::ParseIntError> {
+        match self {
+            LenientU64::Number(n) => Ok(n),
+            LenientU64::Text(s) => s.parse(),
+        }
+    }
+}
+
 /// The 11-value hazard-type enum (`server/src/config/constants.ts`'s
 /// `HAZARD_TYPES` — order is documented there as fixed, append-only).
 /// `FixedSpeedCamera` is a valid label here (it appears in event payloads
@@ -199,7 +249,7 @@ pub struct HazardReport {
 /// `GET /v1/snapshot` response.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SnapshotResult {
-    #[serde(rename = "snapshotSequence")]
+    #[serde(rename = "snapshotSequence", deserialize_with = "deserialize_sequence")]
     pub snapshot_sequence: u64,
     #[serde(rename = "speedLimitSegments")]
     pub speed_limit_segments: Vec<SpeedLimitSegment>,
@@ -219,6 +269,7 @@ pub struct SnapshotResult {
 /// column (`server/docs/schema.md`'s `event_log` section).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EventLogEntry {
+    #[serde(deserialize_with = "deserialize_sequence")]
     pub sequence: u64,
     #[serde(rename = "occurredAt")]
     pub occurred_at: String,
@@ -238,7 +289,7 @@ pub struct EventLogEntry {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DeltaPage {
     pub events: Vec<EventLogEntry>,
-    #[serde(rename = "nextSince")]
+    #[serde(rename = "nextSince", deserialize_with = "deserialize_sequence_opt")]
     pub next_since: Option<u64>,
     #[serde(rename = "hasMore")]
     pub has_more: bool,

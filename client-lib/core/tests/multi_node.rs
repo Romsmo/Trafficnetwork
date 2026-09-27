@@ -26,14 +26,23 @@
 //! (add-on B2) at least makes the check itself testable at 100% instead of
 //! the usual 10%, for whenever that gap is worth closing properly.
 //!
-//! This is also what actually found a real cross-language bug: several
-//! server-emitted timestamp columns (`reportedAt`/`expiresAt`/`occurredAt`)
-//! come back as the database driver's own default `timestamptz` text output
+//! This is also what actually found two real cross-language bugs, both in
+//! raw-`sql` query paths that bypass Drizzle's schema-typed column
+//! conversion (`server/src/db/queries/event-log.ts`): several server-emitted
+//! timestamp columns (`reportedAt`/`expiresAt`/`occurredAt`) come back as
+//! the database driver's own default `timestamptz` text output
 //! (`"2026-09-27 14:45:15.923718+00"`), not the RFC 3339
-//! `server/docs/api.md` documents — `sync::server_time` now tolerates both
-//! on the client side, but the server side is still worth fixing at the
-//! source (out of scope here — this milestone makes no server changes, see
-//! `docs/status.md`'s B2 note).
+//! `server/docs/api.md` documents (`sync::server_time` now tolerates both);
+//! and `event_log.sequence` (`snapshotSequence`/`sequence`/`nextSince`)
+//! comes back as a JSON *string* (`"1"`, a Postgres `bigint`'s default
+//! textual form) rather than a number, which was silently failing every
+//! sync with `SyncError::InvalidResponse` *before* it ever reached
+//! `set_cursor` — a bootstrap that never advances to an incremental
+//! `/v1/delta` looks, from the outside, exactly like data that never
+//! replicates (`sync::types`'s `deserialize_sequence`/`deserialize_sequence_opt`
+//! now tolerate both forms). Both are real server-side inconsistencies worth
+//! fixing at the source, but this milestone makes no server changes
+//! (`docs/status.md`'s B2 note).
 
 use std::time::Duration;
 
