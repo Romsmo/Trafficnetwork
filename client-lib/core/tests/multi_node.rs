@@ -25,6 +25,15 @@
 //! (`sync::withholding::tests`), and `SyncEngine::with_withholding_sample_rate`
 //! (add-on B2) at least makes the check itself testable at 100% instead of
 //! the usual 10%, for whenever that gap is worth closing properly.
+//!
+//! This is also what actually found a real cross-language bug: several
+//! server-emitted timestamp columns (`reportedAt`/`expiresAt`/`occurredAt`)
+//! come back as the database driver's own default `timestamptz` text output
+//! (`"2026-09-27 14:45:15.923718+00"`), not the RFC 3339
+//! `server/docs/api.md` documents — `sync::server_time` now tolerates both
+//! on the client side, but the server side is still worth fixing at the
+//! source (out of scope here — this milestone makes no server changes, see
+//! `docs/status.md`'s B2 note).
 
 use std::time::Duration;
 

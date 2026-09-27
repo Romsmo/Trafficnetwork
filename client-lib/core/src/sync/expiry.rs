@@ -32,13 +32,13 @@ pub fn expires_at_unix_ms(
 /// doesn't have to wait for a server-pushed `ReportExpired` delta event to
 /// stop showing something that's already past its TTL.
 pub fn is_expired(report: &HazardReport, now_unix_ms: i64) -> bool {
-    match chrono::DateTime::parse_from_rfc3339(&report.expires_at) {
-        Ok(dt) => dt.timestamp_millis() <= now_unix_ms,
+    match super::server_time::parse_unix_ms(&report.expires_at) {
+        Some(ms) => ms <= now_unix_ms,
         // An unparseable expiresAt is treated as already expired rather
         // than trusted indefinitely — the safer failure direction for
         // hazard data (a stale warning lingering is worse than one
         // disappearing a little early).
-        Err(_) => true,
+        None => true,
     }
 }
 
