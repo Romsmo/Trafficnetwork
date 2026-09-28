@@ -24,6 +24,20 @@ impl Clock for SystemClock {
     }
 }
 
+/// `wasm32` default (add-on B3) — backed by JS's own `Date.now()`, the one
+/// JS shim this crate is allowed to reach for directly rather than through a
+/// host-supplied `Clock` (every other platform's default reaches for its own
+/// system clock the same way).
+#[cfg(target_arch = "wasm32")]
+pub struct WasmClock;
+
+#[cfg(target_arch = "wasm32")]
+impl Clock for WasmClock {
+    fn now_unix_ms(&self) -> i64 {
+        js_sys::Date::now() as i64
+    }
+}
+
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests {
     use super::*;

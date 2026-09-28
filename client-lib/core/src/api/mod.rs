@@ -21,6 +21,8 @@ pub use events::{ClientEvent, EventHub, Listener as EventListener};
 pub use options::{ClientOptions, Credentials, DEFAULT_NETWORK_ROOT_KEY, DEFAULT_SEEDS};
 #[cfg(not(target_arch = "wasm32"))]
 pub use secure_store::FileSecureStore;
+#[cfg(target_arch = "wasm32")]
+pub use secure_store::LocalStorageSecureStore;
 pub use secure_store::{MemorySecureStore, SecureStore};
 pub use tiles::{ring_for_speed, tile_at, tiles_around, DEFAULT_REGION_RESOLUTION};
 pub use types::{

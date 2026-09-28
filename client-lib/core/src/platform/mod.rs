@@ -14,12 +14,18 @@ pub mod ws;
 pub use clock::Clock;
 #[cfg(not(target_arch = "wasm32"))]
 pub use clock::SystemClock;
+#[cfg(target_arch = "wasm32")]
+pub use clock::WasmClock;
 pub use http::{
     HttpError, HttpMethod, HttpRequest, HttpResponse, HttpTransport, ReqwestHttpTransport,
 };
 pub use sleep::Sleep;
 #[cfg(not(target_arch = "wasm32"))]
 pub use sleep::TokioSleeper;
+#[cfg(target_arch = "wasm32")]
+pub use sleep::WasmSleeper;
 #[cfg(not(target_arch = "wasm32"))]
 pub use ws::TokioTungsteniteWsTransport;
+#[cfg(target_arch = "wasm32")]
+pub use ws::WasmWsTransport;
 pub use ws::{WsConnection, WsError, WsTransport};

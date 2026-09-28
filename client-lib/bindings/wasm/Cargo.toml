@@ -1,0 +1,32 @@
+[package]
+name = "trafficnetwork-wasm"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lib]
+# "rlib" lets `wasm-bindgen-test` (a normal Rust test binary linking this
+# crate) build alongside the "cdylib" wasm-bindgen actually loads in a
+# browser — the same two-crate-type pattern used everywhere wasm-bindgen
+# ships tests.
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+trafficnetwork-core = { path = "../../core" }
+serde_json = { workspace = true }
+wasm-bindgen = "0.2"
+js-sys = "0.3"
+# `AssertUnwindSafe(future).catch_unwind()` in `call` — the same
+# "a panic never crashes past the binding boundary" contract the C-ABI
+# enforces with `std::panic::catch_unwind`, just for a future instead of a
+# plain function call.
+futures-util = { version = "0.3", default-features = false, features = ["std"] }
+# Turns an otherwise silent/cryptic wasm trap on panic into a real message
+# (with a Rust stack trace where the browser supports it) in the JS console
+# — a debugging aid, not a safety mechanism; `Client::call` still converts
+# every *expected* failure into `{"error": ...}` on its own.
+console_error_panic_hook = "0.1"
+
+[dev-dependencies]
+wasm-bindgen-test = "0.3"

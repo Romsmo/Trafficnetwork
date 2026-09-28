@@ -43,6 +43,40 @@ h3o = "0.11"
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 getrandom = { version = "0.4", features = ["wasm_js"] }
+# `storage::IndexedDbStore` (add-on B3): wraps `InMemoryStore` (see its
+# `to_snapshot`/`from_snapshot`) and mirrors writes into IndexedDB in the
+# background — `rexie` is a futures-based wrapper, not the raw callback-style
+# `web-sys` IndexedDB API, so that mirroring code stays ordinary async Rust.
+# Chosen over `sqlite-wasm-rs`+`sqlite-wasm-vfs` (real OPFS): both are eight
+# days old at the time of this decision (four published versions) and OPFS's
+# synchronous file access only works inside a dedicated Worker, which would
+# force this binding's whole JS/TS surface into a worker+message-bridge
+# architecture — IndexedDB is the user-approved "gleichwertig" alternative
+# (client-lib/docs/status.md's B3 note), with none of that.
+rexie = "0.6"
+# `platform::Sleep`'s wasm32 implementation — a small, focused crate over
+# `Window.setTimeout`/`clearTimeout`, not hand-rolled callback/Promise glue.
+gloo-timers = { version = "0.4", features = ["futures"] }
+# `platform::ws`'s wasm32 implementation (`web_sys::WebSocket`), `Platform::wasm`'s
+# async constructor, and the `bindings/wasm` crate's async JS-facing calls.
+wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
+js-sys = "0.3"
+web-sys = { version = "0.3", features = [
+  "WebSocket",
+  "MessageEvent",
+  "CloseEvent",
+  "ErrorEvent",
+  "Window",
+  "Storage",
+] }
+# The wasm32 `WsConnection`'s onopen/onmessage/onerror/onclose bridge (a
+# channel, not `tokio-tungstenite`'s own stream) — `futures-channel` for the
+# channel types themselves, `futures-util`'s `StreamExt` for `.next()` on the
+# receiving end. Native's own `futures-util` (below) additionally needs
+# "sink" for `SinkExt`, which nothing here requires.
+futures-channel = "0.3"
+futures-util = { version = "0.3", default-features = false, features = ["std"] }
 
 # Persistent store (`storage::SqliteStore`), native targets only — a browser
 # build brings its own `Store` with the WASM binding (F-C4). `bundled` compiles
@@ -70,9 +104,17 @@ futures-util = { version = "0.3", default-features = false, features = ["sink", 
 # is expected to already be running wherever this is awaited, same as reqwest.
 tokio = { version = "1", features = ["time"] }
 
-[dev-dependencies]
+[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 # Only for `examples/measure_bootstrap.rs`: compressed size of what crosses the
 # wire, and a process-memory sampler that works on Linux and Windows alike.
 flate2 = "1"
 memory-stats = "1"
+
+# `storage::indexed_db`'s contract test (add-on B3) — genuinely needs a real
+# browser's IndexedDB, so it runs via `wasm-pack test --headless` rather than
+# plain `cargo test`. A blanket (non-target-gated) `[dev-dependencies]` would
+# pull tokio's multi-thread runtime into a wasm32 test build too, which does
+# not support that target at all — hence the split from the block above.
+[target.'cfg(target_arch = "wasm32")'.dev-dependencies]
+wasm-bindgen-test = "0.3"

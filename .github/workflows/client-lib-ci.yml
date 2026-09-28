@@ -84,11 +84,44 @@ jobs:
           key: wasm32
 
       # bindings/c-abi is cdylib/staticlib (native-linking crate-types) and
-      # isn't meaningful on wasm32 — only core needs to prove it's WASM-clean
-      # at this milestone (no platform-specific WASM binding crate exists
-      # yet, that's F-C4).
-      - name: Build core for wasm32
-        run: cargo build -p trafficnetwork-core --target wasm32-unknown-unknown
+      # isn't meaningful on wasm32 — skipped here; bindings/wasm (add-on B3)
+      # is the wasm32-specific binding crate that exists instead.
+      - name: Build core and the wasm binding for wasm32
+        run: cargo build -p trafficnetwork-core -p trafficnetwork-wasm --target wasm32-unknown-unknown
+
+  # Add-on B3: runs core's wasm32-only unit tests (`storage::IndexedDbStore`)
+  # in a real headless browser, not just compiling them — a real IndexedDB,
+  # not a mock, the same "prove it against the real thing" standard as B2's
+  # multi-node job. `wasm-pack` also builds `trafficnetwork-wasm` itself with
+  # its actual JS/TS-facing target (`--target web`), a stronger check than
+  # `wasm-build`'s plain `cargo build` (catches any wasm-bindgen-specific
+  # export issue that a plain library build wouldn't).
+  wasm-test:
+    name: test (wasm32, headless browser)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: client-lib
+          key: wasm32
+
+      - uses: jetli/wasm-pack-action@v0.4.0
+        with:
+          version: "latest"
+
+      - name: Run core's wasm32 unit tests in headless Chrome
+        working-directory: client-lib/core
+        run: wasm-pack test --headless --chrome
+
+      - name: Build the wasm binding for the browser
+        working-directory: client-lib/bindings/wasm
+        run: wasm-pack build --target web --out-dir pkg
 
   crypto-cross-lang-vector:
     name: cross-language crypto vector (Rust -> Node)
