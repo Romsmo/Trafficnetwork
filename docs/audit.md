@@ -218,3 +218,26 @@ Beide sind serverseitige Bugs, in `client-lib` nur toleranzhalber abgefangen (Kr
 ## Zusammenfassung — Stand nach diesem Nachtrag
 
 R1 (Prüfbericht) und der aufräumende Teil von R2 (Branches) sind abgeschlossen. Vor R4 (Release `v1.0.0`) fehlt noch `fix/api-serialization` auf dem Server. Weiter mit R3 (Domain-Platzhalter ersetzen, Prompts auslagern, Doku entrümpeln).
+
+---
+
+## 13. R4 — Release: server v1.0.0, ingestion v0.2.0
+
+**Voraussetzung erfüllt:** `fix/api-serialization` (PR #13) war entgegen der ursprünglichen Annahme noch **offen**, nicht gemergt — beim Prüfen selbst festgestellt, nicht ungeprüft übernommen. Lokal konfliktfrei gegen `main` gemergt (Commit `49208de`), `typecheck`/`lint` grün, danach CI auf `main` grün (`server-ci`, `ingestion-ci`). Root-Cause-Fix (eigene Postgres-Parser für `timestamptz`/`int8` auf Roh-SQL-Lesepfaden, `server/src/db/raw-sql-types.ts`), keine Symptombehandlung — Commit-Beschreibung der PR selbst geprüft, nicht nur behauptet vertraut.
+
+**Versionierung** (Commit `21cb74c`, deine Entscheidung): `server/package.json` `0.1.0` → `1.0.0` (Beschreibung ergänzt: schließt die eingebaute Weboberfläche ein, kein separates Paket dafür). `ingestion/package.json` `0.1.0` → `0.2.0`, mit deiner Begründung im `CHANGELOG.md` festgehalten (optionaler, austauschbarer Client, Quellenkatalog in Bewegung, kein 1.0-Stabilitätsversprechen). `client-lib/Cargo.toml` unverändert `0.1.0`. `package-lock.json` beider Node-Pakete per `npm install --package-lock-only` synchronisiert (nicht von Hand editiert), danach `npm ci` + `typecheck`/`lint` in beiden Paketen erneut grün geprüft.
+
+**`CHANGELOG.md`** neu angelegt (Commit `21cb74c`) — ein Eintrag je Paket, mit Begründung für die jeweilige Versionsentscheidung, den beiden `fix/api-serialization`-Bugs und einem Verweis auf die bestätigt-kein-Blocker-Punkte aus Abschnitt 10 dieses Berichts.
+
+**Release-Workflow neu gebaut** (`.github/workflows/release.yml`, Commit `d93d9f8`) — gab es vorher nicht; `server-ci.yml`s `docker-build`-Job baut nur zur Validierung (`push: false`, mit einem Kommentar, der explizit auf fehlende Freigabe verwies — die liegt jetzt vor, siehe deine Nachricht). Der neue Workflow feuert **ausschließlich** auf Tags der Form `server-v*`/`ingestion-v*` (nie bei einem gewöhnlichen Push), baut Multi-Arch (`linux/amd64`+`linux/arm64`) und **veröffentlicht** nach `ghcr.io`, hängt die Manifest-Prüfsumme (sha256, deckt beide Plattformen ab) als `checksums.txt` an ein GitHub-Release, dessen Text der jeweilige `CHANGELOG.md`-Abschnitt ist (per `awk` extrahiert, nicht von Hand kopiert). Kein Build-Artefakt in der Versionsverwaltung, wie gefordert.
+
+**Tags gesetzt und Releases ausgelöst:** `server-v1.0.0`, `ingestion-v0.2.0` — beide Workflow-Läufe **grün** (`gh run list`, Abschluss geprüft, nicht nur gestartet). Beide GitHub-Releases live mit `checksums.txt`:
+
+| Release | Image | Manifest-Digest (sha256) |
+|---|---|---|
+| [`server-v1.0.0`](https://github.com/Romsmo/Trafficnetwork/releases/tag/server-v1.0.0) | `ghcr.io/romsmo/trafficnetwork-server:1.0.0` | `46f5bf401b8430e60a3304325cc7419e33b47e86d01bce8549b5aac9211fa960` |
+| [`ingestion-v0.2.0`](https://github.com/Romsmo/Trafficnetwork/releases/tag/ingestion-v0.2.0) | `ghcr.io/romsmo/trafficnetwork-ingestion:0.2.0` | `b018210b89d524823cb922089ad351e98510c73e7519c69773e2605ef2468872` |
+
+**Einschränkung bei der eigenen Verifikation, ehrlich benannt:** Ich konnte die beiden Images nicht selbst per `docker pull`/`docker manifest inspect` gegenlesen — mein lokales `gh`-Token hat nicht den Scope `read:packages`, `ghcr.io`-Zugriff wurde mit „unauthorized"/„denied" abgewiesen. Das ist ein Berechtigungsproblem meines lokalen Tokens, kein Beleg gegen den Push: der Workflow lief mit dem automatisch erzeugten `GITHUB_TOKEN` (`packages: write` explizit gesetzt), der Build-/Push-Schritt hat einen Digest zurückgegeben, und der gesamte Job schloss mit `success` ab — `docker/build-push-action` bricht den Schritt bei einem echten Push-Fehler ab, das wäre im Lauf sichtbar gewesen. Die Pakete sind vermutlich **privat** (das Repository selbst ist privat, siehe `server`-Weboberfläche-Bericht in `docs/status.md`) — GHCR-Pakete erben das beim automatischen `GITHUB_TOKEN`-Push. **Bitte einmal selbst bestätigen:** GitHub → dein Profil → „Packages" → `trafficnetwork-server`/`trafficnetwork-ingestion` sollten dort mit Version `1.0.0`/`0.2.0` auftauchen; bei Bedarf dort auf öffentlich stellen, wenn das Projekt live geht.
+
+**Nicht Teil dieses Release:** `client-lib/`-Artefakte (deine Entscheidung — B3–B5 offen, kein Release-Reifegrad); ein `v`-Tag ohne Paketpräfix (es gibt bewusst keinen gemeinsamen).
