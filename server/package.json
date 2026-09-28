@@ -1,9 +1,9 @@
 {
   "name": "@trafficnetwork/server",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "private": true,
   "type": "module",
-  "description": "Relay/moderator server for the Trafficnetwork local-first traffic data network (Phase 1).",
+  "description": "Relay/moderator server for the Trafficnetwork local-first traffic data network, including the built-in web UI.",
   "license": "Apache-2.0",
   "engines": {
     "node": ">=20"
