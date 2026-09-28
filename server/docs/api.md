@@ -695,18 +695,6 @@ is **never** part of any response.
 Local-first devices bootstrap from a snapshot, then poll delta using the
 snapshot's `snapshotSequence` as a starting point.
 
-> **Known deviation from this document, until `fix/api-serialization` merges:** a few raw-SQL read
-> paths (`src/db/queries/event-log.ts` and others that go through `db.execute(sql\`...\`)` instead of
-> Drizzle's typed query builder) return two things differently than documented here:
-> - `sequence` / `snapshotSequence` / `nextSince` come back as a JSON **string**, not a number.
-> - `reportedAt`/`expiresAt`/`occurredAt` and similar timestamp fields come back as Postgres's own
->   `timestamptz` text format (e.g. `"2026-09-27 14:45:15.923718+00"`), not RFC 3339
->   (`"2026-09-27T14:45:15.923Z"`).
->
-> Found by `client-lib`'s multi-node integration tests (see `client-lib/README.md`), which tolerate
-> both forms defensively — that is a workaround on the client side, not a fix. Remove this note once
-> `fix/api-serialization` (or equivalent) lands and every response matches the types documented below.
-
 ### `GET /v1/snapshot?tiles=<comma-separated H3 ids>&types=<comma-separated>`
 
 **Size guard (add-on E-B):** a snapshot with static data reads every static row
