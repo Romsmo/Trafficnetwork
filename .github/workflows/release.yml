@@ -1,0 +1,103 @@
+name: release
+
+# Builds and PUBLISHES a multi-arch Docker image for the tagged package to the GitHub
+# Container Registry, and attaches its digest (checksum) to a GitHub Release. Triggered
+# only by pushing a tag of the form "<package>-v<version>" (server-v1.0.0, ingestion-v0.2.0)
+# — never runs on an ordinary push, so it never publishes by accident. Build artifacts are
+# NOT committed to version control (per docs/audit.md R4): the repo holds the build recipe,
+# the release holds the result.
+
+on:
+  push:
+    tags:
+      - "server-v*"
+      - "ingestion-v*"
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Determine package and version from the tag
+        id: vars
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          PACKAGE="${TAG%%-v*}"
+          VERSION="${TAG#"${PACKAGE}"-v}"
+          if [ "$PACKAGE" != "server" ] && [ "$PACKAGE" != "ingestion" ]; then
+            echo "Unrecognized tag prefix: $TAG" >&2
+            exit 1
+          fi
+          echo "package=$PACKAGE" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "image=ghcr.io/${GITHUB_REPOSITORY,,}-$PACKAGE" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # ingestion/Dockerfile expects a named "certs" build context (a TLS-inspecting proxy's
+      # root CA, for corporate/antivirus networks) — an empty file is the documented no-op.
+      - name: Prepare empty certs build context (ingestion only)
+        if: steps.vars.outputs.package == 'ingestion'
+        run: |
+          mkdir -p /tmp/empty-certs
+          touch /tmp/empty-certs/extra-ca.crt
+
+      - name: Build and push image
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ steps.vars.outputs.package }}
+          build-contexts: ${{ steps.vars.outputs.package == 'ingestion' && 'certs=/tmp/empty-certs' || '' }}
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            ${{ steps.vars.outputs.image }}:${{ steps.vars.outputs.version }}
+            ${{ steps.vars.outputs.image }}:latest
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.version=${{ steps.vars.outputs.version }}
+            org.opencontainers.image.revision=${{ github.sha }}
+
+      - name: Record checksums (image digest, multi-arch manifest)
+        run: |
+          {
+            echo "Package:  ${{ steps.vars.outputs.package }} v${{ steps.vars.outputs.version }}"
+            echo "Image:    ${{ steps.vars.outputs.image }}:${{ steps.vars.outputs.version }}"
+            echo "Platforms: linux/amd64, linux/arm64"
+            echo "Manifest digest (sha256, covers both platforms): ${{ steps.build.outputs.digest }}"
+            echo ""
+            echo "Verify: docker pull ${{ steps.vars.outputs.image }}@${{ steps.build.outputs.digest }}"
+          } > checksums.txt
+          cat checksums.txt
+
+      - name: Extract this version's CHANGELOG section
+        id: notes
+        run: |
+          awk -v pkg="${{ steps.vars.outputs.package }} v${{ steps.vars.outputs.version }}" '
+            $0 ~ "^## " pkg { found=1; print; next }
+            found && /^## / { exit }
+            found { print }
+          ' CHANGELOG.md > release-notes.md
+          if [ ! -s release-notes.md ]; then
+            echo "See CHANGELOG.md." > release-notes.md
+          fi
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: "${{ steps.vars.outputs.package }} v${{ steps.vars.outputs.version }}"
+          body_path: release-notes.md
+          files: checksums.txt
+          generate_release_notes: false
