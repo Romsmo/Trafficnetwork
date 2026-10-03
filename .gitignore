@@ -88,3 +88,6 @@ client-lib/bindings/swift/Sources/TrafficNetwork/*.swift
 client-lib/bindings/swift/build/
 client-lib/bindings/swift/.build/
 client-lib/bindings/swift/conformance/.build/
+client-lib/bindings/dart/.dart_tool/
+client-lib/bindings/dart/pubspec.lock
+client-lib/bindings/dart/rust/target/

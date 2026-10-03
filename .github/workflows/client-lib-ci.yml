@@ -595,8 +595,11 @@ jobs:
 
   # Add-on B4: the Dart/Flutter package. flutter_rust_bridge generates the
   # Dart half and the Rust glue from bindings/dart/rust/src/api/; both are
-  # checked in, so this job regenerates them and fails if they differ — the
-  # checked-in code cannot drift from the Rust it was generated from.
+  # checked in, so this job regenerates them and fails if they differ - the
+  # checked-in code cannot drift from the Rust it was generated from. Then the
+  # package is analyzed and the same scenarios run through it (Dart VM on
+  # Linux: the Dart FFI layer and the Rust code are the ones a Flutter app
+  # on a phone uses; no emulator is involved).
   dart-package:
     name: build + conformance (Dart/Flutter package)
     runs-on: ubuntu-latest
@@ -604,6 +607,8 @@ jobs:
       - uses: actions/checkout@v4
 
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
 
       - uses: Swatinem/rust-cache@v2
         with:
@@ -615,16 +620,22 @@ jobs:
         with:
           node-version: "22"
 
+      # The generator also needs cargo-expand, which it would otherwise
+      # install itself on every run (two minutes).
       - name: Cache the code generator
         id: codegen-cache
         uses: actions/cache@v4
         with:
-          path: ~/.cargo/bin/flutter_rust_bridge_codegen
+          path: |
+            ~/.cargo/bin/flutter_rust_bridge_codegen
+            ~/.cargo/bin/cargo-expand
           key: frb-codegen-2.13.0-${{ runner.os }}
 
       - name: Install the code generator
         if: steps.codegen-cache.outputs.cache-hit != 'true'
-        run: cargo install flutter_rust_bridge_codegen --version 2.13.0 --locked
+        run: |
+          cargo install flutter_rust_bridge_codegen --version 2.13.0 --locked
+          cargo install cargo-expand --locked
 
       - name: Install the package's dependencies
         working-directory: client-lib/bindings/dart
@@ -645,8 +656,59 @@ jobs:
 
       - name: The checked-in generated code is current
         run: |
-          git status --porcelain -- client-lib/bindings/dart
-          test -z "$(git status --porcelain -- client-lib/bindings/dart)"
+          git status --porcelain -- bindings/dart
+          test -z "$(git status --porcelain -- bindings/dart)"
+
+      - name: Rust formatting of the glue crate
+        working-directory: client-lib/bindings/dart/rust
+        run: cargo fmt -- --check
+
+      - name: Analyze the Dart package
+        working-directory: client-lib/bindings/dart
+        run: dart analyze --fatal-infos
+
+      - name: Build the native library
+        working-directory: client-lib/bindings/dart/rust
+        run: cargo build
+
+      - name: Install the runner's dependencies
+        working-directory: client-lib/conformance
+        run: npm ci
+
+      - name: Start the scripted server
+        run: |
+          node conformance/mock-server.mjs --port 18995 > mock.log 2>&1 &
+          for i in $(seq 1 50); do
+            curl -sf -X POST http://127.0.0.1:18995/__instances -d '{}' > /dev/null && break
+            sleep 0.2
+          done
+
+      - name: Run the scenarios (secrets in the library's file)
+        env:
+          MOCK_URL: http://127.0.0.1:18995
+          TN_DART_LIB: ${{ github.workspace }}/client-lib/bindings/dart/rust/target/debug/libtrafficnetwork_dart.so
+        run: node conformance/run_bridge.mjs --name dart -- dart run bindings/dart/bin/conformance_bridge.dart
+
+      - name: Run the scenarios (secrets in a store implemented in Dart)
+        env:
+          MOCK_URL: http://127.0.0.1:18995
+          TN_DART_LIB: ${{ github.workspace }}/client-lib/bindings/dart/rust/target/debug/libtrafficnetwork_dart.so
+        run: node conformance/run_bridge.mjs --name dart --host-secure-store -- dart run bindings/dart/bin/conformance_bridge.dart
+
+      # What docs/integration-flutter.md tells a reader to write must work,
+      # not merely compile.
+      - name: Run the integration guide's example
+        env:
+          TN_DART_LIB: ${{ github.workspace }}/client-lib/bindings/dart/rust/target/debug/libtrafficnetwork_dart.so
+        run: |
+          URL=$(curl -sf -X POST http://127.0.0.1:18995/__instances -d '{}' | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>console.log(JSON.parse(s).url))")
+          TN_NODE="$URL" TN_CLIENT_ID=example TN_CLIENT_SECRET=example             dart run bindings/dart/example/trafficnetwork_example.dart | tee example.out
+          grep -q "sync ok: true" example.out
+          grep -q "queued report" example.out
+
+      - name: Scripted server log
+        if: failure()
+        run: cat mock.log
 
   # Add-on B3: the hand-written .d.ts files of both JS bindings, compiled
   # against a typed usage file (never run) — a declaration that drifts from
