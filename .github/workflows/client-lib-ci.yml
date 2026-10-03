@@ -581,6 +581,61 @@ jobs:
             client-lib/bindings/swift/TrafficNetworkFFI.xcframework
           retention-days: 14
 
+  # Add-on B4: the Dart/Flutter package. flutter_rust_bridge generates the
+  # Dart half and the Rust glue from bindings/dart/rust/src/api/; both are
+  # checked in, so this job regenerates them and fails if they differ — the
+  # checked-in code cannot drift from the Rust it was generated from.
+  dart-package:
+    name: build + conformance (Dart/Flutter package)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: client-lib/bindings/dart/rust
+
+      - uses: dart-lang/setup-dart@v1
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Cache the code generator
+        id: codegen-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin/flutter_rust_bridge_codegen
+          key: frb-codegen-2.13.0-${{ runner.os }}
+
+      - name: Install the code generator
+        if: steps.codegen-cache.outputs.cache-hit != 'true'
+        run: cargo install flutter_rust_bridge_codegen --version 2.13.0 --locked
+
+      - name: Install the package's dependencies
+        working-directory: client-lib/bindings/dart
+        run: dart pub get
+
+      - name: Generate the Dart half and the Rust glue
+        working-directory: client-lib/bindings/dart
+        run: flutter_rust_bridge_codegen generate
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: trafficnetwork-dart-generated
+          path: |
+            client-lib/bindings/dart/lib/src/rust
+            client-lib/bindings/dart/rust/src/frb_generated.rs
+          retention-days: 14
+
+      - name: The checked-in generated code is current
+        run: |
+          git status --porcelain -- client-lib/bindings/dart
+          test -z "$(git status --porcelain -- client-lib/bindings/dart)"
+
   # Add-on B3: the hand-written .d.ts files of both JS bindings, compiled
   # against a typed usage file (never run) — a declaration that drifts from
   # what the integration guides tell a host app to write stops compiling.
