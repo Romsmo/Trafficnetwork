@@ -133,13 +133,18 @@ jobs:
           corepack enable
           yarn install
 
-      - name: Build the Rust for iOS, generate the bindings, install the pods
+      - name: Build the Rust for iOS and generate the bindings
         working-directory: client-lib/bindings/react-native/library
         run: yarn ubrn:ios
 
       - name: Build the library
         working-directory: client-lib/bindings/react-native/library
         run: yarn prepare
+
+      # After the codegen: the pods list the files it wrote.
+      - name: Install the pods
+        working-directory: client-lib/bindings/react-native/library
+        run: yarn ubrn:pods
 
       - name: Build the example app for the simulator
         working-directory: client-lib/bindings/react-native/library/example/ios

@@ -13,6 +13,8 @@
 //     yarn install
 //     yarn ubrn:android      # Rust for Android + the TypeScript/C++ bindings
 //     yarn ubrn:ios          # Rust for iOS (on a Mac) + the same, as an XCFramework
+//     yarn prepare           # React Native's codegen and the JavaScript build
+//     yarn ubrn:pods         # iOS: pod install, after the codegen
 //
 // The tool versions are pinned: both are young and move fast.
 
@@ -81,11 +83,12 @@ manifest.dependencies = {
 };
 manifest.scripts = {
   ...manifest.scripts,
-  "ubrn:android": "ubrn build android --and-generate && node scripts/patch-cmake.mjs",
+  "ubrn:android": "ubrn build android --and-generate",
   // The deployment target keeps the C parts of the dependencies (the crypto
   // library) and the linker agreeing about what an old-enough iOS provides.
-  "ubrn:ios":
-    "IPHONEOS_DEPLOYMENT_TARGET=13.0 ubrn build ios --and-generate && (cd example/ios && pod install)",
+  "ubrn:ios": "IPHONEOS_DEPLOYMENT_TARGET=13.0 ubrn build ios --and-generate",
+  // After `yarn prepare`: the pods list the files React Native's codegen wrote.
+  "ubrn:pods": "(cd example/ios && pod install)",
   "ubrn:clean":
     "rm -rf cpp/ android/CMakeLists.txt android/src/main/java android/*.cpp ios/ src/Native* src/index.*ts* src/multiply* src/generated/",
 };
@@ -93,6 +96,20 @@ manifest.license = "Apache-2.0";
 fs.writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
 
 fs.copyFileSync(path.join(here, "ubrn.config.yaml"), path.join(target, "ubrn.config.yaml"));
+
+// The template registers the library's CMake project with the app as a C++
+// turbo module (`cxxModule*`); the library uniffi-bindgen-react-native
+// generates is a classic Android library module with its own build.gradle that
+// builds that CMake project itself, and has no C++ turbo module class to
+// register — the two would build the same code twice and the app's copy would
+// look for a header that does not exist. Only the codegen entry stays.
+const configPath = path.join(target, "react-native.config.js");
+const config = fs.readFileSync(configPath, "utf8");
+const trimmed = config.replace(/\r?\n\s*cxxModule\w+: '[^']*',/g, "");
+if (trimmed === config || trimmed.includes("cxxModule")) {
+  throw new Error("react-native.config.js: could not remove the cxxModule entries (did create-react-native-library change its template?)");
+}
+fs.writeFileSync(configPath, trimmed);
 
 // The example app needs somewhere to keep the client's data: the app's own
 // document directory, which React Native itself does not expose.
