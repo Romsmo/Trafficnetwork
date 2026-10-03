@@ -663,12 +663,13 @@ jobs:
           path: |
             client-lib/bindings/dart/lib/src/rust
             client-lib/bindings/dart/rust/src/frb_generated.rs
+            client-lib/bindings/dart/rust/Cargo.lock
           retention-days: 14
 
       - name: The checked-in generated code is current
         run: |
-          git status --porcelain -- bindings/dart
-          test -z "$(git status --porcelain -- bindings/dart)"
+          git status --porcelain -- bindings/dart/lib bindings/dart/rust/src
+          test -z "$(git status --porcelain -- bindings/dart/lib bindings/dart/rust/src)"
 
       - name: Rust formatting of the glue crate
         working-directory: client-lib/bindings/dart/rust
