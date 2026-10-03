@@ -1464,3 +1464,65 @@ jobs:
             require('fs').appendFileSync(process.env.GITHUB_STEP_SUMMARY, table);
             process.exit(failed ? 1 : 0);
           "
+
+  # Every package carries the version of the Rust workspace.
+  versions:
+    name: package versions agree
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - run: node release/check-versions.mjs
+
+  # The release files, assembled from what the jobs above built — on every
+  # build, not only at release time, so the assembly (the C ABI per platform,
+  # the AAR, the Swift package, the npm packages, the Python wheel, the Dart
+  # package, the Flutter plugin with both platforms' libraries, the React Native
+  # package with both halves) is known to work long before it is needed. The
+  # release workflow (release.yml, tag client-lib-v*) attaches exactly these
+  # files to a GitHub Release. Nothing is published anywhere.
+  release-files:
+    name: release files (assembled, with checksums)
+    needs:
+      - c-abi
+      - c-abi-header
+      - android-aar
+      - swift-package
+      - npm-packages
+      - flutter-android
+      - flutter-ios
+      - react-native-android
+      - react-native-ios
+      - versions
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: .
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Assemble
+        run: bash client-lib/release/assemble.sh
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: trafficnetwork-release-files
+          path: release/*
+          retention-days: 14
+

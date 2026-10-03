@@ -98,6 +98,12 @@ manifest.scripts = {
     "rm -rf cpp/ android/CMakeLists.txt android/src/main/java android/*.cpp ios/ src/Native* src/index.*ts* src/multiply* src/generated/",
 };
 manifest.license = "Apache-2.0";
+// The library has the version of everything else in client-lib/.
+const workspace = fs.readFileSync(path.join(here, "..", "..", "Cargo.toml"), "utf8");
+manifest.version = /^version\s*=\s*"([^"]+)"/m.exec(workspace)?.[1] ?? manifest.version;
+// `ubrn build ios` writes the XCFramework next to package.json, where the
+// template's `files` would not ship it.
+manifest.files = [...manifest.files, "TrafficnetworkReactNativeFramework.xcframework"];
 fs.writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
 
 fs.copyFileSync(path.join(here, "ubrn.config.yaml"), path.join(target, "ubrn.config.yaml"));
