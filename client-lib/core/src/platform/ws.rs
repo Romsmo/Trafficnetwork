@@ -204,8 +204,7 @@ mod wasm {
     #[async_trait::async_trait(?Send)]
     impl WsTransport for WasmWsTransport {
         async fn connect(&self, url: &str) -> Result<Box<dyn WsConnection>, WsError> {
-            let socket =
-                WebSocket::new(url).map_err(|e| WsError::Connect(js_error_string(&e)))?;
+            let socket = WebSocket::new(url).map_err(|e| WsError::Connect(js_error_string(&e)))?;
 
             // Resolved exactly once, by whichever of onopen/onerror fires
             // first — `connect` itself only cares about that first outcome.

@@ -69,6 +69,7 @@ web-sys = { version = "0.3", features = [
   "ErrorEvent",
   "Window",
   "Storage",
+  "console",
 ] }
 # The wasm32 `WsConnection`'s onopen/onmessage/onerror/onclose bridge (a
 # channel, not `tokio-tungstenite`'s own stream) — `futures-channel` for the

@@ -30,7 +30,12 @@ pub use types::{
     PositionUpdate, ProposalView, SpeedLimitAnswer, SyncReport, SyncStatus, TickResult,
 };
 
-#[cfg(test)]
+// Native-only: both use `#[tokio::test]`, which needs a real tokio runtime
+// (not available on wasm32 regardless of whether a given test's own logic
+// would otherwise be portable) — native CI already runs these; wasm32's own
+// test coverage is `storage::indexed_db`'s tests plus whatever else in this
+// crate has no such dependency.
+#[cfg(all(test, not(target_arch = "wasm32")))]
 mod realtime_tests;
-#[cfg(test)]
+#[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests;

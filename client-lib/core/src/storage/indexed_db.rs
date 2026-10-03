@@ -38,7 +38,9 @@ use std::sync::Arc;
 use rexie::{ObjectStore, Rexie, TransactionMode};
 use wasm_bindgen::JsValue;
 
-use super::{InMemoryStore, LocalCorrectionProposal, PendingWrite, Store, StoreError, StoredEntities};
+use super::{
+    InMemoryStore, LocalCorrectionProposal, PendingWrite, Store, StoreError, StoredEntities,
+};
 use crate::sync::types::{FixedSpeedCamera, HazardReport, SpeedLimitSegment, StaticSign};
 
 const DB_VERSION: u32 = 1;
@@ -249,7 +251,8 @@ impl Store for IndexedDbStore {
         lng: f64,
         radius_meters: f64,
     ) -> Result<Vec<SpeedLimitSegment>, StoreError> {
-        self.inner.speed_limit_segments_near(lat, lng, radius_meters)
+        self.inner
+            .speed_limit_segments_near(lat, lng, radius_meters)
     }
 
     fn static_signs_near(
@@ -326,7 +329,9 @@ mod tests {
 
     #[wasm_bindgen_test::wasm_bindgen_test]
     async fn opening_a_fresh_database_is_the_same_as_a_fresh_in_memory_store() {
-        let store = IndexedDbStore::open(&unique_db_name("fresh")).await.unwrap();
+        let store = IndexedDbStore::open(&unique_db_name("fresh"))
+            .await
+            .unwrap();
         assert_eq!(store.get_cursor("node1").unwrap(), None);
         assert_eq!(store.all_entities().unwrap(), StoredEntities::default());
         assert!(store.pending_writes().unwrap().is_empty());

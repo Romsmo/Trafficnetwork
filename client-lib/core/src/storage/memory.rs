@@ -464,7 +464,10 @@ mod tests {
             restored.get_partition_hash("tileA").unwrap(),
             Some("hash1".to_string())
         );
-        assert_eq!(restored.all_entities().unwrap(), store.all_entities().unwrap());
+        assert_eq!(
+            restored.all_entities().unwrap(),
+            store.all_entities().unwrap()
+        );
         assert_eq!(restored.pending_writes().unwrap().len(), 1);
         assert_eq!(restored.local_proposals().unwrap().len(), 1);
         assert_eq!(restored.static_partition_resolution().unwrap(), Some(4));
@@ -477,7 +480,9 @@ mod tests {
             StoredEntities::default()
         );
         assert_eq!(
-            InMemoryStore::from_snapshot("not json").all_entities().unwrap(),
+            InMemoryStore::from_snapshot("not json")
+                .all_entities()
+                .unwrap(),
             StoredEntities::default()
         );
     }

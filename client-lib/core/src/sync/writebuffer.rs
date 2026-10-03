@@ -332,7 +332,8 @@ pub(super) fn local_write_id(body: &serde_json::Value, now_unix_ms: i64) -> Stri
     hex::encode(hasher.finalize())
 }
 
-#[cfg(test)]
+// Native-only: uses `#[tokio::test]`, which needs a real tokio runtime.
+#[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests {
     use super::*;
     use crate::crypto::generate_ed25519_keypair;

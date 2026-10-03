@@ -814,7 +814,8 @@ pub(super) async fn flush_correction_write(
     }
 }
 
-#[cfg(test)]
+// Native-only: uses `#[tokio::test]`, which needs a real tokio runtime.
+#[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests {
     use super::*;
     use crate::crypto::{generate_ed25519_keypair, verify_signed_envelope, SignedEnvelope};

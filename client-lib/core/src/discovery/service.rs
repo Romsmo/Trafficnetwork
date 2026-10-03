@@ -441,7 +441,8 @@ fn random_jitter() -> f64 {
     (u64::from_le_bytes(buf) as f64) / (u64::MAX as f64)
 }
 
-#[cfg(test)]
+// Native-only: uses `#[tokio::test]`, which needs a real tokio runtime.
+#[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests {
     use super::*;
     use std::sync::atomic::{AtomicI64, Ordering};
