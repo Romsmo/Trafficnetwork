@@ -91,6 +91,17 @@ fs.writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
 
 fs.copyFileSync(path.join(here, "ubrn.config.yaml"), path.join(target, "ubrn.config.yaml"));
 
+// The example app needs somewhere to keep the client's data: the app's own
+// document directory, which React Native itself does not expose.
+const exampleManifestPath = path.join(target, "example", "package.json");
+const exampleManifest = JSON.parse(fs.readFileSync(exampleManifestPath, "utf8"));
+exampleManifest.dependencies = {
+  ...exampleManifest.dependencies,
+  "@dr.pogodin/react-native-fs": "2.40.3",
+};
+fs.writeFileSync(exampleManifestPath, `${JSON.stringify(exampleManifest, null, 2)}
+`);
+
 // Our screens over the template's.
 const overlay = path.join(here, "overlay");
 (function copy(from, to) {
