@@ -4,7 +4,20 @@ Client-Sync-Bibliothek: einbettbarer, maximal portabler Adapter für beliebige A
 
 Zielplattformen: Android (Kotlin), iOS/macOS (Swift), Flutter (Dart), React Native, Desktop/Server über C-ABI (inkl. Python, Node.js), Web-Browser (WASM).
 
-**Status**: der plattformunabhängige Kern (Kryptografie, Discovery/Failover, Sync-Engine mit echtem WebSocket-Push, Offline-Schreibpuffer, lokales Map-Matching, Tempolimit-Korrekturen, Online-Anzeige) ist fertig und gegen ein echtes Mehrknoten-Testnetz verifiziert. Von den Anbindungen gibt es bisher das C-ABI mit Python- und Node.js-Binding, WebAssembly für den Browser (mit TypeScript-Typen, Speicher in IndexedDB), Kotlin (Android), Swift (iOS/macOS) und Dart (Flutter) — alle laufen gegen denselben Szenariensatz; React Native und die Paketierung (AAR, XCFramework, npm, Dart-Package als Build-Artefakte) fehlen noch — siehe "Was noch fehlt" unten. Details zum Gesamtplan siehe [`docs/concept.md`](../docs/concept.md) (Abschnitt 6/13), [`docs/federation.md`](../docs/federation.md) und [`docs/todo.md`](../docs/todo.md). Laufender Koordinationsstatus (solange noch aktiv daran gearbeitet wird): [`docs/status.md`](../docs/status.md).
+**Status**: fertig, Version `1.0.0`. Der plattformunabhängige Kern (Kryptografie, Discovery/Failover, Sync-Engine mit echtem WebSocket-Push, Offline-Schreibpuffer, lokales Map-Matching, Tempolimit-Korrekturen, Online-Anzeige) ist gegen ein echtes Mehrknoten-Testnetz verifiziert, und **jede Zielplattform hat ihre Anbindung** — ein Kern, dünne Anbindungen, überall gleiches Verhalten, an einem gemeinsamen Szenariensatz über sechs Anbindungen gemessen (Python auf Linux/macOS/Windows, Node.js, WebAssembly, Kotlin, Swift, Dart):
+
+| Plattform | Anbindung | Anleitung (mit nachbaubarem Minimalbeispiel) |
+|---|---|---|
+| C / C++ (Linux, macOS, Windows) | C-ABI `libtrafficnetwork` | [`docs/integration-c.md`](docs/integration-c.md) |
+| Python | `ctypes` über das C-ABI | [`docs/integration-python.md`](docs/integration-python.md) |
+| Node.js | `koffi` über das C-ABI, TypeScript-Typen | [`docs/integration-node.md`](docs/integration-node.md) |
+| Web-Browser | WebAssembly, Speicher in IndexedDB, TypeScript-Typen | [`docs/integration-web.md`](docs/integration-web.md) |
+| Android | Kotlin über UniFFI, AAR | [`docs/integration-android.md`](docs/integration-android.md) |
+| iOS / macOS | Swift über UniFFI, XCFramework | [`docs/integration-ios.md`](docs/integration-ios.md) |
+| Flutter / Dart | `flutter_rust_bridge`, Plugin mit gebündelter Bibliothek | [`docs/integration-flutter.md`](docs/integration-flutter.md) |
+| React Native | `uniffi-bindgen-react-native` aus demselben UniFFI-Crate | [`docs/integration-react-native.md`](docs/integration-react-native.md) |
+
+Was davon in CI gebaut, ausgeführt oder nur gebaut wird, sagt jede Anleitung unter „Verified in CI" — und was nicht belegt ist, steht dort offen. Methodenreferenz: [`docs/api.md`](docs/api.md). Details zum Gesamtplan siehe [`docs/concept.md`](../docs/concept.md) (Abschnitt 6/13), [`docs/federation.md`](../docs/federation.md) und [`docs/todo.md`](../docs/todo.md); Änderungen je Version in [`CHANGELOG.md`](../CHANGELOG.md).
 
 ## Warum Basis und Föderation zusammen
 
@@ -12,7 +25,7 @@ Zielplattformen: Android (Kotlin), iOS/macOS (Swift), Flutter (Dart), React Nati
 
 ## Toolchain
 
-Rust-Kern (`core/`) + dünne Bindings pro Plattform (`bindings/`): UniFFI 0.31 (Kotlin, Swift und React Native aus einem Crate, `bindings/uniffi`), flutter_rust_bridge 2.13 (Dart/Flutter, `bindings/dart`), uniffi-bindgen-react-native (React Native, noch offen), cbindgen + reines `ctypes` (Python) + `koffi` (Node.js, FFI über dasselbe C-ABI — kein eigenes `napi-rs`-Crate), wasm-bindgen (Web). Speicher: `rusqlite` (SQLite mit R\*Tree, nativ), im Browser ein `InMemoryStore` mit IndexedDB-Spiegel (`rexie`) — siehe "WebAssembly und Node.js". Kein SpatiaLite. Tiling: `h3o` (reines Rust, gleiche H3-Resolution-7-Semantik wie der Server). Kryptografie: `ed25519-dalek` + `serde_json_canonicalizer` (RFC 8785) — siehe "Kryptografie" unten.
+Rust-Kern (`core/`) + dünne Bindings pro Plattform (`bindings/`): UniFFI 0.31 (Kotlin, Swift und React Native aus einem Crate, `bindings/uniffi`), flutter_rust_bridge 2.13 (Dart/Flutter, `bindings/dart`), cbindgen + reines `ctypes` (Python) + `koffi` (Node.js, FFI über dasselbe C-ABI — kein eigenes `napi-rs`-Crate), wasm-bindgen (Web). Speicher: `rusqlite` (SQLite mit R\*Tree, nativ), im Browser ein `InMemoryStore` mit IndexedDB-Spiegel (`rexie`) — siehe "WebAssembly und Node.js". Kein SpatiaLite. Tiling: `h3o` (reines Rust, gleiche H3-Resolution-7-Semantik wie der Server). Kryptografie: `ed25519-dalek` + `serde_json_canonicalizer` (RFC 8785) — siehe "Kryptografie" unten.
 
 ## Kryptografie
 
@@ -89,7 +102,7 @@ Vorbereitung und Messung für den Europa-Grundstock ("alles auf jedem Gerät"). 
 - **`sync()`** trennt den statischen vom dynamischen Teil (ein unterbrochener Grundstock-Download blockiert nie frische Meldungen) und lässt einen ausgefallenen Pool-Server die anderen nicht aufhalten; scheitert nur bei fehlenden Zugangsdaten, keinem erreichbaren Server oder vollem Speicher (`storageFull`) — jeder Teilfehler steht im zurückgegebenen `SyncReport`, wird nicht geworfen.
 - **Gefundene und behobene Lücken beim Aufbau der Fassade:** ein Verzeichnis nennt nur die *anderen* Knoten, nie sich selbst — ein Kaltstart mit nur einem Seed landete deshalb mit leerem Pool; jetzt trägt sich der antwortende Server selbst ein. Und: geriet der (einzige) Server in Backoff, blieb der Pool leer und nichts wurde je wieder versucht — jetzt wird bei leerem Pool der Server mit der nächsten Erholungszeit trotzdem versucht.
 - **Erstes Binding:** `bindings/python/` (reines `ctypes`, keine Abhängigkeiten). **Konformität:** `client-lib/conformance/` — ein Satz Szenarien (`scenarios.json`) gegen einen geskripteten Server (`mock-server.mjs`, echtes Ed25519/RFC 8785, unabhängig vom echten Server-Code), aktuell mit einem Python-Runner, CI-Job `conformance-python`.
-- **Bewusst noch offen** (siehe "Was noch fehlt" unten): React-Native-Modul und die Paketierung als Build-Artefakte. (WASM/Browser, Node.js, Kotlin, Swift und Dart sind seit den nächsten Sektionen erledigt.)
+- Die weiteren Anbindungen (WebAssembly, Node.js, Kotlin, Swift, Dart, React Native) und die Paketierung folgen in den nächsten Abschnitten.
 
 ## WebAssembly und Node.js
 
@@ -147,21 +160,23 @@ Belegt, dass Discovery/Failover/Föderation im Zusammenspiel wirklich halten —
 
 ## Bauen & Testen
 
-Rust ist auf der Entwicklungsmaschine dieser Session nicht installiert — Verifikation ausschließlich über `.github/workflows/client-lib-ci.yml` (native build+test+clippy+fmt als eigener Job, `wasm32-unknown-unknown`-Build, Cross-Language-Krypto-Vektor, cbindgen-Header-Generierung, `conformance-python` gegen den geskripteten Server). Mit lokalem Rust: `cargo build --workspace`, `cargo test --workspace` in `client-lib/`.
+Mit lokalem Rust: `cargo build --workspace` und `cargo test --workspace` in `client-lib/` (plus `cargo clippy --workspace --all-targets -- -D warnings`, `cargo fmt --all -- --check`); jede Anbindung hat in ihrer Anleitung die Schritte für ihre Plattform. Verifiziert wird ausschließlich über `.github/workflows/client-lib-ci.yml` — die Entwicklung lief auf einer Maschine ohne Rust-Toolchain, deshalb ist CI hier die Quelle der Wahrheit: native Build/Test/Clippy/rustfmt, Mehrknoten-Tests gegen echte Server, `wasm32` (Build, Headless-Chrome-Tests), Krypto-Vektor, cbindgen, C-ABI auf drei Betriebssystemen, die Konformitäts-Jobs je Anbindung samt Zusammenfassung, die Plattform-Builds (AAR, Swift/XCFramework, Flutter Android/iOS, React Native Android/iOS), der Flutter-Lauf auf einem Android-Emulator, die npm-Pakete aus leerem Projekt, `release-files` (setzt die Release-Dateien zusammen) und `versions` (alle Paketversionen müssen übereinstimmen).
 
 ## Was heute geht
 
-- Kompletter plattformunabhängiger Kern: Kryptografie (Ed25519, RFC-8785-kanonisches JSON, cross-language gegen den Server verifiziert), Server-Discovery mit Mehrserver-Failover, Sync-Engine (Snapshot-Bootstrap, Delta-Pull mit pro-Server-Cursor, inhaltsadressierte Statikdaten-Pakete), echter WebSocket-Push mit Wiederverbindung und Lückenschluss, Offline-Schreibpuffer, lokales Map-Matching, lokale Verfallsberechnung, client-lokale Stichproben-Prüfung gegen zurückgehaltene Daten.
-- Zusatzfunktionen: Community-Tempolimit-Korrekturen (vorschlagen/bestätigen/widersprechen), "aktuell online"-Anzeige, ein `SqliteStore` für echte Datenmengen (nativ).
-- Gegen ein echtes Mehrknoten-Testnetz verifiziert (Kaltstart, Serverausfall mitten im Sync, Duplikate über zwei Server, bösartige Antworten).
-- Eine öffentliche API-Fassade (`core/src/api/`) über ein C-ABI, mit Bindings für Python (`bindings/python/`, reines `ctypes`) und Node.js (`bindings/node/`, `koffi`), dazu WebAssembly für den Browser (`bindings/wasm/`, Speicher in IndexedDB, mit ehrlich dokumentierten Grenzen) — gemeinsame TypeScript-Typen.
-- Ein gemeinsamer Konformitäts-Szenariensatz, der über Python, Node.js, WebAssembly (Headless-Chrome), Kotlin (JVM), Swift (macOS) und Dart (Dart-VM) mit gleichem Ergebnis läuft; die Minimalbeispiele der Integrationsanleitungen werden in CI ausgeführt (Android: gebaut).
-- Kotlin/Android (AAR, vier ABIs), Swift/iOS/macOS (XCFramework, iOS-Gerät und -Simulator gebaut) und Dart/Flutter (flutter_rust_bridge) als Anbindungen über UniFFI bzw. flutter_rust_bridge.
+- **Kern:** Kryptografie (Ed25519, RFC-8785-kanonisches JSON, cross-language gegen den Server verifiziert), Server-Discovery mit Mehrserver-Failover, Sync-Engine (Snapshot-Bootstrap, Delta-Pull mit pro-Server-Cursor, inhaltsadressierte Statikdaten-Pakete), echter WebSocket-Push mit Wiederverbindung und Lückenschluss, Offline-Schreibpuffer, lokales Map-Matching, lokale Verfallsberechnung, client-lokale Stichproben-Prüfung gegen zurückgehaltene Daten, Community-Tempolimit-Korrekturen, „aktuell online"-Anzeige, `SqliteStore` für echte Datenmengen (nativ), IndexedDB im Browser. Gegen ein echtes Mehrknoten-Testnetz verifiziert.
+- **Eine öffentliche API-Fassade** (`core/src/api/`, `call(methode, argumenteJson)`), die jede Anbindung freigibt — die Tabelle oben; jede mit Anleitung und einem Minimalbeispiel, das in CI gebaut bzw. ausgeführt wird.
+- **Ein Konformitäts-Szenariensatz** (`conformance/`), der über Python (Linux, macOS, Windows), Node.js, WebAssembly (Headless-Chrome), Kotlin (JVM), Swift (macOS) und Dart (Dart-VM) mit gleichem Ergebnis läuft; der CI-Job `conformance` fasst die Urteile zusammen.
+- **Jede Zielplattform baut in CI:** Android (AAR), iOS/macOS (XCFramework, iOS Gerät/Simulator), Flutter (frisch erzeugte Apps für Android und iOS), React Native (Android und iOS), C-ABI auf Linux/macOS/Windows, Python, Node.js, WebAssembly.
+- **Paketierung als Build-Artefakte** (nichts veröffentlicht): C-ABI je Plattform, AAR, Swift-Paket + XCFramework, npm-Tarballs, Python-Wheel, Dart-Paket, Flutter-Plugin (Android + iOS), React-Native-Paket — der CI-Job `release-files` setzt sie mit Prüfsummen zusammen; `release.yml` hängt sie bei einem Tag `client-lib-v*` an ein GitHub-Release.
 
 ## Was noch fehlt
 
-Weitere dünne Anbindungen auf demselben Kern, nach Schwierigkeitsgrad:
+Nichts, was der ursprüngliche Auftrag zugesagt hat. Was nie zugesagt war und bewusst nicht Teil dieser Version ist:
 
-- Release-Workflow (`client-lib-v*`), der die CI-Artefakte je Plattform mit Prüfsummen an ein GitHub-Release hängt — erst mit der Version `1.0.0`
+- **Veröffentlichung in Paketregistern** (npm, Maven, pub.dev, CocoaPods): die Pakete sind `"private"` bzw. `publish_to: none`, bis das jemand ausdrücklich freigibt. Das GitHub-Release selbst wird erst mit dem Tag `client-lib-v1.0.0` ausgelöst — auch das ist eine eigene Freigabe.
+- **Flutter-Plugin für Desktop:** gebündelt sind Android und iOS; auf Desktop gibt man `initialize(libraryPath: …)` den Pfad einer selbst gebauten Bibliothek.
 
-Bis diese stehen, bleibt die Bibliothek bei einer `0.x`-Version. Details/aktueller Zwischenstand: [`docs/status.md`](../docs/status.md), solange die Arbeit daran läuft.
+Offen benannt statt verschwiegen — nicht zugesagt, aber wichtig zu wissen (jeweils im Detail in der Anleitung der Plattform): *ausgeführt* wird nur die Flutter-App auf einem Android-Emulator; Kotlin/Android, Swift/iOS und React Native werden gebaut und gelinkt, aber nicht auf Gerät, Emulator oder iOS-Simulator ausgeführt (die Konformität läuft für Kotlin auf der JVM und für Swift auf macOS, mit derselben Rust-Bibliothek und demselben erzeugten Code); das React-Native-JSI-Zwischenstück läuft in keinem Test; alle Tests laufen gegen `http://`-Mocks, ein echter TLS-Handshake ist nirgends getestet.
+
+Aktueller Koordinationsstand, solange die Arbeit daran lief: [`docs/status.md`](../docs/status.md).
