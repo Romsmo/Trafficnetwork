@@ -28,7 +28,8 @@ Open <http://localhost:8080/wasm/example/>. It asks for a server and a
 credential, then connects, syncs and shows what is around Berlin. To try it
 against the reference server: start it (`server/README.md`), create a
 credential with `npm run create-client -- --name browser-example --scope client`
-in `server/`, and paste the id and secret into the page. The reference
+in `server/` (in the Docker stack: the snippet in `server/docs/installation.md`,
+"Create the first client"), and paste the id and secret into the page. The reference
 server answers cross-origin requests; any other server you point a browser
 at must too (see "What a browser cannot do").
 

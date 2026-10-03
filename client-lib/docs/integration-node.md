@@ -25,7 +25,8 @@ cd bindings/node
 npm install
 
 # 3. Run the example against a server, with a credential of scope `client`
-#    (in server/: npm run create-client -- --name node-example --scope client).
+#    (in server/: npm run create-client -- --name node-example --scope client;
+#    in the Docker stack: server/docs/installation.md, "Create the first client").
 TRAFFICNETWORK_LIB=../../target/release/libtrafficnetwork.so \
 TN_NODE=http://localhost:3000 TN_CLIENT_ID=… TN_CLIENT_SECRET=… \
   node example.mjs

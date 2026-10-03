@@ -21,7 +21,8 @@ cargo build -p trafficnetwork-c-abi --release
 #      target/release/trafficnetwork.dll        (Windows)
 
 # 2. Run the example against a server, with a credential of scope `client`
-#    (in server/: npm run create-client -- --name py-example --scope client).
+#    (in server/: npm run create-client -- --name py-example --scope client;
+#    in the Docker stack: server/docs/installation.md, "Create the first client").
 cd bindings/python
 TRAFFICNETWORK_LIB=../../target/release/libtrafficnetwork.so \
 TN_NODE=http://localhost:3000 TN_CLIENT_ID=… TN_CLIENT_SECRET=… \

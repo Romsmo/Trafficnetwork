@@ -32,7 +32,8 @@ cc example.c -I.. -L../../../target/release -ltrafficnetwork -o example         
 gcc example.c -I.. ../../../target/release/trafficnetwork.dll -o example.exe      # Windows (MinGW; with MSVC: cl example.c /I.. trafficnetwork.dll.lib)
 
 # 4. Run it against a server, with a credential of scope `client`
-#    (in server/: npm run create-client -- --name c-example --scope client).
+#    (in server/: npm run create-client -- --name c-example --scope client;
+#    in the Docker stack: server/docs/installation.md, "Create the first client").
 #    The library has to be findable: LD_LIBRARY_PATH (Linux), DYLD_LIBRARY_PATH
 #    (macOS), or next to the executable (Windows).
 LD_LIBRARY_PATH=../../../target/release \

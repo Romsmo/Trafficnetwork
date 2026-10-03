@@ -29,7 +29,8 @@ cd ..
 dart pub get
 
 # 3. Run the example against a server, with a credential of scope `client`
-#    (in server/: npm run create-client -- --name dart-example --scope client).
+#    (in server/: npm run create-client -- --name dart-example --scope client;
+#    in the Docker stack: server/docs/installation.md, "Create the first client").
 TN_DART_LIB=rust/target/release/libtrafficnetwork_dart.so \
 TN_NODE=http://localhost:3000 TN_CLIENT_ID=… TN_CLIENT_SECRET=… \
   dart run example/trafficnetwork_example.dart
