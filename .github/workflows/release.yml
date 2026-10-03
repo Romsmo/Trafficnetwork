@@ -6,12 +6,17 @@ name: release
 # — never runs on an ordinary push, so it never publishes by accident. Build artifacts are
 # NOT committed to version control (per docs/audit.md R4): the repo holds the build recipe,
 # the release holds the result.
+#
+# `client-lib-v*` (client-lib-v1.0.0) is different in kind: no Docker image, but the client
+# library's artifacts per platform (see the client-lib jobs at the end of this file) attached
+# to a GitHub Release with checksums. Nothing is published to a package registry.
 
 on:
   push:
     tags:
       - "server-v*"
       - "ingestion-v*"
+      - "client-lib-v*"
 
 permissions:
   contents: write
@@ -19,6 +24,8 @@ permissions:
 
 jobs:
   release:
+    # The Docker release of server and ingestion; a client-lib tag has its own jobs below.
+    if: ${{ !startsWith(github.ref_name, 'client-lib-v') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -100,4 +107,64 @@ jobs:
           name: "${{ steps.vars.outputs.package }} v${{ steps.vars.outputs.version }}"
           body_path: release-notes.md
           files: checksums.txt
+          generate_release_notes: false
+
+  # ----------------------------------------------------------------- client-lib
+  #
+  # Tag `client-lib-vX.Y.Z`: runs the client library's whole CI (the very jobs of
+  # client-lib-ci.yml, reused — so what is released is exactly what was tested, on
+  # every platform), whose last job (`release-files`) assembles the per-platform
+  # artifacts with checksums; this attaches them to a GitHub Release. Nothing is
+  # published to npm, Maven, pub.dev or CocoaPods: those are decisions of their own.
+  client-lib-ci:
+    if: ${{ startsWith(github.ref_name, 'client-lib-v') }}
+    uses: ./.github/workflows/client-lib-ci.yml
+
+  client-lib-release:
+    if: ${{ startsWith(github.ref_name, 'client-lib-v') }}
+    needs: client-lib-ci
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: The tag names the version the code is at
+        id: vars
+        run: |
+          VERSION="${GITHUB_REF_NAME#client-lib-v}"
+          CARGO_VERSION=$(grep -m1 '^version' client-lib/Cargo.toml | cut -d'"' -f2)
+          if [ "$VERSION" != "$CARGO_VERSION" ]; then
+            echo "Tag says $VERSION but client-lib/Cargo.toml says $CARGO_VERSION" >&2
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: trafficnetwork-release-files
+          path: release
+
+      - name: Check the files are the ones for this version
+        run: |
+          ls -l release
+          test -s release/checksums.txt
+          (cd release && sha256sum --check checksums.txt)
+          ls release | grep -q "${{ steps.vars.outputs.version }}"
+
+      - name: This version's CHANGELOG section
+        run: |
+          awk -v pkg="client-lib v${{ steps.vars.outputs.version }}" '
+            $0 ~ "^## " pkg { found=1; print; next }
+            found && /^## / { exit }
+            found { print }
+          ' CHANGELOG.md > release-notes.md
+          if [ ! -s release-notes.md ]; then
+            echo "See CHANGELOG.md." > release-notes.md
+          fi
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: "client-lib v${{ steps.vars.outputs.version }}"
+          body_path: release-notes.md
+          files: release/*
           generate_release_notes: false
