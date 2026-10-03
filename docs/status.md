@@ -182,7 +182,12 @@ PULL REQUEST:   https://github.com/Romsmo/Trafficnetwork/pull/10 (offen, mergeab
   - **Konformität:** derselbe Szenariensatz (9 Szenarien) mit gleichem Ergebnis über Python (C-ABI), Node.js (C-ABI) und WebAssembly in Headless-Chrome. Die Minimalbeispiele der Anleitungen für Web/Node werden in CI ausgeführt.
   - Anleitungen: `client-lib/docs/integration-web.md`, `integration-node.md`.
   - Unterwegs behoben: koffi-Standard-Stacks zu klein (SIGSEGV in CI) → in `bindings/node/index.js` heraufgesetzt und dokumentiert.
-- **B4 (Kotlin, Swift, Dart) und B5 (React Native, Paketierung, Konformität über Mobile):** noch offen, folgen je auf eigenem Branch/PR.
+- **B4 (Kotlin, Swift, Dart) — fertig, CI grün (Lauf 37127236903, alle Jobs), PR https://github.com/Romsmo/Trafficnetwork/pull/15 (Branch `rework/client-lib-mobile`, gestapelt auf #14, offen, nicht gemergt):**
+  - `bindings/uniffi` (+ `uniffi-bindgen`): ein Objekt `TrafficNetworkClient`, Kotlin und Swift aus demselben Crate erzeugt (nichts von Hand darübergeschrieben); Android-AAR (4 ABIs) + Beispiel-App gebaut; Swift-Paket + XCFramework (5 Apple-Ziele), gebaut für macOS und iOS (Gerät/Simulator); Dart/Flutter über `flutter_rust_bridge` 2.13 (erzeugter Code eingecheckt, CI erzeugt neu und vergleicht).
+  - **Konformität:** derselbe Szenariensatz mit gleichem Ergebnis über sechs Anbindungen (Python, Node.js, WASM, Kotlin/JVM, Swift/macOS, Dart/Dart-VM); Kotlin/Swift/Dart über je eine Brücke, die der eine Szenarien-Runner antreibt; jede zweimal, auch mit einem vom Host implementierten `SecureStore`.
+  - **Gefunden und behoben:** reqwest 0.13 nutzt standardmäßig den Plattform-Verifier, der auf Android ohne Handarbeit in jeder App nicht funktioniert → HTTP-Transport vertraut jetzt den eingebauten Mozilla-Wurzeln. Kernumbau: Ergebnis-Umschlag, `call_json`, `open_native` einmal im Kern.
+  - Anleitungen: `client-lib/docs/integration-{android,ios,flutter}.md`. **Ehrlich nicht belegt:** nichts läuft auf Gerät/Emulator/iOS-Simulator/in einer Flutter-App (gebaut und gelinkt, ausgeführt auf JVM/macOS/Dart-VM).
+- **B5 (React Native, Paketierung, C-ABI Windows/macOS, Release-Workflow):** in Arbeit, eigener Branch/PR.
 - **Für die Server-Instanz:** keine Änderungswünsche aus B3 — der Browser-Build setzt voraus, dass ein Server CORS-Header sendet (der Referenzserver tut es).
 
 ## Launch L — lokaler Test (`launch/local-test`, Nutzer-PC, Windows+Docker)
