@@ -120,12 +120,39 @@ impl ReqwestHttpTransport {
         #[cfg(not(target_arch = "wasm32"))]
         let builder = builder
             .connect_timeout(std::time::Duration::from_secs(15))
-            .read_timeout(std::time::Duration::from_secs(60));
+            .read_timeout(std::time::Duration::from_secs(60))
+            .tls_backend_preconfigured(bundled_roots_tls()?);
         let client = builder
             .build()
             .map_err(|e| HttpError::Network(e.to_string()))?;
         Ok(Self { client })
     }
+}
+
+/// TLS that trusts the Mozilla root certificates bundled in the library
+/// (`webpki-roots`) and nothing else.
+///
+/// This is deliberate, and not reqwest's default: reqwest 0.13 asks the
+/// platform's own certificate verifier, and on Android that verifier cannot
+/// work unless every app that uses the library also wires in a Kotlin
+/// component by hand (`rustls-platform-verifier`'s Android setup) — a library
+/// that ships as one AAR cannot ask that of its users. The same bundled roots
+/// make every native platform behave the same way (the WebSocket transport
+/// already used them). The cost is that a server whose certificate chains to
+/// a private authority is not trusted — a host app that needs that supplies
+/// its own `HttpTransport`.
+#[cfg(not(target_arch = "wasm32"))]
+fn bundled_roots_tls() -> Result<rustls::ClientConfig, HttpError> {
+    let roots = rustls::RootCertStore {
+        roots: webpki_roots::TLS_SERVER_ROOTS.to_vec(),
+    };
+    let provider = std::sync::Arc::new(rustls::crypto::aws_lc_rs::default_provider());
+    let config = rustls::ClientConfig::builder_with_provider(provider)
+        .with_safe_default_protocol_versions()
+        .map_err(|e| HttpError::Network(format!("TLS setup: {e}")))?
+        .with_root_certificates(roots)
+        .with_no_client_auth();
+    Ok(config)
 }
 
 impl Default for ReqwestHttpTransport {

@@ -1,0 +1,9 @@
+# What the generated wrappers are called. Kotlin and Swift settings that are
+# the same wherever the library is used live here; what differs per target
+# is in each generate step's own global config (kotlin/*/uniffi.toml,
+# swift/uniffi.toml).
+[bindings.kotlin]
+package_name = "info.trafficnetwork.client"
+
+[bindings.swift]
+module_name = "TrafficNetwork"

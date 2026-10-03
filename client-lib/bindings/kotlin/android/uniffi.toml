@@ -1,4 +1,7 @@
-# The Kotlin that UniFFI generates for the Android library.
-[bindings.kotlin]
-package_name = "info.trafficnetwork.client"
+# Global UniFFI config for the Android generation; the crate's own
+# bindings/uniffi/uniffi.toml gives the package name.
+[crate-roots]
+trafficnetwork_uniffi = "../../uniffi"
+
+[defaults.bindings.kotlin]
 android = true
