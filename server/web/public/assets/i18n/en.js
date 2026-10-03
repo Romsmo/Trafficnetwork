@@ -130,7 +130,7 @@ export default {
   "connect.app.title": "Build your own app",
   "connect.app.body1": "Apps embed the client library. It keeps data locally, works without a network and syncs with the network in the background. The library finds nodes on its own through the directory (see network status below) – you do not have to configure an address.",
   "connect.app.body2": "You need an app key (scope “device-registration”) from a node operator. With it, your app registers an anonymous identity per device.",
-  "connect.app.body3": "Code examples for Android, iOS, Flutter, React Native, desktop and web will follow once the library's platform bindings are finished. Until then, the current state is in the library's README.",
+  "connect.app.body3": "For Android, iOS, Flutter, React Native, desktop (C, Python, Node.js) and web there is a guide with a minimal example each, in client-lib/docs; the library's README links them.",
   "connect.app.link": "Client library: README",
   "connect.node.title": "Run your own node",
   "connect.node.body": "Anyone can run a node – with Docker in four steps:",
