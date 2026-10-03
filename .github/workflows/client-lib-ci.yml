@@ -12,6 +12,9 @@ on:
       - "client-lib/**"
       - "server/tests/support/**"
       - ".github/workflows/client-lib-ci.yml"
+  # The release workflow (release.yml, tag client-lib-v*) runs these very jobs
+  # and attaches the artifacts they produce: what is released is what was tested.
+  workflow_call:
 
 # A newer push to the same branch makes the older run pointless (and the macOS
 # jobs are slow): cancel it.
@@ -213,7 +216,9 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: ubuntu-latest
+          # The oldest Ubuntu runner on purpose: a library built against an
+          # older glibc loads on more systems.
+          - os: ubuntu-22.04
             library: libtrafficnetwork.so
           - os: macos-latest
             library: libtrafficnetwork.dylib
@@ -228,6 +233,8 @@ jobs:
       - uses: actions/checkout@v4
 
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ runner.os == 'macOS' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
 
       - uses: Swatinem/rust-cache@v2
         with:
@@ -238,12 +245,24 @@ jobs:
         run: cargo test -p trafficnetwork-c-abi
 
       - name: Build the release library
-        run: cargo build -p trafficnetwork-c-abi --release
+        run: |
+          mkdir -p dist
+          if [ "$RUNNER_OS" = "macOS" ]; then
+            # One library for Apple silicon and Intel Macs.
+            cargo build -p trafficnetwork-c-abi --release --target aarch64-apple-darwin
+            cargo build -p trafficnetwork-c-abi --release --target x86_64-apple-darwin
+            lipo -create -output dist/${{ matrix.library }}               target/aarch64-apple-darwin/release/${{ matrix.library }}               target/x86_64-apple-darwin/release/${{ matrix.library }}
+            mkdir -p target/release && cp dist/${{ matrix.library }} target/release/
+          else
+            cargo build -p trafficnetwork-c-abi --release
+            cp target/release/${{ matrix.library }} dist/
+          fi
+          ls -l dist
 
       - uses: actions/upload-artifact@v4
         with:
           name: trafficnetwork-c-abi-${{ matrix.os }}
-          path: client-lib/target/release/${{ matrix.library }}
+          path: client-lib/dist/${{ matrix.library }}
           retention-days: 14
 
       # What docs/integration-c.md tells a reader to build must work, not merely
