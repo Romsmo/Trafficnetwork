@@ -96,3 +96,7 @@ client-lib/bindings/dart/example.out
 # Dart packages keep their executables in bin/ (ignored above for Go-style build output).
 !client-lib/bindings/dart/bin/
 client-lib/dist/
+client-lib/bindings/flutter/android/src/main/jniLibs/
+client-lib/bindings/flutter/ios/Frameworks/
+client-lib/bindings/flutter/ios/build/
+client-lib/flutter-example-debug.apk

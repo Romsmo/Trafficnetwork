@@ -867,6 +867,125 @@ jobs:
           path: client-lib/dist/npm/*.tgz
           retention-days: 14
 
+  # Add-on B5: the Flutter plugin (bindings/flutter) with the native library
+  # bundled, on Android: the library for four ABIs built into the plugin, a
+  # brand-new Flutter app created the way docs/integration-flutter.md says
+  # (`flutter create`, add the package, paste the example), and that app
+  # built. What this proves is that it builds and that the APK contains the
+  # library; it does not run the app (see the emulator step, if present, for
+  # what does).
+  flutter-android:
+    name: build (Flutter plugin + example app, Android)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android,armv7-linux-androideabi,x86_64-linux-android,i686-linux-android
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: client-lib/bindings/dart/rust
+          key: flutter-android
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Cache cargo-ndk
+        id: ndk-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin/cargo-ndk
+          key: cargo-ndk-${{ runner.os }}-v4
+
+      - name: Install cargo-ndk
+        if: steps.ndk-cache.outputs.cache-hit != 'true'
+        run: cargo install --locked cargo-ndk
+
+      - name: Build the native library into the plugin
+        run: bash bindings/flutter/build-native.sh android
+
+      - name: Create a Flutter app that uses the plugin, and build it
+        run: |
+          cd "$RUNNER_TEMP"
+          flutter create --platforms=android --project-name trafficnetwork_example_app app
+          cd app
+          flutter pub add path_provider
+          flutter pub add trafficnetwork_flutter --path "$GITHUB_WORKSPACE/client-lib/bindings/flutter"
+          cp "$GITHUB_WORKSPACE/client-lib/bindings/flutter/example/lib/main.dart" lib/main.dart
+          flutter analyze
+          flutter build apk --debug
+          unzip -l build/app/outputs/flutter-apk/app-debug.apk | grep libtrafficnetwork_dart.so
+          cp build/app/outputs/flutter-apk/app-debug.apk "$GITHUB_WORKSPACE/client-lib/flutter-example-debug.apk"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: trafficnetwork-flutter-plugin-android
+          path: |
+            client-lib/bindings/flutter/pubspec.yaml
+            client-lib/bindings/flutter/lib
+            client-lib/bindings/flutter/android
+            client-lib/bindings/flutter/LICENSE
+            client-lib/flutter-example-debug.apk
+          retention-days: 14
+
+  # The same on iOS, on a macOS runner: the static library as an XCFramework in
+  # the plugin, a fresh Flutter app, built for a device (release, unsigned) and
+  # for the simulator. It builds and links; it is not run here.
+  flutter-ios:
+    name: build (Flutter plugin + example app, iOS)
+    runs-on: macos-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-ios,aarch64-apple-ios-sim,x86_64-apple-ios
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: client-lib/bindings/dart/rust
+          key: flutter-ios
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Build the native library into the plugin
+        run: bash bindings/flutter/build-native.sh ios
+
+      - name: Create a Flutter app that uses the plugin, and build it
+        run: |
+          cd "$RUNNER_TEMP"
+          flutter create --platforms=ios --project-name trafficnetwork_example_app app
+          cd app
+          flutter pub add path_provider
+          flutter pub add trafficnetwork_flutter --path "$GITHUB_WORKSPACE/client-lib/bindings/flutter"
+          cp "$GITHUB_WORKSPACE/client-lib/bindings/flutter/example/lib/main.dart" lib/main.dart
+          flutter analyze
+          flutter build ios --release --no-codesign
+          flutter build ios --simulator --debug
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: trafficnetwork-flutter-plugin-ios
+          path: |
+            client-lib/bindings/flutter/pubspec.yaml
+            client-lib/bindings/flutter/lib
+            client-lib/bindings/flutter/ios
+            client-lib/bindings/flutter/LICENSE
+          retention-days: 14
+
   # Add-on B3: the hand-written .d.ts files of both JS bindings, compiled
   # against a typed usage file (never run) — a declaration that drifts from
   # what the integration guides tell a host app to write stops compiling.

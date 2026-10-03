@@ -58,11 +58,19 @@ abstract interface class SecureStore {
 /// Loads the native library. Call once, before the first client is created.
 ///
 /// [libraryPath] names the library file (`libtrafficnetwork_dart.so`,
-/// `.dylib`, `.dll`); without it the loader looks where a Flutter app's build
-/// puts it.
-Future<void> initialize({String? libraryPath}) => RustLib.init(
-      externalLibrary:
-          libraryPath == null ? null : ExternalLibrary.open(libraryPath),
+/// `.dylib`, `.dll`; a bare name is looked up the way the platform looks up
+/// libraries). With [processLibrary] the library is expected to be linked into
+/// the running program already (a static library on iOS) and [libraryPath] is
+/// not used. With neither, the loader looks where a Flutter app's build puts
+/// it. The `trafficnetwork_flutter` package calls this with what its
+/// platforms need.
+Future<void> initialize({String? libraryPath, bool processLibrary = false}) =>
+    RustLib.init(
+      externalLibrary: processLibrary
+          ? ExternalLibrary.process(iKnowHowToUseIt: true)
+          : libraryPath == null
+              ? null
+              : ExternalLibrary.open(libraryPath),
     );
 
 /// The native library's version.

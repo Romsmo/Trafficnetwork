@@ -27,6 +27,11 @@ tokio = { version = "1", features = ["rt-multi-thread", "sync"] }
 futures = { version = "0.3", default-features = false, features = ["std", "executor"] }
 serde_json = "1"
 
+# The release libraries that go into a Flutter app: symbols stripped (the
+# functions Dart looks up stay exported; only the symbol table goes).
+[profile.release]
+strip = "symbols"
+
 # Its own workspace, apart from the library's: this crate's generated code
 # (`src/frb_generated.rs`) only exists once the generator has run, and
 # `cargo build --workspace` over the rest of the library must not depend on it.
