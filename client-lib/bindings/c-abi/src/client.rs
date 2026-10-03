@@ -30,11 +30,18 @@ use trafficnetwork_core::api::{
     code, error_envelope, panic_envelope, ApiError, SecureStore, TrafficNetworkClient,
 };
 
+/// Every API call runs on one of this runtime's threads, never on the host's
+/// own: a call goes deep (TLS, JSON, SQLite) and a host thread's stack — a
+/// secondary thread on macOS has 512 KiB, on Windows 1 MiB — is not ours to
+/// size. Reserved lazily, so only what a call touches is used.
+const WORKER_STACK_BYTES: usize = 8 * 1024 * 1024;
+
 fn runtime() -> &'static Runtime {
     static RUNTIME: OnceLock<Runtime> = OnceLock::new();
     RUNTIME.get_or_init(|| {
         tokio::runtime::Builder::new_multi_thread()
             .worker_threads(2)
+            .thread_stack_size(WORKER_STACK_BYTES)
             .enable_all()
             .build()
             .expect("the async runtime could not start")
@@ -270,10 +277,18 @@ pub unsafe extern "C" fn tn_client_free(client: *mut c_void) {
 // --------------------------------------------------------------------- calls
 
 fn run_call(client: &Arc<TrafficNetworkClient>, method: &str, args: &str) -> String {
-    let result = catch_unwind(AssertUnwindSafe(|| {
-        runtime().block_on(client.call_json(method, args))
-    }));
-    result.unwrap_or_else(|_| panic_envelope())
+    let client = client.clone();
+    let method = method.to_string();
+    let args = args.to_string();
+    let (sender, receiver) = tokio::sync::oneshot::channel();
+    // The call itself runs on the library's own thread (see `WORKER_STACK_BYTES`);
+    // this thread only waits. A call that panicked drops the sender.
+    runtime().spawn(async move {
+        let _ = sender.send(client.call_json(&method, &args).await);
+    });
+    receiver
+        .blocking_recv()
+        .unwrap_or_else(|_| panic_envelope())
 }
 
 /// Runs one API method and returns its result — see the module documentation

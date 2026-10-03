@@ -246,6 +246,59 @@ jobs:
           path: client-lib/target/release/${{ matrix.library }}
           retention-days: 14
 
+      # What docs/integration-c.md tells a reader to build must work, not merely
+      # compile: the header from cbindgen, the example compiled and linked with
+      # the platform's own C compiler, and run against the scripted server.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Cache cbindgen
+        id: cbindgen-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin/cbindgen*
+          key: cbindgen-${{ runner.os }}-v1
+
+      - name: Install cbindgen
+        if: steps.cbindgen-cache.outputs.cache-hit != 'true'
+        run: cargo install --locked cbindgen
+
+      - name: Generate the header
+        working-directory: client-lib/bindings/c-abi
+        run: cbindgen --config cbindgen.toml --output trafficnetwork.h
+
+      - name: Compile the integration guide's example
+        working-directory: client-lib/bindings/c-abi/example
+        run: |
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            gcc example.c -I.. ../../../target/release/trafficnetwork.dll -o example.exe
+            cp ../../../target/release/trafficnetwork.dll .
+          else
+            cc example.c -I.. -L../../../target/release -ltrafficnetwork -o example
+          fi
+
+      - name: Run it against the scripted server
+        working-directory: client-lib/bindings/c-abi/example
+        env:
+          LD_LIBRARY_PATH: ${{ github.workspace }}/client-lib/target/release
+          DYLD_LIBRARY_PATH: ${{ github.workspace }}/client-lib/target/release
+        run: |
+          node ../../../conformance/mock-server.mjs --port 18998 > mock.log 2>&1 &
+          for i in $(seq 1 50); do
+            curl -sf -X POST http://127.0.0.1:18998/__instances -d '{}' > /dev/null && break
+            sleep 0.2
+          done
+          URL=$(curl -sf -X POST http://127.0.0.1:18998/__instances -d '{}' | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>console.log(JSON.parse(s).url))")
+          if [ "$RUNNER_OS" = "Windows" ]; then program=./example.exe; else program=./example; fi
+          TN_NODE="$URL" TN_CLIENT_ID=example TN_CLIENT_SECRET=example "$program" | tee example.out
+          grep -q "sync ok: true" example.out
+          grep -q "queued report; sync ok: true" example.out
+
+      - name: Scripted server log
+        if: failure()
+        run: cat client-lib/bindings/c-abi/example/mock.log
+
   # The conformance scenarios (conformance/scenarios.json) through each binding,
   # against the scripted server (conformance/mock-server.mjs). Every binding
   # runs the same scenarios and has to give the same answers. The Python
@@ -302,6 +355,20 @@ jobs:
           MOCK_URL: http://127.0.0.1:18990
           TRAFFICNETWORK_LIB: ${{ github.workspace }}/client-lib/target/debug/${{ matrix.library }}
         run: python conformance/run_python.py
+
+      # What docs/integration-python.md tells a reader to run must work, not merely
+      # compile: its example, against the mock, with a check that it really synced
+      # and queued a report.
+      - name: Run the integration guide's example
+        working-directory: client-lib/bindings/python
+        env:
+          TRAFFICNETWORK_LIB: ${{ github.workspace }}/client-lib/target/debug/${{ matrix.library }}
+          PYTHONPATH: .
+        run: |
+          URL=$(curl -sf -X POST http://127.0.0.1:18990/__instances -d '{}' | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>console.log(JSON.parse(s).url))")
+          TN_NODE="$URL" TN_CLIENT_ID=example TN_CLIENT_SECRET=example python example.py | tee example.out
+          grep -q "sync ok: true" example.out
+          grep -q "queued report" example.out
 
       - name: Scripted server log
         if: failure()
