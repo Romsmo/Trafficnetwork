@@ -921,6 +921,7 @@ jobs:
           flutter pub add path_provider
           flutter pub add trafficnetwork_flutter --path "$GITHUB_WORKSPACE/client-lib/bindings/flutter"
           cp "$GITHUB_WORKSPACE/client-lib/bindings/flutter/example/lib/main.dart" lib/main.dart
+          rm -f test/widget_test.dart   # the template's test is for the template's main.dart
           flutter analyze
           flutter build apk --debug
           unzip -l build/app/outputs/flutter-apk/app-debug.apk | grep libtrafficnetwork_dart.so
@@ -972,6 +973,7 @@ jobs:
           flutter pub add path_provider
           flutter pub add trafficnetwork_flutter --path "$GITHUB_WORKSPACE/client-lib/bindings/flutter"
           cp "$GITHUB_WORKSPACE/client-lib/bindings/flutter/example/lib/main.dart" lib/main.dart
+          rm -f test/widget_test.dart   # the template's test is for the template's main.dart
           flutter analyze
           flutter build ios --release --no-codesign
           flutter build ios --simulator --debug

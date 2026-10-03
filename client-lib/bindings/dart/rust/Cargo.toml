@@ -26,6 +26,10 @@ tokio = { version = "1", features = ["rt-multi-thread", "sync"] }
 # the core's synchronous secret-store seam.
 futures = { version = "0.3", default-features = false, features = ["std", "executor"] }
 serde_json = "1"
+# Not used by this crate: held below 0.2.190 for `backtrace` (flutter_rust_bridge's
+# dependency), whose iOS code needs `_dyld_*` functions that libc 0.2.190 declares
+# for macOS only — the iOS build fails to compile with it.
+libc = ">=0.2.150, <0.2.190"
 
 # The release libraries that go into a Flutter app: symbols stripped (the
 # functions Dart looks up stay exported; only the symbol table goes).
