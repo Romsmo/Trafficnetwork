@@ -90,8 +90,7 @@ test -d "$rn/package/TrafficnetworkReactNativeFramework.xcframework"
   const fs = require("fs");
   const manifest = JSON.parse(fs.readFileSync("package.json", "utf8"));
   delete manifest.scripts;
-  fs.writeFileSync("package.json", JSON.stringify(manifest, null, 2) + "
-");
+  fs.writeFileSync("package.json", JSON.stringify(manifest, null, 2));
 ' && npm pack --pack-destination "$root/release")
 
 # ---- Checksums
