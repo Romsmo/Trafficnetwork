@@ -872,6 +872,10 @@ jobs:
       - dart-package
     if: always()
     runs-on: ubuntu-latest
+    # No checkout here, so no client-lib/ directory to run in.
+    defaults:
+      run:
+        working-directory: .
     steps:
       - name: Collect the verdicts
         env:
