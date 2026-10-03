@@ -1,0 +1,29 @@
+<!doctype html>
+<meta charset="utf-8" />
+<title>End-to-end run (browser)</title>
+<!--
+  End-to-end step 4, the browser build. Written the way the package's README
+  says to use it: the page imports `index.js` from the installed package
+  (`npm install ./trafficnetwork-client-web-<version>.tgz` in an empty project,
+  then serve that project's directory with any static file server and put this
+  file next to node_modules/). It does nothing by itself — the steps run from
+  the browser's console, see README.md in this directory, so that the server can
+  be stopped and started and other devices can report in between.
+-->
+<pre id="out">loading…</pre>
+<script type="module">
+  import { Client } from "./node_modules/@trafficnetwork/client-web/index.js";
+
+  window.events = [];
+  window.start = async (clientId, clientSecret) => {
+    window.tn = await Client.create({
+      storagePath: "durchstich-browser", // the IndexedDB database
+      discovery: false,
+      nodes: ["http://localhost:3000"],
+      credentials: { type: "client", clientId, clientSecret },
+    });
+    window.tn.onEvent((event) => window.events.push(event.type));
+    document.querySelector("#out").textContent = "ready";
+  };
+  document.querySelector("#out").textContent = "waiting for start()";
+</script>

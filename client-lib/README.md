@@ -17,7 +17,7 @@ Zielplattformen: Android (Kotlin), iOS/macOS (Swift), Flutter (Dart), React Nati
 | Flutter / Dart | `flutter_rust_bridge`, Plugin mit gebündelter Bibliothek | [`docs/integration-flutter.md`](docs/integration-flutter.md) |
 | React Native | `uniffi-bindgen-react-native` aus demselben UniFFI-Crate | [`docs/integration-react-native.md`](docs/integration-react-native.md) |
 
-Was davon in CI gebaut, ausgeführt oder nur gebaut wird, sagt jede Anleitung unter „Verified in CI" — und was nicht belegt ist, steht dort offen. Methodenreferenz: [`docs/api.md`](docs/api.md). Details zum Gesamtplan siehe [`docs/concept.md`](../docs/concept.md) (Abschnitt 6/13), [`docs/federation.md`](../docs/federation.md) und [`docs/todo.md`](../docs/todo.md); Änderungen je Version in [`CHANGELOG.md`](../CHANGELOG.md).
+Welche Release-Datei zu welcher Anleitung gehört: [`docs/releases.md`](docs/releases.md). Was davon in CI gebaut, ausgeführt oder nur gebaut wird, sagt jede Anleitung unter „Verified in CI" — und was nicht belegt ist, steht dort offen. Methodenreferenz: [`docs/api.md`](docs/api.md). Details zum Gesamtplan siehe [`docs/concept.md`](../docs/concept.md) (Abschnitt 6/13), [`docs/federation.md`](../docs/federation.md) und [`docs/todo.md`](../docs/todo.md); Änderungen je Version in [`CHANGELOG.md`](../CHANGELOG.md).
 
 ## Warum Basis und Föderation zusammen
 
@@ -45,7 +45,7 @@ Server-Discovery über `GET /v1/network/directory` (eingebaute Seed-Liste als St
 
 ## Sync-Engine
 
-`core/src/storage/mod.rs` definiert `Store` — die Persistenz-Seam (Cursor pro Server, Partitions-Hashes, Entitäten, Schreibpuffer), analog zu `Clock`/`HttpTransport`. `InMemoryStore` ist die Referenzimplementierung, gegen die die meisten Tests in diesem Crate laufen und die kleine Datenmengen (Tests, Prototypen) trägt; für echte Bestände gibt es einen `SqliteStore` (nativ, siehe unten). Die Browser-Variante (`sqlite-wasm-rs`) ist **weiterhin offen** — das ist eine Plattform-/Binding-Entscheidung, keine, die der plattformunabhängige Kern selbst treffen sollte.
+`core/src/storage/mod.rs` definiert `Store` — die Persistenz-Seam (Cursor pro Server, Partitions-Hashes, Entitäten, Schreibpuffer), analog zu `Clock`/`HttpTransport`. `InMemoryStore` ist die Referenzimplementierung, gegen die die meisten Tests in diesem Crate laufen und die kleine Datenmengen (Tests, Prototypen) trägt; für echte Bestände gibt es einen `SqliteStore` (nativ, siehe unten). Im Browser übernimmt `IndexedDbStore` (siehe „WebAssembly und Node.js“ unten) diese Rolle — eine Plattformentscheidung des Bindings, nicht des Kerns.
 
 `core/src/sync/engine.rs`s `SyncEngine` orchestriert `GET /v1/snapshot` (immer mit `staticData=false`, da statische Daten separat über die inhaltsadressierten Manifest-/Partitions-Endpunkte laufen), `GET /v1/delta` mit einem **pro-Server-Cursor** (ein `409 SNAPSHOT_REQUIRED` löst einen Neu-Snapshot beim selben Server aus, nie bei einem anderen — `since` ist serverlokal, siehe "Föderation" oben) und `GET /v1/static-data/{manifest,partitions/:tile}` (Hash-Vergleich vor jedem Nachladen). Dafür neu: `DiscoveryService::request_to_server()`, die Einzelserver-Variante von `request_with_failover` für genau diesen Fall, wo ein anderer Server bei Fehlschlag aktiv falsch wäre.
 
@@ -57,7 +57,7 @@ Server-Discovery über `GET /v1/network/directory` (eingebaute Seed-Liste als St
 
 `core/src/sync/withholding.rs` ist die client-lokale Stichproben-Prüfung (Standard 10 % der Sync-Zyklen): vergleicht die Delta-Antwort des Primärservers gegen einen Zweitserver für dieselbe `since`-Anfrage und verbucht eine gefundene Zurückhaltung als rein clientlokalen Reputations-Malus — in `SyncEngine` verankert, kein zusätzlicher Aufruf nötig.
 
-`core/src/platform/ws.rs` (`WsConnection`/`WsTransport`) + `core/src/sync/realtime.rs`s `run()` treiben `GET /v1/ws` (Auth-Handshake, Tile-Subscriptions, Event-Dispatch über denselben `SyncEngine::apply_event`, den auch Delta-Pull nutzt) — vollständig getestet gegen eine simulierte Verbindung. **Ohne mitgelieferte Standardimplementierung**: anders als bei HTTP (`ReqwestHttpTransport`) ist ein echter WebSocket-Client eine Plattformentscheidung (`tokio-tungstenite` nativ, Browser-`WebSocket` auf `wasm32`), die sich ohne echte Toolchain nicht verifizieren lässt — bewusst offen gelassen statt hier blind geraten.
+`core/src/platform/ws.rs` (`WsConnection`/`WsTransport`) + `core/src/sync/realtime.rs`s `run()` treiben `GET /v1/ws` (Auth-Handshake, Tile-Subscriptions, Event-Dispatch über denselben `SyncEngine::apply_event`, den auch Delta-Pull nutzt) — vollständig getestet gegen eine simulierte Verbindung. Die echten Clients sind Plattformentscheidungen der Seam: `tokio-tungstenite` nativ (siehe „Echter WebSocket-Transport“), der `WebSocket` des Browsers auf `wasm32`. Gegen einen *echten* Server getestet ist der Push durch einen Mehrknoten-Test (`multi_node.rs`) — der Mock allein hatte einen Fehler in der Adresse (`http://` statt `ws://`) nicht gezeigt.
 
 ## Falsche Tempolimits melden und korrigieren
 

@@ -29,6 +29,8 @@ Erster stabiler Release der Client-Bibliothek: **ein Rust-Kern, dünne Anbindung
 - `libc` 0.2.190 bricht `backtrace` (Abhängigkeit von `flutter_rust_bridge`) auf iOS; gehalten unter 0.2.190, mit Begründung im Manifest.
 - `initialize()` des Dart-Pakets war nicht idempotent (vom Emulator-Lauf gefunden).
 - Ergebnis-Umschlag, `call_json` und `open_native` liegen einmal im Kern statt je Anbindung.
+- **Echtzeit-Push erreichte einen echten Server nie** (vom Ende-zu-Ende-Lauf gegen den Docker-Server gefunden, in keinem Mock-Test sichtbar): die Bibliothek öffnete `http://…/v1/ws` statt `ws://`/`wss://` und ging in den Backoff. Behoben im Kern (alle Anbindungen), abgesichert durch URL-Tests und einen Mehrknoten-Test, der eine Meldung *während der Verbindung* über den echten WebSocket eines echten Servers ankommen lässt.
+- **Erster Zugang im Docker-Stack fehlte in der Anleitung:** `server/scripts/` liegt nicht im Image. `server/docs/installation.md` beschreibt jetzt den Weg („Create the first client“), die Integrationsanleitungen verweisen darauf. Außerdem: die „Verbinden“-Seite der Weboberfläche versprach noch Codebeispiele „sobald die Bindings fertig sind“ — Text korrigiert (nur Text in `server/web`, keine Serverlogik).
 
 **Bekannt offen, kein Grund gegen dieses 1.0 (siehe [`docs/todo.md`](docs/todo.md)):**
 - *Ausgeführt* wird nur die Flutter-App auf einem Android-Emulator; Kotlin/Android, Swift/iOS und React Native werden gebaut und gelinkt (Konformität: JVM/macOS), aber nicht auf Gerät, Emulator oder iOS-Simulator ausgeführt; das erzeugte React-Native-JSI-Zwischenstück läuft in keinem Test. Flutter auf iOS: gebaut, nicht ausgeführt.
