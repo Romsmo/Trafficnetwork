@@ -153,16 +153,18 @@ class TrafficNetworkClient {
 
   Future<Map<String, Object?>> version() => _object('version');
 
-  Future<Map<String, Object?>> getSpeedLimitAt(
+  /// The speed limit at a position, answered from the local copy; `null` when
+  /// nothing is known there.
+  Future<Map<String, Object?>?> getSpeedLimitAt(
     double lat,
     double lng, {
     double? heading,
-  }) =>
-      _object('getSpeedLimitAt', {
+  }) async =>
+      (await call('getSpeedLimitAt', {
         'lat': lat,
         'lng': lng,
         if (heading != null) 'heading': heading,
-      });
+      })) as Map<String, Object?>?;
 
   Future<List<Object?>> getNearby(
     double lat,
