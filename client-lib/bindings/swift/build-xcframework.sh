@@ -50,11 +50,10 @@ source_lib="target/aarch64-apple-darwin/release/$lib"
   --headers --modulemap \
   --module-name TrafficNetworkFFI --modulemap-filename module.modulemap \
   --link-frameworks Security --link-frameworks SystemConfiguration \
-  --link-frameworks CoreFoundation \
-  --config "$here/uniffi.toml"
+  --link-frameworks CoreFoundation
 rm -f "$here"/Sources/TrafficNetwork/*.swift
 "${bindgen[@]}" "$source_lib" "$here/Sources/TrafficNetwork" \
-  --swift-sources --config "$here/uniffi.toml"
+  --swift-sources
 
 xcodebuild -create-xcframework \
   -library "$out/ios/$lib" -headers "$out/headers" \

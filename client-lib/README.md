@@ -12,7 +12,7 @@ Zielplattformen: Android (Kotlin), iOS/macOS (Swift), Flutter (Dart), React Nati
 
 ## Toolchain
 
-Rust-Kern (`core/`) + dünne Bindings pro Plattform (`bindings/`): UniFFI 0.32 (Kotlin und Swift aus einem Crate, `bindings/uniffi`), flutter_rust_bridge 2.13 (Dart/Flutter, `bindings/dart`), uniffi-bindgen-react-native (React Native, noch offen), cbindgen + reines `ctypes` (Python) + `koffi` (Node.js, FFI über dasselbe C-ABI — kein eigenes `napi-rs`-Crate), wasm-bindgen (Web). Speicher: `rusqlite` (SQLite mit R\*Tree, nativ), im Browser ein `InMemoryStore` mit IndexedDB-Spiegel (`rexie`) — siehe "WebAssembly und Node.js". Kein SpatiaLite. Tiling: `h3o` (reines Rust, gleiche H3-Resolution-7-Semantik wie der Server). Kryptografie: `ed25519-dalek` + `serde_json_canonicalizer` (RFC 8785) — siehe "Kryptografie" unten.
+Rust-Kern (`core/`) + dünne Bindings pro Plattform (`bindings/`): UniFFI 0.31 (Kotlin, Swift und React Native aus einem Crate, `bindings/uniffi`), flutter_rust_bridge 2.13 (Dart/Flutter, `bindings/dart`), uniffi-bindgen-react-native (React Native, noch offen), cbindgen + reines `ctypes` (Python) + `koffi` (Node.js, FFI über dasselbe C-ABI — kein eigenes `napi-rs`-Crate), wasm-bindgen (Web). Speicher: `rusqlite` (SQLite mit R\*Tree, nativ), im Browser ein `InMemoryStore` mit IndexedDB-Spiegel (`rexie`) — siehe "WebAssembly und Node.js". Kein SpatiaLite. Tiling: `h3o` (reines Rust, gleiche H3-Resolution-7-Semantik wie der Server). Kryptografie: `ed25519-dalek` + `serde_json_canonicalizer` (RFC 8785) — siehe "Kryptografie" unten.
 
 ## Kryptografie
 
