@@ -42,10 +42,12 @@ lipo -create \
   -output "$out/macos/$lib"
 
 # The generator reads the UniFFI description out of any one of the libraries.
+# (Not its `--xcframework` flag: that writes the module map of a *framework*
+# XCFramework, and this one holds static libraries.)
 bindgen=(cargo run --quiet --release -p trafficnetwork-uniffi-bindgen --bin uniffi-bindgen-swift --)
 source_lib="target/aarch64-apple-darwin/release/$lib"
 "${bindgen[@]}" "$source_lib" "$out/headers" \
-  --headers --modulemap --xcframework \
+  --headers --modulemap \
   --module-name TrafficNetworkFFI --modulemap-filename module.modulemap \
   --link-frameworks Security --link-frameworks SystemConfiguration \
   --link-frameworks CoreFoundation \
