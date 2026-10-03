@@ -1,26 +1,31 @@
 //! `Store`: the local-persistence seam (F-C0 plan §2's `storage/` module) —
 //! every entity read/write, per-server sync cursor, static-data partition
 //! hash, and offline write-buffer item goes through this trait rather than a
-//! concrete database, so each platform binding (F-C4) can supply the storage
-//! backend that actually fits it (SQLite via `rusqlite` natively,
-//! `sqlite-wasm-rs`/IndexedDB in the browser, ...) without `sync`/`matching`/
-//! `writebuffer` depending on any one of them — the same pattern already
-//! used for `platform::{Clock, HttpTransport}`.
+//! concrete database, so each platform binding can supply the storage
+//! backend that actually fits it, without `sync`/`matching`/`writebuffer`
+//! depending on any one of them — the same pattern already used for
+//! `platform::{Clock, HttpTransport}`.
 //!
 //! [`SqliteStore`] (native targets) is the persistent implementation: SQLite
 //! through `rusqlite`, with an R*Tree over the segments' bounding boxes so a
 //! position lookup touches a handful of rows instead of the whole dataset.
-//! [`InMemoryStore`] is the reference implementation the engine tests run
-//! against. Browser targets (`sqlite-wasm-rs`/IndexedDB) bring their own
-//! `Store` with F-C4's WASM binding. Both implementations here are held to
-//! the same behaviour by one shared contract test.
+//! [`IndexedDbStore`] (`wasm32`, add-on B3) wraps [`InMemoryStore`] with a
+//! background IndexedDB mirror instead — see its own module doc for why
+//! (real OPFS needs a dedicated Worker; IndexedDB is the user-approved
+//! "gleichwertig" alternative). [`InMemoryStore`] is also the reference
+//! implementation the engine tests run against. All three are held to the
+//! same behaviour by one shared contract test.
 
 #[cfg(test)]
 mod contract;
+#[cfg(target_arch = "wasm32")]
+mod indexed_db;
 mod memory;
 #[cfg(not(target_arch = "wasm32"))]
 mod sqlite;
 
+#[cfg(target_arch = "wasm32")]
+pub use indexed_db::IndexedDbStore;
 pub use memory::InMemoryStore;
 #[cfg(not(target_arch = "wasm32"))]
 pub use sqlite::SqliteStore;
@@ -91,7 +96,7 @@ pub(crate) fn boxes_intersect(a: (f64, f64, f64, f64), b: (f64, f64, f64, f64)) 
     a.0 <= b.1 && a.1 >= b.0 && a.2 <= b.3 && a.3 >= b.2
 }
 
-#[derive(Debug, Clone, Default, PartialEq)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct StoredEntities {
     pub speed_limit_segments: Vec<SpeedLimitSegment>,
     pub static_signs: Vec<StaticSign>,

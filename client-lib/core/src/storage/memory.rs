@@ -7,19 +7,22 @@
 use std::collections::HashMap;
 use std::sync::Mutex;
 
+use serde::{Deserialize, Serialize};
+
 use super::{
     boxes_intersect, query_box, segment_bbox, LocalCorrectionProposal, PendingWrite,
     StorageFullError, Store, StoreError, StoredEntities,
 };
 use crate::sync::types::{HazardReport, SpeedLimitSegment, StaticSign};
 
-#[derive(Default)]
+#[derive(Default, Serialize, Deserialize)]
 struct Inner {
     cursors: HashMap<String, u64>,
     partition_hashes: HashMap<String, String>,
     entities: StoredEntities,
     pending_writes: Vec<PendingWrite>,
     local_proposals: Vec<LocalCorrectionProposal>,
+    #[serde(skip)]
     static_entity_limit: Option<usize>,
     static_partition_resolution: Option<u8>,
 }
@@ -32,6 +35,32 @@ pub struct InMemoryStore {
 impl InMemoryStore {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// A JSON snapshot of everything this store holds — for a host binding
+    /// that persists an `InMemoryStore`'s contents itself rather than
+    /// re-implementing entity storage (`storage::IndexedDbStore`, add-on B3):
+    /// mirror this after every write, restore it once at startup.
+    /// `static_entity_limit` is deliberately not part of the snapshot — it's
+    /// a test-only knob (see [`Self::with_static_entity_limit`]), never a
+    /// real host app's persisted setting.
+    pub fn to_snapshot(&self) -> Result<String, StoreError> {
+        serde_json::to_string(&*self.inner.lock().unwrap()).map_err(|e| Box::new(e) as StoreError)
+    }
+
+    /// Rebuilds a store from [`Self::to_snapshot`]'s output. An empty or
+    /// unparseable string is treated as "nothing saved yet" (a fresh store),
+    /// not an error — the caller (a host binding opening its persisted
+    /// database for the first time) shouldn't have to special-case that.
+    pub fn from_snapshot(json: &str) -> Self {
+        let inner = if json.trim().is_empty() {
+            Inner::default()
+        } else {
+            serde_json::from_str(json).unwrap_or_default()
+        };
+        Self {
+            inner: Mutex::new(inner),
+        }
     }
 
     /// A store that refuses static data beyond `limit` entities with a
@@ -403,6 +432,59 @@ mod tests {
     #[test]
     fn behaves_like_every_other_store() {
         crate::storage::contract::run(&|| Box::new(InMemoryStore::new()));
+    }
+
+    #[test]
+    fn a_snapshot_round_trips_everything_a_binding_would_persist() {
+        let store = InMemoryStore::new();
+        store.set_cursor("node1", 42).unwrap();
+        store.set_partition_hash("tileA", "hash1").unwrap();
+        store
+            .upsert_hazard_reports(&[sample_report("hr1")])
+            .unwrap();
+        store
+            .upsert_static_data(&crate::storage::contract::sample_static_data())
+            .unwrap();
+        store
+            .enqueue_write(&PendingWrite {
+                id: "w1".to_string(),
+                request_body: serde_json::json!({ "type": "ice" }),
+                created_at_unix_ms: 1000,
+                attempts: 0,
+                kind: WriteKind::HazardReport,
+            })
+            .unwrap();
+        store.upsert_local_proposal(&proposal("keyA", 30)).unwrap();
+        store.set_static_partition_resolution(4).unwrap();
+
+        let restored = InMemoryStore::from_snapshot(&store.to_snapshot().unwrap());
+
+        assert_eq!(restored.get_cursor("node1").unwrap(), Some(42));
+        assert_eq!(
+            restored.get_partition_hash("tileA").unwrap(),
+            Some("hash1".to_string())
+        );
+        assert_eq!(
+            restored.all_entities().unwrap(),
+            store.all_entities().unwrap()
+        );
+        assert_eq!(restored.pending_writes().unwrap().len(), 1);
+        assert_eq!(restored.local_proposals().unwrap().len(), 1);
+        assert_eq!(restored.static_partition_resolution().unwrap(), Some(4));
+    }
+
+    #[test]
+    fn from_snapshot_treats_empty_or_garbage_as_a_fresh_store_not_an_error() {
+        assert_eq!(
+            InMemoryStore::from_snapshot("").all_entities().unwrap(),
+            StoredEntities::default()
+        );
+        assert_eq!(
+            InMemoryStore::from_snapshot("not json")
+                .all_entities()
+                .unwrap(),
+            StoredEntities::default()
+        );
     }
 
     #[test]

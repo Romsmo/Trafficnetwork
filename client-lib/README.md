@@ -4,7 +4,7 @@ Client-Sync-Bibliothek: einbettbarer, maximal portabler Adapter für beliebige A
 
 Zielplattformen: Android (Kotlin), iOS/macOS (Swift), Flutter (Dart), React Native, Desktop/Server über C-ABI (inkl. Python, Node.js), Web-Browser (WASM).
 
-**Status**: der plattformunabhängige Kern (Kryptografie, Discovery/Failover, Sync-Engine mit echtem WebSocket-Push, Offline-Schreibpuffer, lokales Map-Matching, Tempolimit-Korrekturen, Online-Anzeige) ist fertig und gegen ein echtes Mehrknoten-Testnetz verifiziert. Von den Anbindungen gibt es bisher ein C-ABI und ein Python-Binding; WASM/JS-TS, Kotlin, Swift, Dart, React Native und die Paketierung für Mobile-Plattformen fehlen noch — siehe "Was fehlt noch" unten. Details zum Gesamtplan siehe [`docs/concept.md`](../docs/concept.md) (Abschnitt 6/13), [`docs/federation.md`](../docs/federation.md) und [`docs/todo.md`](../docs/todo.md). Laufender Koordinationsstatus (solange noch aktiv daran gearbeitet wird): [`docs/status.md`](../docs/status.md).
+**Status**: der plattformunabhängige Kern (Kryptografie, Discovery/Failover, Sync-Engine mit echtem WebSocket-Push, Offline-Schreibpuffer, lokales Map-Matching, Tempolimit-Korrekturen, Online-Anzeige) ist fertig und gegen ein echtes Mehrknoten-Testnetz verifiziert. Von den Anbindungen gibt es bisher das C-ABI mit Python- und Node.js-Binding sowie WebAssembly für den Browser (mit TypeScript-Typen, Speicher in IndexedDB) — alle drei laufen gegen denselben Szenariensatz; Kotlin, Swift, Dart, React Native und die Paketierung für Mobile-Plattformen fehlen noch — siehe "Was noch fehlt" unten. Details zum Gesamtplan siehe [`docs/concept.md`](../docs/concept.md) (Abschnitt 6/13), [`docs/federation.md`](../docs/federation.md) und [`docs/todo.md`](../docs/todo.md). Laufender Koordinationsstatus (solange noch aktiv daran gearbeitet wird): [`docs/status.md`](../docs/status.md).
 
 ## Warum Basis und Föderation zusammen
 
@@ -12,7 +12,7 @@ Zielplattformen: Android (Kotlin), iOS/macOS (Swift), Flutter (Dart), React Nati
 
 ## Toolchain
 
-Rust-Kern (`core/`) + dünne Bindings pro Plattform (`bindings/`): UniFFI (Android/iOS), flutter_rust_bridge (Flutter), uniffi-bindgen-react-native (React Native), cbindgen + PyO3 + napi-rs (C-ABI/Python/Node.js), wasm-bindgen (Web). Speicher: `rusqlite`/`sqlite-wasm-rs` (SQLite, kein SpatiaLite). Tiling: `h3o` (reines Rust, gleiche H3-Resolution-7-Semantik wie der Server). Kryptografie: `ed25519-dalek` + `serde_json_canonicalizer` (RFC 8785) — siehe "Kryptografie" unten.
+Rust-Kern (`core/`) + dünne Bindings pro Plattform (`bindings/`): UniFFI (Android/iOS), flutter_rust_bridge (Flutter), uniffi-bindgen-react-native (React Native), cbindgen + reines `ctypes` (Python) + `koffi` (Node.js, FFI über dasselbe C-ABI — kein eigenes `napi-rs`-Crate), wasm-bindgen (Web). Speicher: `rusqlite` (SQLite mit R\*Tree, nativ), im Browser ein `InMemoryStore` mit IndexedDB-Spiegel (`rexie`) — siehe "WebAssembly und Node.js". Kein SpatiaLite. Tiling: `h3o` (reines Rust, gleiche H3-Resolution-7-Semantik wie der Server). Kryptografie: `ed25519-dalek` + `serde_json_canonicalizer` (RFC 8785) — siehe "Kryptografie" unten.
 
 ## Kryptografie
 
@@ -89,7 +89,18 @@ Vorbereitung und Messung für den Europa-Grundstock ("alles auf jedem Gerät"). 
 - **`sync()`** trennt den statischen vom dynamischen Teil (ein unterbrochener Grundstock-Download blockiert nie frische Meldungen) und lässt einen ausgefallenen Pool-Server die anderen nicht aufhalten; scheitert nur bei fehlenden Zugangsdaten, keinem erreichbaren Server oder vollem Speicher (`storageFull`) — jeder Teilfehler steht im zurückgegebenen `SyncReport`, wird nicht geworfen.
 - **Gefundene und behobene Lücken beim Aufbau der Fassade:** ein Verzeichnis nennt nur die *anderen* Knoten, nie sich selbst — ein Kaltstart mit nur einem Seed landete deshalb mit leerem Pool; jetzt trägt sich der antwortende Server selbst ein. Und: geriet der (einzige) Server in Backoff, blieb der Pool leer und nichts wurde je wieder versucht — jetzt wird bei leerem Pool der Server mit der nächsten Erholungszeit trotzdem versucht.
 - **Erstes Binding:** `bindings/python/` (reines `ctypes`, keine Abhängigkeiten). **Konformität:** `client-lib/conformance/` — ein Satz Szenarien (`scenarios.json`) gegen einen geskripteten Server (`mock-server.mjs`, echtes Ed25519/RFC 8785, unabhängig vom echten Server-Code), aktuell mit einem Python-Runner, CI-Job `conformance-python`.
-- **Bewusst noch offen** (siehe "Was noch fehlt" oben): WASM/Browser-Speicher, Node/Dart/Kotlin/Swift-Wrapper samt eigener Konformitätsläufe, React-Native-Modul, Android-AAR/iOS-XCFramework-Paketierung.
+- **Bewusst noch offen** (siehe "Was noch fehlt" unten): Dart/Kotlin/Swift-Wrapper samt eigener Konformitätsläufe, React-Native-Modul, Android-AAR/iOS-XCFramework-Paketierung. (WASM/Browser-Speicher und Node.js sind seit der nächsten Sektion erledigt.)
+
+## WebAssembly und Node.js
+
+Zwei weitere Anbindungen auf demselben `call(methode, argumenteJson)`-Kern, mit **einer** gemeinsamen, handgeschriebenen TypeScript-Fläche (`bindings/shared/`: `BaseClient`, `TrafficNetworkError`, `index.d.ts`) — Code gegen den einen läuft gegen den anderen.
+
+- **`bindings/wasm/`** (`trafficnetwork-wasm`, `wasm-bindgen`, Paket `bindings/wasm/js/`): `Client.create(options, { secureStore?, wasm? })`, dann dieselben Methoden wie überall. HTTP über `fetch()` (reqwest wechselt auf `wasm32` selbst), Push über `web_sys::WebSocket` (`platform::WasmWsTransport`), Warten über `gloo-timers`, Uhr über `Date.now()`.
+- **Speicher im Browser — `IndexedDbStore`** (`core/src/storage/indexed_db.rs`): umschließt den `InMemoryStore`; Lesen kommt synchron aus dem Speicher, jede Änderung geht sofort dorthin und wird entprellt (250 ms) als ein Gesamt-Schnappschuss nach IndexedDB gespiegelt. Gewählt statt OPFS: OPFS' synchroner Zugriff gibt es nur in einem dedizierten Worker, das hätte jeder Seite, die die Bibliothek nutzt, eine Worker-und-Nachrichten-Brücke aufgezwungen (**Entscheidung des Auftraggebers: IndexedDB zählt als „gleichwertig"**). **Die Grenzen stehen offen in [`docs/integration-web.md`](docs/integration-web.md)**: Persistenz hinkt dem Speicher bis zu 250 ms hinterher; der ganze Speicher liegt im RAM und in einem Datensatz (Regionen ja, ganze Länder nein — dafür `SqliteStore`); ein Tab je Datenbank; Geheimnisse standardmäßig in `localStorage`; keine Hintergrundsynchronisation; CORS- und Mixed-Content-Regeln; keine R\*Tree.
+- **`bindings/node/`** (`@trafficnetwork/client-node`, `koffi` über das C-ABI): kompilieren muss nur, wer die Bibliothek *baut*; Aufrufe laufen auf einem Worker-Thread, der Event-Loop bleibt frei. Ein echter Fehler unterwegs: koffis Standard-Stacks (2 MiB/128 KiB) sind für einen echten Sync viel zu klein — ein SIGSEGV in CI; `index.js` setzt sie vor jeder Deklaration hoch (`docs/integration-node.md`).
+- **Konformität:** derselbe Szenariensatz (`conformance/scenarios.json`, 9 Szenarien) läuft jetzt über **drei** Anbindungen mit gleichem Ergebnis — Python (C-ABI), Node.js (C-ABI) und WebAssembly in einem echten Headless-Chrome (CI-Jobs `conformance-python`/`conformance-node`/`conformance-web`). Die Minimalbeispiele aus beiden Integrationsanleitungen werden in CI tatsächlich ausgeführt (Node: `example.mjs`; Browser: die Beispielseite in Chrome). Keine Abweichung zwischen den Anbindungen gefunden; die plattformbedingten Unterschiede (Speicher, Geheimnisse, Hintergrund) sind in den Anleitungen aufgeführt, nicht in den Szenarien versteckt. Aufbau und Szenarienformat: [`conformance/README.md`](conformance/README.md).
+- **CI:** `wasm-build` (Kern + Anbindung für `wasm32-unknown-unknown`), `wasm-test` (die `IndexedDbStore`-Tests laufen in Headless-Chrome gegen ein echtes IndexedDB), `conformance-node`, `conformance-web`, `typescript-types` (beide `.d.ts` werden mit einer typisierten Beispielnutzung kompiliert, inklusive eines absichtlich falschen Aufrufs, der abgelehnt werden muss).
+- **Dafür ändert sich im Kern nur wenig:** `Store`-Trait und Fassade blieben unverändert; neu sind `InMemoryStore::to_snapshot`/`from_snapshot`, die `wasm32`-Implementierungen der Seams (`Clock`, `Sleep`, `WsTransport`), `LocalStorageSecureStore` und `Platform::wasm(db_name)`. Auf `wasm32` sind die Traits `?Send` (ein Thread), die native Seite ist unverändert.
 
 ## Echter WebSocket-Transport
 
@@ -120,15 +131,16 @@ Rust ist auf der Entwicklungsmaschine dieser Session nicht installiert — Verif
 - Kompletter plattformunabhängiger Kern: Kryptografie (Ed25519, RFC-8785-kanonisches JSON, cross-language gegen den Server verifiziert), Server-Discovery mit Mehrserver-Failover, Sync-Engine (Snapshot-Bootstrap, Delta-Pull mit pro-Server-Cursor, inhaltsadressierte Statikdaten-Pakete), echter WebSocket-Push mit Wiederverbindung und Lückenschluss, Offline-Schreibpuffer, lokales Map-Matching, lokale Verfallsberechnung, client-lokale Stichproben-Prüfung gegen zurückgehaltene Daten.
 - Zusatzfunktionen: Community-Tempolimit-Korrekturen (vorschlagen/bestätigen/widersprechen), "aktuell online"-Anzeige, ein `SqliteStore` für echte Datenmengen (nativ).
 - Gegen ein echtes Mehrknoten-Testnetz verifiziert (Kaltstart, Serverausfall mitten im Sync, Duplikate über zwei Server, bösartige Antworten).
-- Eine öffentliche API-Fassade (`core/src/api/`) über ein C-ABI, mit einem ersten Binding: Python (`bindings/python/`, reines `ctypes`).
+- Eine öffentliche API-Fassade (`core/src/api/`) über ein C-ABI, mit Bindings für Python (`bindings/python/`, reines `ctypes`) und Node.js (`bindings/node/`, `koffi`), dazu WebAssembly für den Browser (`bindings/wasm/`, Speicher in IndexedDB, mit ehrlich dokumentierten Grenzen) — gemeinsame TypeScript-Typen.
+- Ein gemeinsamer Konformitäts-Szenariensatz, der über Python, Node.js und WebAssembly (Headless-Chrome) mit gleichem Ergebnis läuft; die Minimalbeispiele der Integrationsanleitungen für Web und Node werden in CI ausgeführt.
 
 ## Was noch fehlt
 
 Weitere dünne Anbindungen auf demselben Kern, nach Schwierigkeitsgrad:
 
-- WASM + JS/TS (Browser)
 - Kotlin (Android), Swift (iOS/macOS), Dart (Flutter)
-- React Native, Paketierung je Zielplattform (Android-AAR, iOS-XCFramework, npm, …)
-- Konformitätstests über mehrere Bindings hinweg (derselbe Szenariensatz, gleiches Verhalten überall)
+- React Native, Paketierung je Zielplattform (Android-AAR, iOS-XCFramework, npm, Dart-Package)
+- Konformitätslauf über eine Mobile-Anbindung (derselbe Szenariensatz — über C-ABI und WASM steht er bereits)
+- C-ABI-Builds für Windows und macOS in CI (Linux läuft)
 
 Bis diese stehen, bleibt die Bibliothek bei einer `0.x`-Version. Details/aktueller Zwischenstand: [`docs/status.md`](../docs/status.md), solange die Arbeit daran läuft.

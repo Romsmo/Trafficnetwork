@@ -1,0 +1,13 @@
+{
+  "name": "trafficnetwork-types-test",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Compiles a typed usage of both JS bindings against their .d.ts files — what proves the hand-written types are consistent and usable",
+  "type": "module",
+  "scripts": {
+    "check": "tsc -p tsconfig.json"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.3"
+  }
+}

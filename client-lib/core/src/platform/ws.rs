@@ -31,7 +31,13 @@ impl std::error::Error for WsError {}
 /// WebSocket is an inherently sequential, exclusively-owned stream, unlike
 /// `HttpTransport`'s independent request/response calls, so there's no
 /// need for `HttpTransport`'s `Sync` bound here.
-#[async_trait::async_trait]
+///
+/// `?Send` on wasm32: see `platform::http`'s identical comment on
+/// `HttpTransport` — the wasm32 implementation bridges browser callbacks
+/// through a channel whose future can't satisfy async-trait's default
+/// Send-required expansion; native keeps the normal Send-required expansion.
+#[cfg_attr(target_arch = "wasm32", async_trait::async_trait(?Send))]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait::async_trait)]
 pub trait WsConnection: Send {
     async fn send_text(&mut self, text: String) -> Result<(), WsError>;
 
@@ -41,7 +47,8 @@ pub trait WsConnection: Send {
     async fn recv_text(&mut self) -> Result<Option<String>, WsError>;
 }
 
-#[async_trait::async_trait]
+#[cfg_attr(target_arch = "wasm32", async_trait::async_trait(?Send))]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait::async_trait)]
 pub trait WsTransport: Send + Sync {
     async fn connect(&self, url: &str) -> Result<Box<dyn WsConnection>, WsError>;
 }
@@ -168,3 +175,149 @@ mod native {
 
 #[cfg(not(target_arch = "wasm32"))]
 pub use native::TokioTungsteniteWsTransport;
+
+#[cfg(target_arch = "wasm32")]
+mod wasm {
+    use std::cell::RefCell;
+    use std::rc::Rc;
+
+    use futures_channel::{mpsc, oneshot};
+    use futures_util::StreamExt;
+    use wasm_bindgen::closure::Closure;
+    use wasm_bindgen::{JsCast, JsValue};
+    use web_sys::{CloseEvent, ErrorEvent, MessageEvent, WebSocket};
+
+    use super::{WsConnection, WsError, WsTransport};
+
+    fn js_error_string(value: &JsValue) -> String {
+        value.as_string().unwrap_or_else(|| format!("{value:?}"))
+    }
+
+    /// The wasm32 default (add-on B3), backed by the browser's own
+    /// `WebSocket`. Its events are callback-based (`onopen`/`onmessage`/
+    /// `onerror`/`onclose`); bridged here into a channel so `recv_text` can
+    /// simply `.await` the next one, giving `WsConnection`'s `&mut self`
+    /// sequential-read contract the same shape as the native
+    /// tungstenite-backed implementation.
+    pub struct WasmWsTransport;
+
+    #[async_trait::async_trait(?Send)]
+    impl WsTransport for WasmWsTransport {
+        async fn connect(&self, url: &str) -> Result<Box<dyn WsConnection>, WsError> {
+            let socket = WebSocket::new(url).map_err(|e| WsError::Connect(js_error_string(&e)))?;
+
+            // Resolved exactly once, by whichever of onopen/onerror fires
+            // first — `connect` itself only cares about that first outcome.
+            let (open_tx, open_rx) = oneshot::channel::<Result<(), WsError>>();
+            let open_tx = Rc::new(RefCell::new(Some(open_tx)));
+            let (message_tx, message_rx) = mpsc::unbounded::<Result<Option<String>, WsError>>();
+
+            let open_tx_for_open = open_tx.clone();
+            let onopen = Closure::<dyn FnMut()>::new(move || {
+                if let Some(tx) = open_tx_for_open.borrow_mut().take() {
+                    let _ = tx.send(Ok(()));
+                }
+            });
+            socket.set_onopen(Some(onopen.as_ref().unchecked_ref()));
+
+            // Before the connection opens, this fails `connect`; afterwards,
+            // it feeds `message_rx` an error the next `recv_text` surfaces —
+            // mirroring the native transport's own `WsError::Send` on a
+            // stream error.
+            let open_tx_for_error = open_tx.clone();
+            let message_tx_for_error = message_tx.clone();
+            let onerror = Closure::<dyn FnMut(ErrorEvent)>::new(move |event: ErrorEvent| {
+                let message = event.message();
+                let message = if message.is_empty() {
+                    "websocket error".to_string()
+                } else {
+                    message
+                };
+                if let Some(tx) = open_tx_for_error.borrow_mut().take() {
+                    let _ = tx.send(Err(WsError::Connect(message.clone())));
+                }
+                let _ = message_tx_for_error.unbounded_send(Err(WsError::Send(message)));
+            });
+            socket.set_onerror(Some(onerror.as_ref().unchecked_ref()));
+
+            let message_tx_for_message = message_tx.clone();
+            let onmessage = Closure::<dyn FnMut(MessageEvent)>::new(move |event: MessageEvent| {
+                // The protocol (server/docs/api.md's "Real-time push") is
+                // text-only; anything else (a binary frame) is silently
+                // ignored, matching the native transport's own handling of a
+                // non-conforming frame.
+                if let Some(text) = event.data().as_string() {
+                    let _ = message_tx_for_message.unbounded_send(Ok(Some(text)));
+                }
+            });
+            socket.set_onmessage(Some(onmessage.as_ref().unchecked_ref()));
+
+            let onclose = Closure::<dyn FnMut(CloseEvent)>::new(move |_event: CloseEvent| {
+                let _ = message_tx.unbounded_send(Ok(None));
+            });
+            socket.set_onclose(Some(onclose.as_ref().unchecked_ref()));
+
+            match open_rx.await {
+                Ok(Ok(())) => Ok(Box::new(WasmWsConnection {
+                    socket,
+                    receiver: message_rx,
+                    _onopen: onopen,
+                    _onerror: onerror,
+                    _onmessage: onmessage,
+                    _onclose: onclose,
+                })),
+                Ok(Err(error)) => Err(error),
+                // The sender was dropped without ever sending — the socket
+                // object itself (and therefore every closure above) went
+                // away before either onopen or onerror fired.
+                Err(_) => Err(WsError::Connect(
+                    "the connection was dropped before it opened".to_string(),
+                )),
+            }
+        }
+    }
+
+    struct WasmWsConnection {
+        socket: WebSocket,
+        receiver: mpsc::UnboundedReceiver<Result<Option<String>, WsError>>,
+        // Kept alive for the connection's lifetime: dropping a `Closure`
+        // invalidates the JS function it backs, and these stay registered
+        // as the socket's event handlers for as long as it's open.
+        _onopen: Closure<dyn FnMut()>,
+        _onerror: Closure<dyn FnMut(ErrorEvent)>,
+        _onmessage: Closure<dyn FnMut(MessageEvent)>,
+        _onclose: Closure<dyn FnMut(CloseEvent)>,
+    }
+
+    #[async_trait::async_trait(?Send)]
+    impl WsConnection for WasmWsConnection {
+        async fn send_text(&mut self, text: String) -> Result<(), WsError> {
+            self.socket
+                .send_with_str(&text)
+                .map_err(|e| WsError::Send(js_error_string(&e)))
+        }
+
+        async fn recv_text(&mut self) -> Result<Option<String>, WsError> {
+            match self.receiver.next().await {
+                Some(outcome) => outcome,
+                // The sender (owned by this same struct's closures) can only
+                // disappear if this connection itself is being dropped —
+                // there is no one left to ask, so this is a clean close.
+                None => Ok(None),
+            }
+        }
+    }
+
+    // Safety: wasm32 without the `atomics` target feature (which this crate
+    // does not enable) is single-threaded — there is never a second thread
+    // this could be sent to or accessed from concurrently. `WsConnection:
+    // Send` is a supertrait shared with the native, genuinely multi-threaded
+    // implementation; `WebSocket`/`Closure`/the channel's `JsValue`-adjacent
+    // internals are conservatively `!Send` regardless — same justification
+    // already used for `bindings/c-abi`'s `CallbackSecureStore` and
+    // `storage::IndexedDbStore`.
+    unsafe impl Send for WasmWsConnection {}
+}
+
+#[cfg(target_arch = "wasm32")]
+pub use wasm::WasmWsTransport;

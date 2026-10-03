@@ -102,6 +102,36 @@ impl Platform {
     }
 }
 
+#[cfg(target_arch = "wasm32")]
+impl Platform {
+    /// The `wasm32` defaults (add-on B3): `storage::IndexedDbStore` (opening
+    /// it is the one part of this that has to be async — see its own module
+    /// doc), `api::LocalStorageSecureStore`, `reqwest` (delegates to the
+    /// browser's own `fetch()`), `platform::WasmClock` (`Date.now()`),
+    /// `platform::WasmWsTransport` (the browser's own `WebSocket`) and
+    /// `platform::WasmSleeper` (`Window.setTimeout`).
+    ///
+    /// `db_name` becomes the IndexedDB database name — a host page running
+    /// more than one client (e.g. two accounts) needs a distinct name per
+    /// client, the same role `directory` plays for [`Self::native`].
+    pub async fn wasm(db_name: &str) -> Result<Self, ApiError> {
+        let store = crate::storage::IndexedDbStore::open(db_name)
+            .await
+            .map_err(|e| ApiError::new(code::STORAGE, e.to_string()))?;
+        Ok(Self {
+            store: Arc::new(store),
+            secure_store: Arc::new(super::secure_store::LocalStorageSecureStore::new()),
+            http: Arc::new(
+                crate::platform::ReqwestHttpTransport::new()
+                    .map_err(|e| ApiError::new(code::NETWORK, e.to_string()))?,
+            ),
+            clock: Arc::new(crate::platform::WasmClock),
+            ws: Arc::new(crate::platform::WasmWsTransport),
+            sleep: Arc::new(crate::platform::WasmSleeper),
+        })
+    }
+}
+
 struct CachedToken {
     access_token: String,
     expires_at_ms: i64,

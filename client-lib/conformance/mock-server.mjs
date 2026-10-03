@@ -129,9 +129,24 @@ function createInstance(config) {
   return instance;
 }
 
+// CORS: a browser binding (WebAssembly, `bindings/wasm`) calls this server
+// with `fetch()` from a page served from another origin, so it needs
+// preflight answers and an allow-origin header on every response. Harmless
+// to the native bindings, which ignore both.
+const CORS = {
+  "access-control-allow-origin": "*",
+  "access-control-allow-methods": "GET, POST, OPTIONS",
+  "access-control-allow-headers": "authorization, content-type",
+  "access-control-max-age": "600",
+};
+
 function json(res, status, body) {
   const text = typeof body === "string" ? body : JSON.stringify(body);
-  res.writeHead(status, { "content-type": "application/json", "content-length": Buffer.byteLength(text) });
+  res.writeHead(status, {
+    ...CORS,
+    "content-type": "application/json",
+    "content-length": Buffer.byteLength(text),
+  });
   res.end(text);
 }
 
@@ -333,6 +348,10 @@ function handleInstance(instance, req, res, path, query, body) {
 
 const server = http.createServer(async (req, res) => {
   try {
+    if (req.method === "OPTIONS") {
+      res.writeHead(204, CORS);
+      return res.end();
+    }
     const url = new URL(req.url, `http://127.0.0.1:${PORT}`);
     const body = await readBody(req);
     if (req.method === "POST" && url.pathname === "/__instances") {

@@ -113,6 +113,78 @@ impl SecureStore for FileSecureStore {
     }
 }
 
+/// The wasm32 default (add-on B3) — `window.localStorage`, namespaced under
+/// a fixed prefix so this never collides with a host page's own keys.
+/// **Not hardware-backed** (same caveat as `FileSecureStore`, and there is
+/// no browser equivalent of a Keychain/Keystore to reach for): a page's
+/// `localStorage` is readable by any script on the same origin, which is a
+/// real, documented limit (`client-lib/docs/integration-web.md`), not one
+/// this store can fix — a host app with stricter requirements passes its
+/// own `SecureStore` (e.g. backed by the WebCrypto-wrapped key an origin
+/// isolation strategy provides) via the JS binding's constructor option
+/// instead of this default.
+#[cfg(target_arch = "wasm32")]
+pub struct LocalStorageSecureStore {
+    prefix: String,
+}
+
+#[cfg(target_arch = "wasm32")]
+impl LocalStorageSecureStore {
+    pub fn new() -> Self {
+        Self {
+            prefix: "trafficnetwork.secure.".to_string(),
+        }
+    }
+
+    fn storage(&self) -> Option<web_sys::Storage> {
+        web_sys::window()?.local_storage().ok()?
+    }
+
+    fn full_key(&self, key: &str) -> String {
+        format!("{}{}", self.prefix, key)
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+impl Default for LocalStorageSecureStore {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+impl SecureStore for LocalStorageSecureStore {
+    fn get(&self, key: &str) -> Option<String> {
+        self.storage()?.get_item(&self.full_key(key)).ok()?
+    }
+
+    fn set(&self, key: &str, value: &str) -> Result<(), String> {
+        let storage = self.storage().ok_or("localStorage is unavailable")?;
+        storage
+            .set_item(&self.full_key(key), value)
+            .map_err(|e| format!("{e:?}"))
+    }
+
+    fn delete(&self, key: &str) -> Result<(), String> {
+        let storage = self.storage().ok_or("localStorage is unavailable")?;
+        storage
+            .remove_item(&self.full_key(key))
+            .map_err(|e| format!("{e:?}"))
+    }
+}
+
+// Safety: wasm32 without the `atomics` target feature (which this crate does
+// not enable) is single-threaded — there is never a second thread this could
+// be sent to or accessed from concurrently. `SecureStore: Send + Sync` is a
+// supertrait shared with the native implementations above; `web_sys::Storage`
+// is only ever fetched fresh per call (never held as a field), but the
+// struct still needs the same treatment as `storage::IndexedDbStore` because
+// nothing here can prove that to the compiler on its own.
+#[cfg(target_arch = "wasm32")]
+unsafe impl Send for LocalStorageSecureStore {}
+#[cfg(target_arch = "wasm32")]
+unsafe impl Sync for LocalStorageSecureStore {}
+
 #[cfg(test)]
 mod tests {
     use super::*;

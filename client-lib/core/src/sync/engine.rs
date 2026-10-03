@@ -705,7 +705,8 @@ fn hash_matches(body: &[u8], expected_hex: &str) -> bool {
     hex::encode(Sha256::digest(body)).eq_ignore_ascii_case(expected_hex)
 }
 
-#[cfg(test)]
+// Native-only: uses `#[tokio::test]`, which needs a real tokio runtime.
+#[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests {
     use super::*;
     use crate::discovery::DiscoveryConfig;

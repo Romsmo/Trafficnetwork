@@ -76,3 +76,5 @@ playwright-report/
 # cbindgen-generated C header — regenerated on demand/in CI from src/lib.rs,
 # never hand-edited, so not worth tracking (see bindings/c-abi/cbindgen.toml).
 client-lib/bindings/c-abi/trafficnetwork.h
+# wasm-pack output (`wasm-pack build --out-dir pkg`) — a build artifact, rebuilt by CI.
+client-lib/bindings/wasm/pkg/
