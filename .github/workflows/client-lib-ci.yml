@@ -197,12 +197,27 @@ jobs:
           path: client-lib/bindings/c-abi/trafficnetwork.h
           retention-days: 14
 
-  # The conformance scenarios (conformance/scenarios.json) through each binding,
-  # against the scripted server (conformance/mock-server.mjs). Every binding
-  # runs the same scenarios and has to give the same answers.
-  conformance-python:
-    name: conformance (Python over the C ABI)
-    runs-on: ubuntu-latest
+  # The C ABI on every desktop platform it is meant for: it builds, its own
+  # tests pass, and the release library is kept as an artifact. The Linux
+  # build is also what most other jobs here use; Windows and macOS are only
+  # ever built here.
+  c-abi:
+    name: build + test (C ABI, ${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            library: libtrafficnetwork.so
+          - os: macos-latest
+            library: libtrafficnetwork.dylib
+          - os: windows-latest
+            library: trafficnetwork.dll
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+        working-directory: client-lib
     steps:
       - uses: actions/checkout@v4
 
@@ -211,6 +226,51 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: client-lib
+          key: c-abi
+
+      - name: Test
+        run: cargo test -p trafficnetwork-c-abi
+
+      - name: Build the release library
+        run: cargo build -p trafficnetwork-c-abi --release
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: trafficnetwork-c-abi-${{ matrix.os }}
+          path: client-lib/target/release/${{ matrix.library }}
+          retention-days: 14
+
+  # The conformance scenarios (conformance/scenarios.json) through each binding,
+  # against the scripted server (conformance/mock-server.mjs). Every binding
+  # runs the same scenarios and has to give the same answers. The Python
+  # binding runs on all three desktop platforms — the C ABI is the same code
+  # there, the operating system's file, process and network behavior is not.
+  conformance-python:
+    name: conformance (Python over the C ABI, ${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            library: libtrafficnetwork.so
+          - os: macos-latest
+            library: libtrafficnetwork.dylib
+          - os: windows-latest
+            library: trafficnetwork.dll
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+        working-directory: client-lib
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: client-lib
+          key: python
 
       - uses: actions/setup-node@v4
         with:
@@ -234,7 +294,7 @@ jobs:
       - name: Run the scenarios
         env:
           MOCK_URL: http://127.0.0.1:18990
-          TRAFFICNETWORK_LIB: ${{ github.workspace }}/client-lib/target/debug/libtrafficnetwork.so
+          TRAFFICNETWORK_LIB: ${{ github.workspace }}/client-lib/target/debug/${{ matrix.library }}
         run: python conformance/run_python.py
 
       - name: Scripted server log
@@ -794,3 +854,47 @@ jobs:
         if: always()
         working-directory: server
         run: cat multi-node-harness.log
+
+  # One line that says whether every binding passed the same scenario set:
+  # the C ABI (through Python on three operating systems, and through Node.js),
+  # WebAssembly, and the three mobile bindings. Each of those jobs runs
+  # conformance/scenarios.json with the same expectations; this job only
+  # collects their verdicts, so "same behavior everywhere" has one status to
+  # point at.
+  conformance:
+    name: conformance (every binding, same scenarios)
+    needs:
+      - conformance-python
+      - conformance-node
+      - conformance-web
+      - conformance-kotlin
+      - swift-package
+      - dart-package
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Collect the verdicts
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+        run: |
+          echo "$NEEDS" | node -e "
+            const needs = JSON.parse(require('fs').readFileSync(0, 'utf8'));
+            const names = {
+              'conformance-python': 'C ABI via Python (Linux, macOS, Windows)',
+              'conformance-node': 'C ABI via Node.js',
+              'conformance-web': 'WebAssembly in headless Chrome',
+              'conformance-kotlin': 'Kotlin (UniFFI) on the JVM',
+              'swift-package': 'Swift (UniFFI) on macOS',
+              'dart-package': 'Dart (flutter_rust_bridge) on the Dart VM',
+            };
+            let failed = 0;
+            let table = '| Binding | Result |\n|---|---|\n';
+            for (const [job, label] of Object.entries(names)) {
+              const result = needs[job].result;
+              if (result !== 'success') failed += 1;
+              table += '| ' + label + ' | ' + result + ' |\n';
+            }
+            console.log(table);
+            require('fs').appendFileSync(process.env.GITHUB_STEP_SUMMARY, table);
+            process.exit(failed ? 1 : 0);
+          "
