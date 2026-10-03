@@ -13,6 +13,12 @@ on:
       - "server/tests/support/**"
       - ".github/workflows/client-lib-ci.yml"
 
+# A newer push to the same branch makes the older run pointless (and the macOS
+# jobs are slow): cancel it.
+concurrency:
+  group: client-lib-ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 defaults:
   run:
     working-directory: client-lib
