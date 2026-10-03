@@ -93,3 +93,5 @@ client-lib/bindings/dart/pubspec.lock
 client-lib/bindings/dart/rust/target/
 client-lib/bindings/swift/example/.build/
 client-lib/bindings/dart/example.out
+# Dart packages keep their executables in bin/ (ignored above for .NET-style output).
+!client-lib/bindings/dart/bin/
