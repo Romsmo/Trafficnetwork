@@ -16,8 +16,8 @@ wartet und noch keinen Code hat. Tatsächlicher Stand seither: Server und
 Weboberfläche sind vollständig fertig und auf `main` gemergt. Die
 Client-Bibliothek hat ihren Kern, echten WebSocket-Push, ein C-ABI/Python-
 Binding fertig und ist gegen ein echtes Mehrknoten-Testnetz verifiziert;
-weitere Anbindungen (WASM/JS-TS, Kotlin, Swift, Dart, React Native) und
-Konformitätstests darüber stehen noch aus — Einzelheiten in
+alle Anbindungen (WASM/JS-TS, Kotlin, Swift, Dart, React Native) und die
+Konformitätstests darüber sind seit Version 1.0.0 fertig — Einzelheiten in
 `client-lib/README.md` ("Was heute geht" / "Was noch fehlt") und in
 [`docs/status.md`](status.md).
 
@@ -50,14 +50,14 @@ Konformitätstests darüber stehen noch aus — Einzelheiten in
 - [x] Portabilität entschieden: plattformunabhängiger Kern + dünne Bindings (Android, iOS, Flutter, React Native, Desktop/Server über C-ABI inkl. Python/Node, Web/WASM)
 - [x] Geräte-Identität entschieden: anonyme Geräteregistrierung per App-Schlüssel (Server-Erweiterung in P2.0)
 - [x] P2.0 Server-Erweiterungen: Geräteregistrierung, partitionierte/versionierte statische Datenpakete + Manifest, Config-Endpunkt
-- [ ] Kernsprache/Toolchain + Speicher/Geo-Index wählen lassen (SpatiaLite-Verfügbarkeit auf allen Zielen prüfen)
-- [ ] Lokaler Speicher + Migrationen
-- [ ] Sync-Engine (Registrierung/Token, Bootstrap, Delta inkl. 409-Fallback, WebSocket-Push, regionale Subscription, Paket-Updates)
-- [ ] Lokales Map-Matching für Tempolimits
-- [ ] Lokale Verfallsberechnung
-- [ ] Offline-Schreibpuffer + Reconciliation
-- [ ] Bindings + Konformitätstests für alle Zielplattformen
-- [ ] Öffentliche lokale API + Integrations-Guides dokumentieren — **Phase-2-Abschluss**
+- [x] Kernsprache/Toolchain + Speicher/Geo-Index gewählt (Rust-Kern; SQLite mit R*Tree nativ, IndexedDB im Browser; kein SpatiaLite)
+- [x] Lokaler Speicher + Migrationen
+- [x] Sync-Engine (Registrierung/Token, Bootstrap, Delta inkl. 409-Fallback, WebSocket-Push, regionale Subscription, Paket-Updates)
+- [x] Lokales Map-Matching für Tempolimits
+- [x] Lokale Verfallsberechnung
+- [x] Offline-Schreibpuffer + Reconciliation
+- [x] Bindings + Konformitätstests für alle Zielplattformen
+- [x] Öffentliche lokale API + Integrations-Guides dokumentieren — **Phase-2-Abschluss**
 
 ## Vor produktivem Einsatz von Phase 2
 - [ ] Letzten `server-ci`-Lauf prüfen (Integrationstests grün)
@@ -68,7 +68,7 @@ Konformitätstests darüber stehen noch aus — Einzelheiten in
 - [x] Claude-Code-Prompts erstellt (`docs/prompt-rework-server-federation.md`, `docs/prompt-rework-client-lib-federation.md`)
 - [x] Stand von Phase 2 im Repo klären: P2.0 (Server-Erweiterungen für client-lib) ist auf GitHub; `client-lib/` selbst enthält bewusst noch keinen Code — das ist die eigentliche Phase-2-Client-Bibliothek, eigener, noch nicht gestarteter Auftrag
 - [x] F-S: Server-Überarbeitung (Docker/Apache/nginx/Caddy, Signaturen, Föderation, Reputation, Verzeichnis) — F-S0–F-S5 vollständig umgesetzt (Docker/Compose/Installation ohne Docker, Node-/Wurzelschlüssel + CLI, geräteseitig signierte Auth, signierte Netzwerk-Konfiguration, Beitritt über Seeds, Peer-Verzeichnis + Gossip, signierte Heartbeats, Push/Pull-Replikation geräteseitig signierter Meldungserstellungen, Reputationsstufen, `GET /v1/network/directory` + Export-Skript, Überlast-Signal, echtes Mehrknoten-Testnetz), Doku vollständig (`server/docs/{installation,operating,api,schema,threat-model,federation-protocol}.md`), Branch `rework/server-federation`, Pull Request nach `main` eingereicht
-- [ ] F-C: Client-Bibliothek-Überarbeitung (Discovery, Failover, Signaturprüfung, gerätesignierte Meldungen) — Kern, echter WebSocket-Push, C-ABI mit Python-/Node.js-Binding, WebAssembly für den Browser (B3), Kotlin/Android, Swift/iOS/macOS und Dart/Flutter (B4; derselbe Szenariensatz über alle sechs Anbindungen) und die Verifikation gegen ein echtes Mehrknoten-Testnetz sind fertig, siehe `client-lib/README.md`; React Native, die Paketierung als Build-Artefakte, die C-ABI-Builds für Windows/macOS und die zusammengeführte Konformität sind mit B5 fertig (PR gestapelt auf B4); das Setzen auf 1.0.0 folgt im Abschluss-PR
+- [x] F-C: Client-Bibliothek-Überarbeitung (Discovery, Failover, Signaturprüfung, gerätesignierte Meldungen) — Kern, echter WebSocket-Push, C-ABI mit Python-/Node.js-Binding, WebAssembly für den Browser (B3), Kotlin/Android, Swift/iOS/macOS und Dart/Flutter (B4; derselbe Szenariensatz über alle sechs Anbindungen) und die Verifikation gegen ein echtes Mehrknoten-Testnetz sind fertig, siehe `client-lib/README.md`; React Native, die Paketierung als Build-Artefakte, die C-ABI-Builds für Windows/macOS und die zusammengeführte Konformität sind fertig (B5); Version `1.0.0`, Abnahme vom frischen Klon in `docs/final-report.md`, Abschnitt 4
 - [ ] Domain `trafficnetwork.info` (entschieden 2026-09-27) registrieren und DNS betreiben — Platzhalter in Code/Doku sind bereits ersetzt
 - [ ] Netzwerk-Wurzelschlüssel erzeugen und offline sicher aufbewahren
 - [ ] Mindestens zwei Seed-Server bei unterschiedlichen Anbietern bereitstellen
@@ -157,6 +157,15 @@ Konformitätstests darüber stehen noch aus — Einzelheiten in
 - [x] Konformitätstest gegen `server/docs/api.md` (Typ und Format, nicht nur Vorhandensein): `server/tests/integration/api-serialization.test.ts`
 - [x] `server/docs/api.md`-Hinweis „bekannte Abweichung" entfernt; `docs/status.md` aktualisiert
 - [ ] Offen (Betreiber/Reviewer): PR #13 grün prüfen und mergen — lokal durch abstürzendes Docker Desktop nicht vollständig durchgelaufen, siehe Lagebericht in `docs/status.md`
+
+## Client-Bibliothek nach 1.0 — nie zugesagt, aber offen benannt
+- [ ] Release auslösen: Tag `client-lib-v1.0.0` setzen (hängt die Build-Artefakte mit Prüfsummen an ein GitHub-Release; bewusst **nicht** von der Client-Instanz gesetzt — deine Freigabe)
+- [ ] Pakete in Registern veröffentlichen (npm, Maven, pub.dev, CocoaPods) — jede Veröffentlichung ist eine eigene Freigabe; bis dahin `"private"` bzw. `publish_to: none`
+- [ ] Kotlin/Android, Swift/iOS und React Native auf Emulator/Simulator/Gerät *ausführen* (heute: gebaut und gelinkt; Konformität auf JVM bzw. macOS mit derselben Rust-Bibliothek; nur die Flutter-App läuft auf einem Android-Emulator)
+- [ ] Das von `uniffi-bindgen-react-native` erzeugte JSI-Zwischenstück in einem Test ausführen
+- [ ] Einen echten TLS-Handshake gegen einen Server mit gültigem Zertifikat testen (alle Tests laufen heute über `http://`; sinnvoll, sobald Domain und Seed-Server stehen)
+- [ ] Flutter-Plugin auch für Desktop bündeln (heute Android und iOS)
+- [ ] `tools/test-client/` (Launch L) auf die Bibliothek umstellen, statt direkt gegen HTTP/WebSocket zu sprechen
 
 ## Launch P — Öffentlicher Betrieb (gemieteter Server + Domain)
 - [x] Claude-Code-Prompt erstellt (`docs/prompt-launch-public-server.md`)
