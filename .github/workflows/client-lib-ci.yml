@@ -361,6 +361,372 @@ jobs:
         if: failure()
         run: cat mock.log
 
+  # Add-on B4: the same scenarios through the Kotlin that UniFFI generates,
+  # run on a plain JVM against a Linux build of the very same library the
+  # Android AAR contains (no emulator: the Kotlin layer and the Rust code are
+  # the shipped ones, only the CPU/OS differ). conformance/bridge-client.mjs
+  # lets the one scenario runner drive it — see conformance/README.md.
+  conformance-kotlin:
+    name: conformance (Kotlin over UniFFI, on the JVM)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: client-lib
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.10.2"
+
+      - name: Build the UniFFI library
+        run: cargo build -p trafficnetwork-uniffi
+
+      - name: Generate the Kotlin wrapper from it
+        run: bash bindings/kotlin/generate.sh jvm target/debug/libtrafficnetwork_uniffi.so
+
+      - name: Build the conformance bridge
+        working-directory: client-lib/bindings/kotlin/jvm
+        run: gradle installDist --no-daemon
+
+      - name: Install the runner's dependencies
+        working-directory: client-lib/conformance
+        run: npm ci
+
+      - name: Start the scripted server
+        run: |
+          node conformance/mock-server.mjs --port 18993 > mock.log 2>&1 &
+          for i in $(seq 1 50); do
+            curl -sf -X POST http://127.0.0.1:18993/__instances -d '{}' > /dev/null && break
+            sleep 0.2
+          done
+
+      - name: Run the scenarios (secrets in the library's file)
+        env:
+          MOCK_URL: http://127.0.0.1:18993
+          JAVA_OPTS: -Djna.library.path=${{ github.workspace }}/client-lib/target/debug
+        run: node conformance/run_bridge.mjs --name kotlin -- bindings/kotlin/jvm/build/install/trafficnetwork-kotlin-jvm/bin/trafficnetwork-kotlin-jvm
+
+      # The same scenarios again, with the device's secrets in a store the
+      # host (Kotlin) implements — the library calling back into Kotlin, which
+      # is what the Android Keystore binding rests on.
+      - name: Run the scenarios (secrets in a store implemented in Kotlin)
+        env:
+          MOCK_URL: http://127.0.0.1:18993
+          JAVA_OPTS: -Djna.library.path=${{ github.workspace }}/client-lib/target/debug
+        run: node conformance/run_bridge.mjs --name kotlin --host-secure-store -- bindings/kotlin/jvm/build/install/trafficnetwork-kotlin-jvm/bin/trafficnetwork-kotlin-jvm
+
+      # What docs/integration-android.md tells a reader to write must work,
+      # not merely compile: its example (the same calls as in an Activity),
+      # against the mock, with a check that it really synced and queued a report.
+      - name: Run the integration guide's example
+        run: |
+          URL=$(curl -sf -X POST http://127.0.0.1:18993/__instances -d '{}' | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>console.log(JSON.parse(s).url))")
+          TN_NODE="$URL" TN_CLIENT_ID=example TN_CLIENT_SECRET=example             java -Djna.library.path="$PWD/target/debug"             -cp 'bindings/kotlin/jvm/build/install/trafficnetwork-kotlin-jvm/lib/*'             info.trafficnetwork.example.ExampleKt | tee example.out
+          grep -q "sync ok: true" example.out
+          grep -q "queued report" example.out
+
+      - name: Scripted server log
+        if: failure()
+        run: cat mock.log
+
+  # Add-on B4: the Android library. The native library for all four Android
+  # ABIs (cargo-ndk, the NDK preinstalled on the runner), the Kotlin UniFFI
+  # generates from it, packaged by Gradle into an AAR — the artifact an Android
+  # app depends on. What this proves is that it *builds* and contains what it
+  # should; running it on a device or emulator is not done here (the Kotlin
+  # layer and the Rust code it wraps are run by `conformance-kotlin`, on a
+  # JVM). docs/integration-android.md says so too.
+  android-aar:
+    name: build (Android AAR)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android,armv7-linux-androideabi,x86_64-linux-android,i686-linux-android
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: client-lib
+          key: android
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.10.2"
+
+      - name: Install cargo-ndk
+        run: cargo install --locked cargo-ndk
+
+      - name: Build the native library for every Android ABI
+        run: |
+          cargo ndk -t arm64-v8a -t armeabi-v7a -t x86_64 -t x86             -o bindings/kotlin/android/src/main/jniLibs             build --release -p trafficnetwork-uniffi
+
+      # The generator only reads the UniFFI description out of the library, so
+      # one ABI's file is as good as another's.
+      - name: Generate the Kotlin wrapper
+        run: bash bindings/kotlin/generate.sh android bindings/kotlin/android/src/main/jniLibs/arm64-v8a/libtrafficnetwork_uniffi.so
+
+      # After generating, because the generator reads the UniFFI description
+      # out of the library's symbols. Gradle cannot strip without an NDK of
+      # its own, and the library is a third of the size without them.
+      - name: Strip the symbols
+        run: |
+          strip="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip"
+          for lib in bindings/kotlin/android/src/main/jniLibs/*/libtrafficnetwork_uniffi.so; do
+            "$strip" --strip-unneeded "$lib"
+          done
+          ls -l bindings/kotlin/android/src/main/jniLibs/*/
+
+      # The example app is what docs/integration-android.md walks through;
+      # building it proves the guide's code compiles against the library.
+      - name: Build the AAR and the example app
+        working-directory: client-lib/bindings/kotlin/android
+        run: gradle assembleRelease :example:assembleDebug --no-daemon
+
+      - name: Check what is in the AAR
+        working-directory: client-lib/bindings/kotlin/android
+        run: |
+          aar=$(ls build/outputs/aar/*-release.aar)
+          unzip -l "$aar"
+          for abi in arm64-v8a armeabi-v7a x86_64 x86; do
+            unzip -l "$aar" | grep -q "jni/$abi/libtrafficnetwork_uniffi.so"
+          done
+          unzip -l "$aar" | grep -q "classes.jar"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: trafficnetwork-android-aar
+          path: client-lib/bindings/kotlin/android/build/outputs/aar/*-release.aar
+          retention-days: 14
+
+  # Add-on B4: the Swift package and its XCFramework (iOS device, iOS
+  # simulator, macOS), on a macOS runner — Xcode only exists there. Builds the
+  # package for macOS and for iOS (device and simulator), and runs the same
+  # conformance scenarios through the generated Swift on macOS. What is *not*
+  # done: running anything inside an iOS simulator — the iOS slices are built
+  # and linked, and it is the same Rust library and the same generated Swift
+  # that run on macOS here. docs/integration-ios.md says so too.
+  swift-package:
+    name: build + conformance (Swift package, macOS runner)
+    runs-on: macos-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-ios,aarch64-apple-ios-sim,x86_64-apple-ios,aarch64-apple-darwin,x86_64-apple-darwin
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: client-lib
+          key: apple
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Build the XCFramework and generate the Swift wrapper
+        run: bash bindings/swift/build-xcframework.sh
+
+      - name: Build the package for macOS
+        working-directory: client-lib/bindings/swift
+        run: swift build
+
+      - name: Build the package for iOS (device and simulator)
+        working-directory: client-lib/bindings/swift
+        run: |
+          xcodebuild build -scheme TrafficNetwork -destination 'generic/platform=iOS' -derivedDataPath .build/xcode-ios
+          xcodebuild build -scheme TrafficNetwork -destination 'generic/platform=iOS Simulator' -derivedDataPath .build/xcode-ios-sim
+
+      - name: Build the conformance bridge
+        working-directory: client-lib/bindings/swift/conformance
+        run: swift build
+
+      - name: Install the runner's dependencies
+        working-directory: client-lib/conformance
+        run: npm ci
+
+      - name: Start the scripted server
+        run: |
+          node conformance/mock-server.mjs --port 18994 > mock.log 2>&1 &
+          for i in $(seq 1 50); do
+            curl -sf -X POST http://127.0.0.1:18994/__instances -d '{}' > /dev/null && break
+            sleep 0.2
+          done
+
+      - name: Run the scenarios (secrets in the library's file)
+        env:
+          MOCK_URL: http://127.0.0.1:18994
+        run: node conformance/run_bridge.mjs --name swift -- bindings/swift/conformance/.build/debug/TrafficNetworkBridge
+
+      - name: Run the scenarios (secrets in a store implemented in Swift)
+        env:
+          MOCK_URL: http://127.0.0.1:18994
+        run: node conformance/run_bridge.mjs --name swift --host-secure-store -- bindings/swift/conformance/.build/debug/TrafficNetworkBridge
+
+      # What docs/integration-ios.md tells a reader to write must work, not
+      # merely compile: its example (the same calls as in a SwiftUI view),
+      # against the mock, with a check that it really synced and queued a report.
+      - name: Run the integration guide's example
+        working-directory: client-lib/bindings/swift/example
+        run: |
+          URL=$(curl -sf -X POST http://127.0.0.1:18994/__instances -d '{}' | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>console.log(JSON.parse(s).url))")
+          TN_NODE="$URL" TN_CLIENT_ID=example TN_CLIENT_SECRET=example swift run | tee example.out
+          grep -q "sync ok: true" example.out
+          grep -q "queued report" example.out
+
+      - name: Scripted server log
+        if: failure()
+        run: cat mock.log
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: trafficnetwork-swift-package
+          path: |
+            client-lib/bindings/swift/Package.swift
+            client-lib/bindings/swift/Sources
+            client-lib/bindings/swift/TrafficNetworkFFI.xcframework
+          retention-days: 14
+
+  # Add-on B4: the Dart/Flutter package. flutter_rust_bridge generates the
+  # Dart half and the Rust glue from bindings/dart/rust/src/api/; both are
+  # checked in, so this job regenerates them and fails if they differ - the
+  # checked-in code cannot drift from the Rust it was generated from. Then the
+  # package is analyzed and the same scenarios run through it (Dart VM on
+  # Linux: the Dart FFI layer and the Rust code are the ones a Flutter app
+  # on a phone uses; no emulator is involved).
+  dart-package:
+    name: build + conformance (Dart/Flutter package)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: client-lib/bindings/dart/rust
+
+      - uses: dart-lang/setup-dart@v1
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      # The generator also needs cargo-expand, which it would otherwise
+      # install itself on every run (two minutes).
+      - name: Cache the code generator
+        id: codegen-cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/flutter_rust_bridge_codegen
+            ~/.cargo/bin/cargo-expand
+          key: frb-codegen-2.13.0-${{ runner.os }}
+
+      - name: Install the code generator
+        if: steps.codegen-cache.outputs.cache-hit != 'true'
+        run: |
+          cargo install flutter_rust_bridge_codegen --version 2.13.0 --locked
+          cargo install cargo-expand --locked
+
+      - name: Install the package's dependencies
+        working-directory: client-lib/bindings/dart
+        run: dart pub get
+
+      - name: Generate the Dart half and the Rust glue
+        working-directory: client-lib/bindings/dart
+        run: flutter_rust_bridge_codegen generate
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: trafficnetwork-dart-generated
+          path: |
+            client-lib/bindings/dart/lib/src/rust
+            client-lib/bindings/dart/rust/src/frb_generated.rs
+            client-lib/bindings/dart/rust/Cargo.lock
+          retention-days: 14
+
+      - name: The checked-in generated code is current
+        run: |
+          git status --porcelain -- bindings/dart/lib bindings/dart/rust/src
+          test -z "$(git status --porcelain -- bindings/dart/lib bindings/dart/rust/src)"
+
+      - name: Rust formatting of the glue crate
+        working-directory: client-lib/bindings/dart/rust
+        run: cargo fmt -- --check
+
+      - name: Analyze the Dart package
+        working-directory: client-lib/bindings/dart
+        run: dart analyze --fatal-infos
+
+      - name: Build the native library
+        working-directory: client-lib/bindings/dart/rust
+        run: cargo build
+
+      - name: Install the runner's dependencies
+        working-directory: client-lib/conformance
+        run: npm ci
+
+      - name: Start the scripted server
+        run: |
+          node conformance/mock-server.mjs --port 18995 > mock.log 2>&1 &
+          for i in $(seq 1 50); do
+            curl -sf -X POST http://127.0.0.1:18995/__instances -d '{}' > /dev/null && break
+            sleep 0.2
+          done
+
+      - name: Run the scenarios (secrets in the library's file)
+        env:
+          MOCK_URL: http://127.0.0.1:18995
+          TN_DART_LIB: ${{ github.workspace }}/client-lib/bindings/dart/rust/target/debug/libtrafficnetwork_dart.so
+        run: node conformance/run_bridge.mjs --name dart --cwd bindings/dart -- dart run bin/conformance_bridge.dart
+
+      - name: Run the scenarios (secrets in a store implemented in Dart)
+        env:
+          MOCK_URL: http://127.0.0.1:18995
+          TN_DART_LIB: ${{ github.workspace }}/client-lib/bindings/dart/rust/target/debug/libtrafficnetwork_dart.so
+        run: node conformance/run_bridge.mjs --name dart --host-secure-store --cwd bindings/dart -- dart run bin/conformance_bridge.dart
+
+      # What docs/integration-flutter.md tells a reader to write must work,
+      # not merely compile.
+      - name: Run the integration guide's example
+        working-directory: client-lib/bindings/dart
+        env:
+          TN_DART_LIB: ${{ github.workspace }}/client-lib/bindings/dart/rust/target/debug/libtrafficnetwork_dart.so
+        run: |
+          URL=$(curl -sf -X POST http://127.0.0.1:18995/__instances -d '{}' | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>console.log(JSON.parse(s).url))")
+          TN_NODE="$URL" TN_CLIENT_ID=example TN_CLIENT_SECRET=example             dart run example/trafficnetwork_example.dart | tee example.out
+          grep -q "sync ok: true" example.out
+          grep -q "queued report" example.out
+
+      - name: Scripted server log
+        if: failure()
+        run: cat mock.log
+
   # Add-on B3: the hand-written .d.ts files of both JS bindings, compiled
   # against a typed usage file (never run) — a declaration that drifts from
   # what the integration guides tell a host app to write stops compiling.

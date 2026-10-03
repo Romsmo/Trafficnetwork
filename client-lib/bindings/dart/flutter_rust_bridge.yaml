@@ -1,0 +1,14 @@
+# Input for `flutter_rust_bridge_codegen generate` (run from this directory):
+# reads the Rust API in rust/src/api/ and writes the Dart half into
+# lib/src/rust/ and the Rust glue into rust/src/frb_generated.rs. The
+# generated files are checked in; CI regenerates them and fails if they
+# differ (see .github/workflows/client-lib-ci.yml, job dart-package).
+rust_input: crate::api
+rust_root: rust/
+dart_output: lib/src/rust
+# A plain Dart package, no Flutter: nothing for build_runner to do (it is for
+# freezed classes, which this API has none of), and no web build.
+build_runner: false
+web: false
+# Only checks pubspec.yaml's dependency list against the generator's.
+deps_check: false

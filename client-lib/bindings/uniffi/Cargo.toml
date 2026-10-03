@@ -1,0 +1,22 @@
+[package]
+name = "trafficnetwork-uniffi"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+# One native library for Kotlin (Android and plain JVM) and Swift (iOS and
+# macOS): UniFFI generates both languages' wrappers from this crate's exports.
+# `staticlib` is what an XCFramework wants, `cdylib` what Android (.so) and
+# the JVM need.
+[lib]
+name = "trafficnetwork_uniffi"
+crate-type = ["cdylib", "staticlib"]
+
+[dependencies]
+trafficnetwork-core = { path = "../../core" }
+uniffi = "0.32"
+serde_json = { workspace = true }
+# The client API is async and reqwest needs a tokio runtime, so this crate
+# owns one, like the C ABI does — the core itself stays runtime-agnostic.
+tokio = { version = "1", features = ["rt-multi-thread", "sync"] }

@@ -89,6 +89,14 @@ rusqlite = { version = "0.37", features = ["bundled"] }
 # already does it): the server stores its static packages compressed, and a
 # Europe-sized bootstrap is about four times smaller on the wire that way.
 reqwest = { version = "0.13", default-features = false, features = ["gzip", "brotli"] }
+# `platform::http`'s TLS configuration (add-on B4): reqwest 0.13 verifies
+# certificates with the platform's own verifier, which on Android needs a
+# Kotlin component wired in by every app — so the transport hands reqwest a
+# `rustls::ClientConfig` trusting the bundled Mozilla roots instead (see
+# `bundled_roots_tls`). The versions are the ones reqwest and tokio-tungstenite
+# already resolve to, so this adds no second TLS stack.
+rustls = { version = "0.23", default-features = false, features = ["std", "aws_lc_rs", "tls12"] }
+webpki-roots = "1"
 # `platform::ws`'s native WebSocket transport (add-on B1). `rustls-tls-webpki-roots`
 # matches reqwest's own TLS choice above (rustls + bundled Mozilla roots, no
 # second TLS stack, no system OpenSSL) — confirmed against the crate's actual

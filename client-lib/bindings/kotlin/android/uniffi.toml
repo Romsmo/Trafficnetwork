@@ -1,0 +1,7 @@
+# Global UniFFI config for the Android generation; the crate's own
+# bindings/uniffi/uniffi.toml gives the package name.
+[crate-roots]
+trafficnetwork_uniffi = "../../uniffi"
+
+[defaults.bindings.kotlin]
+android = true
