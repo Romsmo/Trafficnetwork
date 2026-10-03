@@ -424,6 +424,16 @@ jobs:
           JAVA_OPTS: -Djna.library.path=${{ github.workspace }}/client-lib/target/debug
         run: node conformance/run_bridge.mjs --name kotlin --host-secure-store -- bindings/kotlin/jvm/build/install/trafficnetwork-kotlin-jvm/bin/trafficnetwork-kotlin-jvm
 
+      # What docs/integration-android.md tells a reader to write must work,
+      # not merely compile: its example (the same calls as in an Activity),
+      # against the mock, with a check that it really synced and queued a report.
+      - name: Run the integration guide's example
+        run: |
+          URL=$(curl -sf -X POST http://127.0.0.1:18993/__instances -d '{}' | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>console.log(JSON.parse(s).url))")
+          TN_NODE="$URL" TN_CLIENT_ID=example TN_CLIENT_SECRET=example             java -Djna.library.path="$PWD/target/debug"             -cp 'bindings/kotlin/jvm/build/install/trafficnetwork-kotlin-jvm/lib/*'             info.trafficnetwork.example.ExampleKt | tee example.out
+          grep -q "sync ok: true" example.out
+          grep -q "queued report" example.out
+
       - name: Scripted server log
         if: failure()
         run: cat mock.log
@@ -482,9 +492,11 @@ jobs:
           done
           ls -l bindings/kotlin/android/src/main/jniLibs/*/
 
-      - name: Build the AAR
+      # The example app is what docs/integration-android.md walks through;
+      # building it proves the guide's code compiles against the library.
+      - name: Build the AAR and the example app
         working-directory: client-lib/bindings/kotlin/android
-        run: gradle assembleRelease --no-daemon
+        run: gradle assembleRelease :example:assembleDebug --no-daemon
 
       - name: Check what is in the AAR
         working-directory: client-lib/bindings/kotlin/android

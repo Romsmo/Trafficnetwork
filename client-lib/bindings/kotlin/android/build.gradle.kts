@@ -4,8 +4,8 @@
 // come from the Rust code, so they can never be out of step with it.
 // docs/integration-android.md has the commands, in order.
 plugins {
-    id("com.android.library") version "8.7.3"
-    id("org.jetbrains.kotlin.android") version "2.0.21"
+    id("com.android.library")
+    id("org.jetbrains.kotlin.android")
 }
 
 android {
