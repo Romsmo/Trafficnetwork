@@ -1064,6 +1064,13 @@ jobs:
             client-lib/bindings/react-native/library/android/src/main/java
           retention-days: 14
 
+      # `yarn prepare` is react-native-builder-bob: React Native's own codegen
+      # (the native module spec the generated Kotlin extends), the JavaScript
+      # build of the library, and its type declarations — what a library ships.
+      - name: Build the library
+        working-directory: client-lib/bindings/react-native/library
+        run: yarn prepare
+
       - name: Type-check the library
         working-directory: client-lib/bindings/react-native/library
         run: yarn typecheck
