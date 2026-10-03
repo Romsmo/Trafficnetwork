@@ -100,3 +100,5 @@ client-lib/bindings/flutter/android/src/main/jniLibs/
 client-lib/bindings/flutter/ios/Frameworks/
 client-lib/bindings/flutter/ios/build/
 client-lib/flutter-example-debug.apk
+client-lib/bindings/flutter/.dart_tool/
+client-lib/bindings/flutter/pubspec.lock
