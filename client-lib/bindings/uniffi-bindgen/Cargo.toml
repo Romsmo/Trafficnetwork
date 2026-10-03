@@ -1,0 +1,22 @@
+[package]
+name = "trafficnetwork-uniffi-bindgen"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+# The generators UniFFI needs, built from the same `uniffi` version the
+# library uses (a generator and a library from different versions refuse to
+# work together). `cargo run -p trafficnetwork-uniffi-bindgen --bin
+# uniffi-bindgen -- generate --library <lib> --language kotlin ...`
+[[bin]]
+name = "uniffi-bindgen"
+path = "src/main.rs"
+
+[[bin]]
+name = "uniffi-bindgen-swift"
+path = "src/swift.rs"
+
+[dependencies]
+uniffi = { version = "0.32", features = ["cli"] }

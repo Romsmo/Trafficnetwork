@@ -1,0 +1,5 @@
+# The Kotlin that UniFFI generates for a plain JVM (the conformance run). The
+# Android build (../android/uniffi.toml) differs in one setting only.
+[bindings.kotlin]
+package_name = "info.trafficnetwork.client"
+android = false

@@ -1,0 +1,4 @@
+# The Kotlin that UniFFI generates for the Android library.
+[bindings.kotlin]
+package_name = "info.trafficnetwork.client"
+android = true

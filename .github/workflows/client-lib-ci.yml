@@ -357,6 +357,77 @@ jobs:
         if: failure()
         run: cat mock.log
 
+  # Add-on B4: the same scenarios through the Kotlin that UniFFI generates,
+  # run on a plain JVM against a Linux build of the very same library the
+  # Android AAR contains (no emulator: the Kotlin layer and the Rust code are
+  # the shipped ones, only the CPU/OS differ). conformance/bridge-client.mjs
+  # lets the one scenario runner drive it — see conformance/README.md.
+  conformance-kotlin:
+    name: conformance (Kotlin over UniFFI, on the JVM)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: client-lib
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.10.2"
+
+      - name: Build the UniFFI library
+        run: cargo build -p trafficnetwork-uniffi
+
+      - name: Generate the Kotlin wrapper from it
+        run: bindings/kotlin/generate.sh jvm target/debug/libtrafficnetwork_uniffi.so
+
+      - name: Build the conformance bridge
+        working-directory: client-lib/bindings/kotlin/jvm
+        run: gradle installDist --no-daemon
+
+      - name: Install the runner's dependencies
+        working-directory: client-lib/conformance
+        run: npm ci
+
+      - name: Start the scripted server
+        run: |
+          node conformance/mock-server.mjs --port 18993 > mock.log 2>&1 &
+          for i in $(seq 1 50); do
+            curl -sf -X POST http://127.0.0.1:18993/__instances -d '{}' > /dev/null && break
+            sleep 0.2
+          done
+
+      - name: Run the scenarios (secrets in the library's file)
+        env:
+          MOCK_URL: http://127.0.0.1:18993
+          JAVA_OPTS: -Djna.library.path=${{ github.workspace }}/client-lib/target/debug
+        run: node conformance/run_bridge.mjs --name kotlin -- bindings/kotlin/jvm/build/install/trafficnetwork-kotlin-jvm/bin/trafficnetwork-kotlin-jvm
+
+      # The same scenarios again, with the device's secrets in a store the
+      # host (Kotlin) implements — the library calling back into Kotlin, which
+      # is what the Android Keystore binding rests on.
+      - name: Run the scenarios (secrets in a store implemented in Kotlin)
+        env:
+          MOCK_URL: http://127.0.0.1:18993
+          JAVA_OPTS: -Djna.library.path=${{ github.workspace }}/client-lib/target/debug
+        run: node conformance/run_bridge.mjs --name kotlin --host-secure-store -- bindings/kotlin/jvm/build/install/trafficnetwork-kotlin-jvm/bin/trafficnetwork-kotlin-jvm
+
+      - name: Scripted server log
+        if: failure()
+        run: cat mock.log
+
   # Add-on B3: the hand-written .d.ts files of both JS bindings, compiled
   # against a typed usage file (never run) — a declaration that drifts from
   # what the integration guides tell a host app to write stops compiling.

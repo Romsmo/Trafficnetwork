@@ -102,6 +102,38 @@ impl Platform {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
+impl TrafficNetworkClient {
+    /// The construction every native binding (the C ABI, Kotlin, Swift, ...)
+    /// needs, so each of them does not carry its own copy: `options_json` is
+    /// the [`ClientOptions`] as JSON plus `storagePath`, the directory the
+    /// database and the secrets go in. With `secure_store`, the device's
+    /// secrets go there (a Keychain, a Keystore, ...) instead of into a file.
+    ///
+    /// `reqwest` needs a running tokio runtime on some platforms to build its
+    /// client: the caller keeps one entered while this runs.
+    pub fn open_native(
+        options_json: &str,
+        secure_store: Option<Arc<dyn SecureStore>>,
+    ) -> Result<Self, ApiError> {
+        let value: serde_json::Value = serde_json::from_str(options_json).map_err(|e| {
+            ApiError::new(code::INVALID_ARGUMENT, format!("options are not JSON: {e}"))
+        })?;
+        let storage_path = value
+            .get("storagePath")
+            .and_then(serde_json::Value::as_str)
+            .ok_or_else(|| ApiError::new(code::INVALID_ARGUMENT, "options need a `storagePath`"))?
+            .to_string();
+        let options: ClientOptions = serde_json::from_value(value)
+            .map_err(|e| ApiError::new(code::INVALID_ARGUMENT, format!("options: {e}")))?;
+        let mut platform = Platform::native(&storage_path)?;
+        if let Some(store) = secure_store {
+            platform.secure_store = store;
+        }
+        Self::new(options, platform)
+    }
+}
+
 #[cfg(target_arch = "wasm32")]
 impl Platform {
     /// The `wasm32` defaults (add-on B3): `storage::IndexedDbStore` (opening

@@ -78,3 +78,8 @@ playwright-report/
 client-lib/bindings/c-abi/trafficnetwork.h
 # wasm-pack output (`wasm-pack build --out-dir pkg`) — a build artifact, rebuilt by CI.
 client-lib/bindings/wasm/pkg/
+client-lib/bindings/kotlin/*/generated/
+client-lib/bindings/kotlin/*/build/
+client-lib/bindings/kotlin/*/.gradle/
+client-lib/bindings/kotlin/android/src/main/jniLibs/
+client-lib/bindings/kotlin/*/.kotlin/
