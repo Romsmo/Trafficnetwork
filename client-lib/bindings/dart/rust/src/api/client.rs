@@ -11,8 +11,7 @@ use flutter_rust_bridge::{frb, DartFnFuture};
 use tokio::runtime::Runtime;
 use tokio::sync::oneshot;
 use trafficnetwork_core::api::{
-    code, panic_envelope, ApiError, ClientEvent, EventListener, SecureStore,
-    TrafficNetworkClient,
+    code, panic_envelope, ApiError, ClientEvent, EventListener, SecureStore, TrafficNetworkClient,
 };
 
 use crate::frb_generated::StreamSink;
