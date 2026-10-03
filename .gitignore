@@ -95,3 +95,4 @@ client-lib/bindings/swift/example/.build/
 client-lib/bindings/dart/example.out
 # Dart packages keep their executables in bin/ (ignored above for Go-style build output).
 !client-lib/bindings/dart/bin/
+client-lib/dist/

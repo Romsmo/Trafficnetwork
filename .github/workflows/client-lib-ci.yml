@@ -787,6 +787,86 @@ jobs:
         if: failure()
         run: cat mock.log
 
+  # Add-on B5: the npm packages as tarballs that stand on their own
+  # (bindings/pack-npm.mjs), and proof that what is in them works: they are
+  # installed into an empty project, and the guides' examples run from the
+  # *installed* packages — the Node one against the mock server, the browser
+  # one in headless Chrome. The tarballs are kept as artifacts; nothing is
+  # published.
+  npm-packages:
+    name: npm packages (pack, install, run)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: client-lib
+          key: npm
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      # Pinned: see the comment at the first use of this action.
+      - uses: jetli/wasm-pack-action@v0.4.0
+        with:
+          version: "v0.13.1"
+
+      - name: Build the WebAssembly package and the native library
+        run: |
+          (cd bindings/wasm && wasm-pack build --target web --out-dir pkg)
+          cargo build -p trafficnetwork-c-abi
+
+      - name: Pack
+        run: node bindings/pack-npm.mjs "$PWD/dist/npm"
+
+      - name: Start the scripted server
+        run: |
+          node conformance/mock-server.mjs --port 18996 > mock.log 2>&1 &
+          for i in $(seq 1 50); do
+            curl -sf -X POST http://127.0.0.1:18996/__instances -d '{}' > /dev/null && break
+            sleep 0.2
+          done
+
+      - name: Install the Node package into an empty project and run its example
+        env:
+          TRAFFICNETWORK_LIB: ${{ github.workspace }}/client-lib/target/debug/libtrafficnetwork.so
+        run: |
+          mkdir -p "$RUNNER_TEMP/consumer-node" && cd "$RUNNER_TEMP/consumer-node"
+          npm init -y > /dev/null
+          npm install "$GITHUB_WORKSPACE"/client-lib/dist/npm/trafficnetwork-client-node-*.tgz
+          node --input-type=module -e "import { libraryVersion } from '@trafficnetwork/client-node'; console.log('library', libraryVersion())"
+          URL=$(curl -sf -X POST http://127.0.0.1:18996/__instances -d '{}' | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>console.log(JSON.parse(s).url))")
+          TN_NODE="$URL" TN_CLIENT_ID=example TN_CLIENT_SECRET=example             node node_modules/@trafficnetwork/client-node/example.mjs | tee example.out
+          grep -q "sync ok: true" example.out
+          grep -q "queued report" example.out
+
+      - name: Install the browser package into an empty project and run its example in Chrome
+        env:
+          MOCK_URL: http://127.0.0.1:18996
+          CHROME_PATH: /usr/bin/google-chrome
+        run: |
+          mkdir -p "$RUNNER_TEMP/consumer-web" && cd "$RUNNER_TEMP/consumer-web"
+          npm init -y > /dev/null
+          npm install "$GITHUB_WORKSPACE"/client-lib/dist/npm/trafficnetwork-client-web-*.tgz
+          cd "$GITHUB_WORKSPACE/client-lib/conformance" && npm ci
+          TN_WEB_PACKAGE="$RUNNER_TEMP/consumer-web/node_modules/@trafficnetwork/client-web"             node run_web_example.mjs
+
+      - name: Scripted server log
+        if: failure()
+        run: cat mock.log
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: trafficnetwork-npm-packages
+          path: client-lib/dist/npm/*.tgz
+          retention-days: 14
+
   # Add-on B3: the hand-written .d.ts files of both JS bindings, compiled
   # against a typed usage file (never run) — a declaration that drifts from
   # what the integration guides tell a host app to write stops compiling.

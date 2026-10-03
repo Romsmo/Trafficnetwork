@@ -34,12 +34,24 @@ const TYPES = {
 
 export const CHROME = process.env.CHROME_PATH ?? "/usr/bin/google-chrome";
 
-/** Serves the mounts above (and `/` → web/index.html); resolves with `{ port, close }`. */
-export async function startStaticServer() {
+/**
+ * Serves the mounts above (and `/` → web/index.html); resolves with `{ port, close }`.
+ *
+ * With `packageRoot` (or the environment variable `TN_WEB_PACKAGE`) it serves
+ * that directory instead, as it is — an *installed* @trafficnetwork/client-web
+ * package — so the same page can be run from what a user would actually get.
+ */
+export async function startStaticServer(packageRoot = process.env.TN_WEB_PACKAGE) {
+  const root = packageRoot ? path.resolve(packageRoot) : null;
   const server = http.createServer((req, res) => {
     const url = new URL(req.url, "http://127.0.0.1");
     let file = null;
-    if (url.pathname === "/") {
+    if (root) {
+      let relative = decodeURIComponent(url.pathname).replace(/^\/+/, "");
+      if (relative === "" || relative.endsWith("/")) relative += "index.html";
+      const candidate = path.resolve(root, relative);
+      if (candidate.startsWith(root + path.sep)) file = candidate;
+    } else if (url.pathname === "/") {
       file = path.join(HERE, "web", "index.html");
     } else {
       for (const [prefix, directory] of MOUNTS) {
