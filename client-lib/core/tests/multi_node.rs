@@ -417,7 +417,9 @@ async fn a_report_made_while_connected_arrives_through_the_websocket_push() {
     // Another party reports once the connection is up (the loop first closes
     // the gap with a delta sync, then listens).
     tokio::time::sleep(Duration::from_secs(2)).await;
-    harness.seed_hazard_report(&node, "accident", 48.5, 9.5).await;
+    harness
+        .seed_hazard_report(&node, "accident", 48.5, 9.5)
+        .await;
 
     wait_for(
         || async {
