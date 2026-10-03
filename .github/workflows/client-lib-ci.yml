@@ -1079,6 +1079,55 @@ jobs:
         working-directory: client-lib/bindings/react-native/library/example/android
         run: ./gradlew assembleDebug --no-daemon --console=plain -PreactNativeArchitectures=arm64-v8a
 
+  # The same on iOS, on a macOS runner: the Rust for the iOS targets as an
+  # XCFramework, the bindings, `pod install`, and the example app built for the
+  # simulator. Builds only: the app is not run.
+  react-native-ios:
+    name: build (React Native library + example app, iOS)
+    runs-on: macos-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-ios,aarch64-apple-ios-sim,x86_64-apple-ios
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: client-lib
+          key: rn-ios
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Scaffold the React Native library
+        run: node bindings/react-native/scaffold.mjs
+
+      - name: Install its dependencies
+        working-directory: client-lib/bindings/react-native/library
+        env:
+          YARN_ENABLE_IMMUTABLE_INSTALLS: "false"
+        run: |
+          corepack enable
+          yarn install
+
+      - name: Build the Rust for iOS, generate the bindings, install the pods
+        working-directory: client-lib/bindings/react-native/library
+        run: yarn ubrn:ios
+
+      - name: Build the library
+        working-directory: client-lib/bindings/react-native/library
+        run: yarn prepare
+
+      - name: Build the example app for the simulator
+        working-directory: client-lib/bindings/react-native/library/example/ios
+        run: |
+          workspace=$(ls -d *.xcworkspace | head -1)
+          scheme="${workspace%.xcworkspace}"
+          xcodebuild build -workspace "$workspace" -scheme "$scheme" -configuration Debug             -sdk iphonesimulator -destination 'generic/platform=iOS Simulator'             -derivedDataPath build CODE_SIGNING_ALLOWED=NO
+
   # Add-on B3: the hand-written .d.ts files of both JS bindings, compiled
   # against a typed usage file (never run) — a declaration that drifts from
   # what the integration guides tell a host app to write stops compiling.
