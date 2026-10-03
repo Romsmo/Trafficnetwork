@@ -491,6 +491,85 @@ jobs:
           path: client-lib/bindings/kotlin/android/build/outputs/aar/*-release.aar
           retention-days: 14
 
+  # Add-on B4: the Swift package and its XCFramework (iOS device, iOS
+  # simulator, macOS), on a macOS runner — Xcode only exists there. Builds the
+  # package for macOS and for iOS (device and simulator), and runs the same
+  # conformance scenarios through the generated Swift on macOS. What is *not*
+  # done: running anything inside an iOS simulator — the iOS slices are built
+  # and linked, and it is the same Rust library and the same generated Swift
+  # that run on macOS here. docs/integration-ios.md says so too.
+  swift-package:
+    name: build + conformance (Swift package, macOS runner)
+    runs-on: macos-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-ios,aarch64-apple-ios-sim,x86_64-apple-ios,aarch64-apple-darwin,x86_64-apple-darwin
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: client-lib
+          key: apple
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Build the XCFramework and generate the Swift wrapper
+        run: bash bindings/swift/build-xcframework.sh
+
+      - name: Build the package for macOS
+        working-directory: client-lib/bindings/swift
+        run: swift build
+
+      - name: Build the package for iOS (device and simulator)
+        working-directory: client-lib/bindings/swift
+        run: |
+          xcodebuild build -scheme TrafficNetwork -destination 'generic/platform=iOS' -derivedDataPath .build/xcode-ios
+          xcodebuild build -scheme TrafficNetwork -destination 'generic/platform=iOS Simulator' -derivedDataPath .build/xcode-ios-sim
+
+      - name: Build the conformance bridge
+        working-directory: client-lib/bindings/swift/conformance
+        run: swift build
+
+      - name: Install the runner's dependencies
+        working-directory: client-lib/conformance
+        run: npm ci
+
+      - name: Start the scripted server
+        run: |
+          node conformance/mock-server.mjs --port 18994 > mock.log 2>&1 &
+          for i in $(seq 1 50); do
+            curl -sf -X POST http://127.0.0.1:18994/__instances -d '{}' > /dev/null && break
+            sleep 0.2
+          done
+
+      - name: Run the scenarios (secrets in the library's file)
+        env:
+          MOCK_URL: http://127.0.0.1:18994
+        run: node conformance/run_bridge.mjs --name swift -- bindings/swift/conformance/.build/debug/TrafficNetworkBridge
+
+      - name: Run the scenarios (secrets in a store implemented in Swift)
+        env:
+          MOCK_URL: http://127.0.0.1:18994
+        run: node conformance/run_bridge.mjs --name swift --host-secure-store -- bindings/swift/conformance/.build/debug/TrafficNetworkBridge
+
+      - name: Scripted server log
+        if: failure()
+        run: cat mock.log
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: trafficnetwork-swift-package
+          path: |
+            client-lib/bindings/swift/Package.swift
+            client-lib/bindings/swift/Sources
+            client-lib/bindings/swift/TrafficNetworkFFI.xcframework
+          retention-days: 14
+
   # Add-on B3: the hand-written .d.ts files of both JS bindings, compiled
   # against a typed usage file (never run) — a declaration that drifts from
   # what the integration guides tell a host app to write stops compiling.

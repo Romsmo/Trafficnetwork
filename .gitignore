@@ -83,3 +83,8 @@ client-lib/bindings/kotlin/*/build/
 client-lib/bindings/kotlin/*/.gradle/
 client-lib/bindings/kotlin/android/src/main/jniLibs/
 client-lib/bindings/kotlin/*/.kotlin/
+client-lib/bindings/swift/TrafficNetworkFFI.xcframework/
+client-lib/bindings/swift/Sources/TrafficNetwork/*.swift
+client-lib/bindings/swift/build/
+client-lib/bindings/swift/.build/
+client-lib/bindings/swift/conformance/.build/
