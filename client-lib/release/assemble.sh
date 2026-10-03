@@ -66,8 +66,13 @@ mkdir -p "$plugin"
 cp -r client-lib/bindings/flutter/lib client-lib/bindings/flutter/android client-lib/bindings/flutter/ios \
       client-lib/bindings/flutter/pubspec.yaml client-lib/bindings/flutter/analysis_options.yaml \
       client-lib/bindings/flutter/example LICENSE "$plugin"/
-cp -r artifacts/trafficnetwork-flutter-plugin-android/android/src/main/jniLibs "$plugin/android/src/main/"
-cp -r artifacts/trafficnetwork-flutter-plugin-ios/ios/Frameworks "$plugin/ios/"
+# (An artifact's root is the common ancestor of the paths uploaded, so find the
+# directories instead of assuming where they ended up.)
+jni_libs="$(find artifacts/trafficnetwork-flutter-plugin-android -type d -name jniLibs | head -1)"
+frameworks="$(find artifacts/trafficnetwork-flutter-plugin-ios -type d -name Frameworks | head -1)"
+test -n "$jni_libs" && test -n "$frameworks"
+cp -r "$jni_libs" "$plugin/android/src/main/"
+cp -r "$frameworks" "$plugin/ios/"
 tar czf "release/trafficnetwork-flutter-$VERSION.tar.gz" -C stage "trafficnetwork-flutter-$VERSION"
 
 # ---- React Native: the two halves of the library, merged into one package

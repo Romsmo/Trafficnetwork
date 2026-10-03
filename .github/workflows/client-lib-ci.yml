@@ -803,8 +803,8 @@ jobs:
       - name: Install the code generator
         if: steps.codegen-cache.outputs.cache-hit != 'true'
         run: |
-          cargo install flutter_rust_bridge_codegen --version 2.13.0 --locked
-          cargo install cargo-expand --locked
+          cargo install flutter_rust_bridge_codegen --version 2.13.0 --locked --force
+          cargo install cargo-expand --locked --force
 
       - name: Install the package's dependencies
         working-directory: client-lib/bindings/dart
