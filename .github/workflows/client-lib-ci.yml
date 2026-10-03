@@ -1079,6 +1079,106 @@ jobs:
         working-directory: client-lib/bindings/react-native/library/example/android
         run: ./gradlew assembleDebug --no-daemon --console=plain -PreactNativeArchitectures=arm64-v8a
 
+  # What flutter-android cannot show: the app *running*. The same freshly
+  # created Flutter app, with an integration test added, on an Android
+  # emulator (x86_64, hardware-accelerated) — the library loads from the APK,
+  # a client syncs against the scripted server running on the host
+  # (10.0.2.2 is the emulator's name for it), and a secret store implemented in
+  # Dart is called by the library. The first place anything of this library
+  # executes on Android.
+  flutter-android-emulator:
+    name: run (Flutter app on an Android emulator)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-linux-android
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: client-lib/bindings/dart/rust
+          key: flutter-android-emulator
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Cache cargo-ndk
+        id: ndk-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin/cargo-ndk
+          key: cargo-ndk-${{ runner.os }}-v4
+
+      - name: Install cargo-ndk
+        if: steps.ndk-cache.outputs.cache-hit != 'true'
+        run: cargo install --locked cargo-ndk
+
+      # Only the emulator's own ABI: this job is about running, not packaging.
+      - name: Build the native library into the plugin (x86_64 only)
+        working-directory: client-lib/bindings/dart/rust
+        run: |
+          rm -rf ../../flutter/android/src/main/jniLibs
+          cargo ndk -t x86_64 -o ../../flutter/android/src/main/jniLibs build --release
+
+      - name: Start the scripted server
+        run: |
+          node conformance/mock-server.mjs --port 18997 > mock.log 2>&1 &
+          for i in $(seq 1 50); do
+            curl -sf -X POST http://127.0.0.1:18997/__instances -d '{}' > /dev/null && break
+            sleep 0.2
+          done
+
+      - name: Create the app and add the test
+        run: |
+          URL=$(curl -sf -X POST http://127.0.0.1:18997/__instances -d '{}' | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>console.log(JSON.parse(s).url))")
+          echo "TN_NODE=${URL/127.0.0.1/10.0.2.2}" >> "$GITHUB_ENV"
+          cd "$RUNNER_TEMP"
+          flutter create --platforms=android --project-name trafficnetwork_example_app app
+          cd app
+          flutter pub add path_provider
+          flutter pub add trafficnetwork_flutter --path "$GITHUB_WORKSPACE/client-lib/bindings/flutter"
+          flutter pub add dev:integration_test --sdk flutter
+          mkdir integration_test
+          cp "$GITHUB_WORKSPACE/client-lib/bindings/flutter/example/integration_test/app_test.dart" integration_test/
+          rm -f test/widget_test.dart
+          # The scripted server speaks plain http; Android refuses that by default.
+          sed -i 's|<application|<application android:usesCleartextTraffic="true"|' android/app/src/main/AndroidManifest.xml
+
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Run the test on the emulator
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          arch: x86_64
+          target: google_apis
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          disable-animations: true
+          working-directory: ${{ runner.temp }}/app
+          script: flutter test integration_test --dart-define=TN_NODE=${{ env.TN_NODE }}
+
+      - name: Scripted server log
+        if: failure()
+        run: cat mock.log
+
   # The same on iOS, on a macOS runner: the Rust for the iOS targets as an
   # XCFramework, the bindings, `pod install`, and the example app built for the
   # simulator. Builds only: the app is not run.

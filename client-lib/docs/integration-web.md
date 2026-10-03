@@ -129,7 +129,17 @@ These are real differences, not omissions waiting to be fixed:
 ## Packaging
 
 `wasm-pack build --target web` produces a self-contained package directory
-(`pkg/`: the `.wasm`, its JavaScript loader and `.d.ts`). The wrapper in
-`js/` and the shared module in `../shared/` are plain ES modules; bundlers
-(Vite, webpack, esbuild) handle them as they are. There is no npm tarball
-yet, and nothing is published to a registry.
+(`pkg/`: the `.wasm`, its JavaScript loader and `.d.ts`). The wrapper in `js/`
+and the shared module in `../shared/` are plain ES modules; bundlers (Vite,
+webpack, esbuild) handle them as they are.
+
+`node bindings/pack-npm.mjs` (after the `wasm-pack build` above) assembles
+`@trafficnetwork/client-web` as a tarball that stands on its own
+(`trafficnetwork-client-web-<version>.tgz`: wrapper, types, the WebAssembly
+package, the shared typed surface copied in, the example page, a README); in
+the repository the wrapper imports `../pkg/` and `../../shared/`, paths the
+script points at the copies inside the package. CI installs the tarball into
+an empty project, serves the installed package and opens its example page in
+headless Chrome (job `npm-packages`); the tarball is attached to the run.
+The package is marked `"private": true` — nothing has been published to a
+registry.
