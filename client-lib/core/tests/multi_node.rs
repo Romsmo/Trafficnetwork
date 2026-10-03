@@ -384,6 +384,57 @@ async fn the_same_report_seen_through_two_servers_is_shown_once() {
     harness.stop_node(&b).await;
 }
 
+/// Real-time push against a real server — the one path the other tests here do
+/// not touch, and the one whose URL used to be wrong (`http://…/v1/ws`, which no
+/// WebSocket implementation accepts): the unit tests drive a scripted
+/// transport that was keyed on the same wrong URL, so only a real server could
+/// show that no push ever arrived. Nothing here calls `sync()` after the push
+/// loop is running: the report must come through the WebSocket.
+#[tokio::test]
+async fn a_report_made_while_connected_arrives_through_the_websocket_push() {
+    let Some(harness) = Harness::connect().await else {
+        eprintln!(
+            "skipped: no multi-node harness at {} (see the module doc)",
+            harness_url()
+        );
+        return;
+    };
+    let node = harness.start_node(json!({})).await;
+    let client = std::sync::Arc::new(client_for(&node, &temp_storage("push")));
+    client.update_position(48.5, 9.5, None).unwrap();
+    client.sync().await.unwrap();
+    assert!(client
+        .get_nearby(48.5, 9.5, 500.0, &[NearbyCategory::Hazards])
+        .unwrap()
+        .is_empty());
+
+    let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let runner = {
+        let client = client.clone();
+        let stop = stop.clone();
+        tokio::spawn(async move { client.run_realtime(&stop).await })
+    };
+    // Another party reports once the connection is up (the loop first closes
+    // the gap with a delta sync, then listens).
+    tokio::time::sleep(Duration::from_secs(2)).await;
+    harness.seed_hazard_report(&node, "accident", 48.5, 9.5).await;
+
+    wait_for(
+        || async {
+            let items = client
+                .get_nearby(48.5, 9.5, 500.0, &[NearbyCategory::Hazards])
+                .ok()?;
+            (!items.is_empty()).then_some(())
+        },
+        Duration::from_secs(15),
+    )
+    .await;
+
+    stop.store(true, std::sync::atomic::Ordering::Relaxed);
+    runner.abort();
+    harness.stop_node(&node).await;
+}
+
 #[tokio::test]
 async fn an_offline_report_is_delivered_once_a_different_server_is_reachable() {
     let Some(harness) = Harness::connect().await else {
