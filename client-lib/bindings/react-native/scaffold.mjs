@@ -48,6 +48,7 @@ execFileSync(
     "--type", "turbo-module",
     "--languages", "cpp",
     "--example", "vanilla",
+    "--tools", "eslint",
   ],
   { stdio: "inherit", shell: process.platform === "win32" },
 );
