@@ -83,7 +83,16 @@ tar xzf artifacts/trafficnetwork-react-native-ios/trafficnetwork-react-native-io
 # Both halves must really be in it: the Rust for four Android ABIs and the XCFramework.
 test -f "$rn/package/android/src/main/jniLibs/arm64-v8a/libtrafficnetwork_uniffi.a"
 test -d "$rn/package/TrafficnetworkReactNativeFramework.xcframework"
-(cd "$rn/package" && npm pack --ignore-scripts --pack-destination "$root/release")
+# The package ships its JavaScript already built; a consumer must not run the
+# library's own build (react-native-builder-bob) when installing it, so the
+# lifecycle scripts go before packing.
+(cd "$rn/package" && node -e '
+  const fs = require("fs");
+  const manifest = JSON.parse(fs.readFileSync("package.json", "utf8"));
+  delete manifest.scripts;
+  fs.writeFileSync("package.json", JSON.stringify(manifest, null, 2) + "
+");
+' && npm pack --pack-destination "$root/release")
 
 # ---- Checksums
 (cd release && sha256sum * > checksums.txt)
