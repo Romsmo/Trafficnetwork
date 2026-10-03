@@ -129,7 +129,7 @@ installs the tarball into an empty project and runs the example from there
 cd client-lib
 node bindings/pack-npm.mjs dist/npm
 mkdir ~/try-it && cd ~/try-it && npm init -y
-npm install ~/…/client-lib/dist/npm/trafficnetwork-client-node-0.1.0.tgz
+npm install ~/…/client-lib/dist/npm/trafficnetwork-client-node-1.0.0.tgz
 ```
 
 The package does **not** contain the native library — it is per platform and
