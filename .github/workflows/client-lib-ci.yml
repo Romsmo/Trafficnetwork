@@ -580,6 +580,17 @@ jobs:
           MOCK_URL: http://127.0.0.1:18994
         run: node conformance/run_bridge.mjs --name swift --host-secure-store -- bindings/swift/conformance/.build/debug/TrafficNetworkBridge
 
+      # What docs/integration-ios.md tells a reader to write must work, not
+      # merely compile: its example (the same calls as in a SwiftUI view),
+      # against the mock, with a check that it really synced and queued a report.
+      - name: Run the integration guide's example
+        working-directory: client-lib/bindings/swift/example
+        run: |
+          URL=$(curl -sf -X POST http://127.0.0.1:18994/__instances -d '{}' | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>console.log(JSON.parse(s).url))")
+          TN_NODE="$URL" TN_CLIENT_ID=example TN_CLIENT_SECRET=example swift run | tee example.out
+          grep -q "sync ok: true" example.out
+          grep -q "queued report" example.out
+
       - name: Scripted server log
         if: failure()
         run: cat mock.log
