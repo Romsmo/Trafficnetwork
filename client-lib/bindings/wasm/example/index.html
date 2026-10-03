@@ -1,0 +1,85 @@
+<!doctype html>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Trafficnetwork — minimal browser example</title>
+<style>
+  body { font: 16px/1.5 system-ui, sans-serif; max-width: 42rem; margin: 2rem auto; padding: 0 1rem; }
+  input { font: inherit; width: 100%; box-sizing: border-box; }
+  button { font: inherit; margin: .5rem .5rem .5rem 0; }
+  pre { background: #f4f4f4; padding: .75rem; overflow: auto; }
+</style>
+
+<h1>Trafficnetwork — minimal example</h1>
+<p>
+  Server to talk to (a Trafficnetwork node that allows browser access — the
+  reference server does):
+</p>
+<input id="server" value="http://localhost:3000" />
+<p>
+  Client id and secret of a credential with scope <code>client</code>
+  (<code>server/scripts/create-client.mts</code> creates one):
+</p>
+<input id="clientId" placeholder="client id" />
+<input id="clientSecret" placeholder="client secret" type="password" />
+<p>
+  <button id="go">Connect, sync, look around Berlin</button>
+  <button id="report">Report an accident at that spot</button>
+</p>
+<pre id="out">Not started.</pre>
+
+<script type="module">
+  // The only import a host page needs. It loads the WebAssembly module itself.
+  import { Client } from "../js/index.js";
+
+  const out = document.querySelector("#out");
+  const log = (text) => (out.textContent += `\n${text}`);
+  const BERLIN = { lat: 52.52, lng: 13.405 };
+  let client = null;
+
+  async function connect() {
+    if (client) return client;
+    // `storagePath` is the name of the IndexedDB database here — everything
+    // the client learns stays in this browser and survives a reload.
+    client = await Client.create({
+      storagePath: "trafficnetwork-example",
+      discovery: false,
+      nodes: [document.querySelector("#server").value],
+      credentials: {
+        type: "client",
+        clientId: document.querySelector("#clientId").value,
+        clientSecret: document.querySelector("#clientSecret").value,
+      },
+    });
+    client.onEvent((event) => log(`event: ${event.type}`));
+    return client;
+  }
+
+  document.querySelector("#go").addEventListener("click", async () => {
+    out.textContent = "Working…";
+    try {
+      const c = await connect();
+      await c.updatePosition(BERLIN.lat, BERLIN.lng); // which map tiles to watch
+      const report = await c.sync(); // fetch what is around
+      log(`sync ok: ${report.ok}, pending writes: ${report.pendingWrites}`);
+
+      // Reads never touch the network — they answer from the local copy.
+      log(`speed limit here: ${JSON.stringify(await c.getSpeedLimitAt(BERLIN.lat, BERLIN.lng))}`);
+      const nearby = await c.getNearby(BERLIN.lat, BERLIN.lng, 2000);
+      log(`${nearby.length} things within 2 km`);
+    } catch (error) {
+      log(`${error.name ?? "Error"}: ${error.message}`);
+    }
+  });
+
+  document.querySelector("#report").addEventListener("click", async () => {
+    try {
+      const c = await connect();
+      // Queued locally first (shown at once by getNearby), sent by the next sync.
+      const id = await c.submitReport("accident", BERLIN.lat, BERLIN.lng);
+      log(`queued report ${id}; syncing…`);
+      log(`sync ok: ${(await c.sync()).ok}`);
+    } catch (error) {
+      log(`${error.name ?? "Error"}: ${error.message}`);
+    }
+  });
+</script>
