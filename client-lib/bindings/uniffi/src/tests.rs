@@ -72,7 +72,9 @@ fn closing_the_last_reference_leaves_the_data_and_a_closed_client_says_so() {
     let status = parsed(&client.call("getSyncStatus".to_string(), String::new()));
     assert_eq!(status["error"]["code"], "closed");
     drop(client);
-    assert!(std::path::Path::new(&dir).join("trafficnetwork.db").exists());
+    assert!(std::path::Path::new(&dir)
+        .join("trafficnetwork.db")
+        .exists());
     let _ = std::fs::remove_dir_all(&dir);
 }
 

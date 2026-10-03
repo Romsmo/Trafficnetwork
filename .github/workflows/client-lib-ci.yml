@@ -391,7 +391,7 @@ jobs:
         run: cargo build -p trafficnetwork-uniffi
 
       - name: Generate the Kotlin wrapper from it
-        run: bindings/kotlin/generate.sh jvm target/debug/libtrafficnetwork_uniffi.so
+        run: bash bindings/kotlin/generate.sh jvm target/debug/libtrafficnetwork_uniffi.so
 
       - name: Build the conformance bridge
         working-directory: client-lib/bindings/kotlin/jvm

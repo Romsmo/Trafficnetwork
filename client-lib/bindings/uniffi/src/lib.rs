@@ -177,9 +177,8 @@ impl TrafficNetworkClient {
         options_json: String,
         secure_store: Option<Arc<dyn SecureStore>>,
     ) -> Result<Arc<Self>, ClientError> {
-        let store = secure_store.map(|store| -> Arc<dyn CoreSecureStore> {
-            Arc::new(HostSecureStore(store))
-        });
+        let store = secure_store
+            .map(|store| -> Arc<dyn CoreSecureStore> { Arc::new(HostSecureStore(store)) });
         let outcome = catch_unwind(AssertUnwindSafe(|| {
             // reqwest needs a running runtime to build its client on some platforms.
             let _enter = runtime().enter();
