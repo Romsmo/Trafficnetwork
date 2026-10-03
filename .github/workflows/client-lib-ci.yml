@@ -236,10 +236,12 @@ jobs:
         with:
           targets: ${{ runner.os == 'macOS' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
 
+      # The key names the runner: objects built on one Ubuntu release do not
+      # link on another (glibc symbols differ).
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: client-lib
-          key: c-abi
+          key: c-abi-${{ matrix.os }}
 
       - name: Test
         run: cargo test -p trafficnetwork-c-abi

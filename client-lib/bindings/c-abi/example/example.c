@@ -49,7 +49,7 @@ int main(void) {
     tn_free_string(ask(client, "update position", "updatePosition", here)); /* which map tiles to watch */
 
     char *sync = ask(client, "sync", "sync", "{}"); /* fetch what is around */
-    int synced = strstr(sync, "\"ok\":{\"ok\":true") != NULL;
+    int synced = strstr(sync, "\"ok\":true") != NULL;
     printf("sync ok: %s\n", synced ? "true" : "false");
     tn_free_string(sync);
 
@@ -63,7 +63,7 @@ int main(void) {
                        "{\"type\": \"accident\", \"lat\": 52.52, \"lng\": 13.405}");
     tn_free_string(queued);
     char *sent = ask(client, "sync again", "sync", "{}");
-    printf("queued report; sync ok: %s\n", strstr(sent, "\"ok\":{\"ok\":true") ? "true" : "false");
+    printf("queued report; sync ok: %s\n", strstr(sent, "\"ok\":true") ? "true" : "false");
     tn_free_string(sent);
 
     tn_client_free(client); /* the data stays on disk */
