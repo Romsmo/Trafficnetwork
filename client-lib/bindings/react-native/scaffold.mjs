@@ -81,8 +81,11 @@ manifest.dependencies = {
 };
 manifest.scripts = {
   ...manifest.scripts,
-  "ubrn:android": "ubrn build android --and-generate",
-  "ubrn:ios": "ubrn build ios --and-generate && (cd example/ios && pod install)",
+  "ubrn:android": "ubrn build android --and-generate && node scripts/patch-cmake.mjs",
+  // The deployment target keeps the C parts of the dependencies (the crypto
+  // library) and the linker agreeing about what an old-enough iOS provides.
+  "ubrn:ios":
+    "IPHONEOS_DEPLOYMENT_TARGET=13.0 ubrn build ios --and-generate && (cd example/ios && pod install)",
   "ubrn:clean":
     "rm -rf cpp/ android/CMakeLists.txt android/src/main/java android/*.cpp ios/ src/Native* src/index.*ts* src/multiply* src/generated/",
 };
