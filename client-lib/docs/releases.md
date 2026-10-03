@@ -19,7 +19,7 @@ publishing them is a decision of its own. You use the files directly, as below.
 | `TrafficNetworkFFI-<v>.xcframework.zip` | iOS / macOS | the XCFramework on its own | [integration-ios.md](integration-ios.md) |
 | `trafficnetwork-dart-<v>.tar.gz` | Dart (command line, server) | `dependencies: trafficnetwork: {path: …}`; the native library comes from the C-ABI/Dart build | [integration-flutter.md](integration-flutter.md) |
 | `trafficnetwork-flutter-<v>.tar.gz` | Flutter (Android + iOS) | unpack, `dependencies: trafficnetwork_flutter: {path: …}`; the native libraries are inside | [integration-flutter.md](integration-flutter.md) |
-| `trafficnetwork-<v>.tgz` (`@trafficnetwork/react-native`) | React Native (Android + iOS) | `npm install ./trafficnetwork-react-native-<v>.tgz` | [integration-react-native.md](integration-react-native.md) |
+| `trafficnetwork-react-native-<v>.tgz` (`@trafficnetwork/react-native`) | React Native (Android + iOS) | `npm install ./trafficnetwork-react-native-<v>.tgz` | [integration-react-native.md](integration-react-native.md) |
 | `trafficnetwork-client-web-<v>.tgz` | browser | `npm install ./…tgz`, serve `node_modules/@trafficnetwork/client-web/` | [integration-web.md](integration-web.md) |
 | `trafficnetwork-client-node-<v>.tgz` | Node.js | `npm install ./…tgz`, plus the C-ABI library for your platform | [integration-node.md](integration-node.md) |
 | `trafficnetwork-<v>-py3-none-any.whl`, `trafficnetwork-<v>.tar.gz` | Python | `pip install ./…whl`, plus the C-ABI library for your platform | [integration-python.md](integration-python.md) |
