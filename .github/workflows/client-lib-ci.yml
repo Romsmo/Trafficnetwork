@@ -699,22 +699,23 @@ jobs:
         env:
           MOCK_URL: http://127.0.0.1:18995
           TN_DART_LIB: ${{ github.workspace }}/client-lib/bindings/dart/rust/target/debug/libtrafficnetwork_dart.so
-        run: node conformance/run_bridge.mjs --name dart -- dart run bindings/dart/bin/conformance_bridge.dart
+        run: node conformance/run_bridge.mjs --name dart --cwd bindings/dart -- dart run bin/conformance_bridge.dart
 
       - name: Run the scenarios (secrets in a store implemented in Dart)
         env:
           MOCK_URL: http://127.0.0.1:18995
           TN_DART_LIB: ${{ github.workspace }}/client-lib/bindings/dart/rust/target/debug/libtrafficnetwork_dart.so
-        run: node conformance/run_bridge.mjs --name dart --host-secure-store -- dart run bindings/dart/bin/conformance_bridge.dart
+        run: node conformance/run_bridge.mjs --name dart --host-secure-store --cwd bindings/dart -- dart run bin/conformance_bridge.dart
 
       # What docs/integration-flutter.md tells a reader to write must work,
       # not merely compile.
       - name: Run the integration guide's example
+        working-directory: client-lib/bindings/dart
         env:
           TN_DART_LIB: ${{ github.workspace }}/client-lib/bindings/dart/rust/target/debug/libtrafficnetwork_dart.so
         run: |
           URL=$(curl -sf -X POST http://127.0.0.1:18995/__instances -d '{}' | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>console.log(JSON.parse(s).url))")
-          TN_NODE="$URL" TN_CLIENT_ID=example TN_CLIENT_SECRET=example             dart run bindings/dart/example/trafficnetwork_example.dart | tee example.out
+          TN_NODE="$URL" TN_CLIENT_ID=example TN_CLIENT_SECRET=example             dart run example/trafficnetwork_example.dart | tee example.out
           grep -q "sync ok: true" example.out
           grep -q "queued report" example.out
 

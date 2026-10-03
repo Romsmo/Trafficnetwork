@@ -35,10 +35,11 @@ export class BridgeClient extends BaseClient {
   }
 
   /** Starts the bridge and creates the client in it; rejects with a TrafficNetworkError like any binding. */
-  static async create(command, args, options, { hostSecureStore = false, env = {} } = {}) {
+  static async create(command, args, options, { hostSecureStore = false, env = {}, cwd } = {}) {
     const child = spawn(command, args, {
       stdio: ["pipe", "pipe", "inherit"],
       env: { ...process.env, ...env },
+      cwd,
     });
     const client = new BridgeClient(child);
     const reply = await client._request({

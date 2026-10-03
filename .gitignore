@@ -92,3 +92,4 @@ client-lib/bindings/dart/.dart_tool/
 client-lib/bindings/dart/pubspec.lock
 client-lib/bindings/dart/rust/target/
 client-lib/bindings/swift/example/.build/
+client-lib/bindings/dart/example.out
