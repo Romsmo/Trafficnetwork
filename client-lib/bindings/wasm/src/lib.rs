@@ -22,7 +22,9 @@
 //! (`Platform::wasm`, `storage::IndexedDbStore`) is only ever reachable
 //! asynchronously in a browser — see that module's own doc for why.
 
+use std::cell::RefCell;
 use std::panic::AssertUnwindSafe;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use futures_util::FutureExt;
@@ -69,6 +71,9 @@ unsafe impl Sync for WasmEventCallback {}
 #[wasm_bindgen]
 pub struct Client {
     inner: Arc<TrafficNetworkClient>,
+    /// Set while `startRealtime` has a task running — same role as the
+    /// C-ABI `Handle::realtime_stop`.
+    realtime_stop: RefCell<Option<Arc<AtomicBool>>>,
 }
 
 #[wasm_bindgen]
@@ -95,6 +100,7 @@ impl Client {
             .map_err(|e| JsValue::from_str(&error_envelope(&e)))?;
         Ok(Client {
             inner: Arc::new(client),
+            realtime_stop: RefCell::new(None),
         })
     }
 
@@ -125,6 +131,35 @@ impl Client {
             Ok(Ok(value)) => json!({ "ok": value }).to_string(),
             Ok(Err(error)) => error_envelope(&error),
             Err(_) => panic_envelope(),
+        }
+    }
+
+    /// Keeps a WebSocket connection to the network open and applies pushed
+    /// events (`client-lib/docs/api.md`, "Realtime push") — the JS
+    /// counterpart of the C-ABI's `tn_client_start_realtime`, run on the
+    /// page's own event loop instead of a library-owned thread. A no-op if
+    /// already running.
+    #[wasm_bindgen(js_name = startRealtime)]
+    pub fn start_realtime(&self) {
+        let mut slot = self.realtime_stop.borrow_mut();
+        if slot.is_some() {
+            return;
+        }
+        let stop = Arc::new(AtomicBool::new(false));
+        *slot = Some(stop.clone());
+        let client = self.inner.clone();
+        wasm_bindgen_futures::spawn_local(async move {
+            let _ = client.run_realtime(&stop).await;
+        });
+    }
+
+    /// Asks a running realtime task to stop — between connection attempts,
+    /// not by force-closing a connection that is open (see
+    /// `TrafficNetworkClient::run_realtime`). A no-op if none is running.
+    #[wasm_bindgen(js_name = stopRealtime)]
+    pub fn stop_realtime(&self) {
+        if let Some(stop) = self.realtime_stop.borrow_mut().take() {
+            stop.store(true, Ordering::Relaxed);
         }
     }
 

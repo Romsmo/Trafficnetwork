@@ -115,13 +115,9 @@ jobs:
         with:
           version: "latest"
 
-      # `-- --lib`: only the library's own unit tests. Without it cargo would
-      # also compile this crate's integration tests (`tests/multi_node.rs`,
-      # which needs a native tokio runtime and `Platform::native`) and
-      # examples for wasm32, none of which exist there.
       - name: Run core's wasm32 unit tests in headless Chrome
         working-directory: client-lib/core
-        run: wasm-pack test --headless --chrome -- --lib
+        run: wasm-pack test --headless --chrome
 
       - name: Build the wasm binding for the browser
         working-directory: client-lib/bindings/wasm

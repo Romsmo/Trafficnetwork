@@ -16,6 +16,10 @@ crate-type = ["cdylib", "rlib"]
 trafficnetwork-core = { path = "../../core" }
 serde_json = { workspace = true }
 wasm-bindgen = "0.2"
+# `#[wasm_bindgen] pub async fn` expands to code that names this crate
+# directly, so it has to be a direct dependency here even though core
+# already depends on it — and `startRealtime` uses `spawn_local` itself.
+wasm-bindgen-futures = "0.4"
 js-sys = "0.3"
 # `AssertUnwindSafe(future).catch_unwind()` in `call` — the same
 # "a panic never crashes past the binding boundary" contract the C-ABI
