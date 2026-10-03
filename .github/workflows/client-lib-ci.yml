@@ -1033,8 +1033,12 @@ jobs:
       - name: Scaffold the React Native library
         run: node bindings/react-native/scaffold.mjs
 
+      # The library is generated, so there is no lockfile yet; yarn refuses to
+      # create one on CI unless told otherwise.
       - name: Install its dependencies
         working-directory: client-lib/bindings/react-native/library
+        env:
+          YARN_ENABLE_IMMUTABLE_INSTALLS: "false"
         run: |
           corepack enable
           yarn install
