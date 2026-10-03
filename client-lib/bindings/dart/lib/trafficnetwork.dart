@@ -55,7 +55,10 @@ abstract interface class SecureStore {
   Future<void> delete(String key);
 }
 
-/// Loads the native library. Call once, before the first client is created.
+/// Loads the native library. Call before the first client is created; calling
+/// it again (a second screen, a second test) returns the first call's result
+/// instead of loading twice, so the arguments of the first call are the ones
+/// that count. A failed attempt may be retried.
 ///
 /// [libraryPath] names the library file (`libtrafficnetwork_dart.so`,
 /// `.dylib`, `.dll`; a bare name is looked up the way the platform looks up
@@ -64,14 +67,24 @@ abstract interface class SecureStore {
 /// not used. With neither, the loader looks where a Flutter app's build puts
 /// it. The `trafficnetwork_flutter` package calls this with what its
 /// platforms need.
-Future<void> initialize({String? libraryPath, bool processLibrary = false}) =>
-    RustLib.init(
-      externalLibrary: processLibrary
-          ? ExternalLibrary.process(iKnowHowToUseIt: true)
-          : libraryPath == null
-              ? null
-              : ExternalLibrary.open(libraryPath),
-    );
+Future<void> initialize({String? libraryPath, bool processLibrary = false}) {
+  final running = _initialization;
+  if (running != null) return running;
+  final started = RustLib.init(
+    externalLibrary: processLibrary
+        ? ExternalLibrary.process(iKnowHowToUseIt: true)
+        : libraryPath == null
+            ? null
+            : ExternalLibrary.open(libraryPath),
+  );
+  _initialization = started;
+  started.onError<Object>((error, stackTrace) {
+    _initialization = null;
+  });
+  return started;
+}
+
+Future<void>? _initialization;
 
 /// The native library's version.
 String libraryVersion() => native.libraryVersion();
