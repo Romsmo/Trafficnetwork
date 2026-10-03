@@ -95,3 +95,18 @@ client-lib/bindings/swift/example/.build/
 client-lib/bindings/dart/example.out
 # Dart packages keep their executables in bin/ (ignored above for Go-style build output).
 !client-lib/bindings/dart/bin/
+client-lib/dist/
+client-lib/bindings/flutter/android/src/main/jniLibs/
+client-lib/bindings/flutter/ios/Frameworks/
+client-lib/bindings/flutter/ios/build/
+client-lib/flutter-example-debug.apk
+client-lib/bindings/flutter/.dart_tool/
+client-lib/bindings/flutter/pubspec.lock
+client-lib/bindings/react-native/library/
+client-lib/bindings/c-abi/example/example
+client-lib/bindings/c-abi/example/example.exe
+client-lib/bindings/c-abi/example/*.dll
+client-lib/bindings/c-abi/example/*.out
+client-lib/bindings/c-abi/example/*.log
+client-lib/bindings/c-abi/example/trafficnetwork-example-data/
+client-lib/bindings/python/example.out

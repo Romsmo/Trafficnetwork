@@ -25,7 +25,8 @@ cd bindings/node
 npm install
 
 # 3. Run the example against a server, with a credential of scope `client`
-#    (in server/: npm run create-client -- --name node-example --scope client).
+#    (in server/: npm run create-client -- --name node-example --scope client;
+#    in the Docker stack: server/docs/installation.md, "Create the first client").
 TRAFFICNETWORK_LIB=../../target/release/libtrafficnetwork.so \
 TN_NODE=http://localhost:3000 TN_CLIENT_ID=… TN_CLIENT_SECRET=… \
   node example.mjs
@@ -86,12 +87,14 @@ types ship alongside (`index.d.ts`).
   "not there"/"refused", like in every other binding).
 - Do not call `free()` while a call on that client is still in flight.
 - **Koffi's call stacks are sized at load.** Koffi runs each native call on a
-  stack of its own, and its defaults (2 MiB sync, 128 KiB async) are far too
-  small for a real sync — the library overflowed it with a segmentation fault
-  on the first request. `index.js` raises them (`koffi.config(...)`: 8 MiB
-  each, plus a 4 MiB async heap) before declaring anything. If your
-  application configures koffi itself, do it before importing this package
-  and keep at least those values.
+  stack of its own, and its defaults (2 MiB sync, 128 KiB async) were far too
+  small for a real sync back when the library ran the call on the calling
+  thread — it overflowed with a segmentation fault on the first request.
+  `index.js` raises them (`koffi.config(...)`: 8 MiB each, plus a 4 MiB async
+  heap) before declaring anything. Since add-on B5 the library runs every call on
+  its own 8 MiB threads and the calling thread only waits, so this is no longer
+  what keeps a call alive — it stays as insurance. If your application configures
+  koffi itself, do it before importing this package.
 
 ## Differences from the browser binding
 
@@ -114,6 +117,24 @@ plausible.
 
 ## Packaging
 
-The package is marked private and its sources import `../shared/`, so it is
-used from this repository as shown above. A self-contained tarball is not
-built yet, and nothing is published to a registry.
+`node bindings/pack-npm.mjs` assembles the package as a tarball that stands on
+its own (`trafficnetwork-client-node-<version>.tgz`: the sources, the shared
+typed surface copied in, the example, a README) — in the repository the
+sources import `../shared/`, a path that does not exist once a package is
+installed elsewhere, and the script points the two imports at the copy. CI
+installs the tarball into an empty project and runs the example from there
+(job `npm-packages`); the tarball is attached to the run.
+
+```bash
+cd client-lib
+node bindings/pack-npm.mjs dist/npm
+mkdir ~/try-it && cd ~/try-it && npm init -y
+npm install ~/…/client-lib/dist/npm/trafficnetwork-client-node-0.1.0.tgz
+```
+
+The package does **not** contain the native library — it is per platform and
+big; build it (`cargo build -p trafficnetwork-c-abi --release`, see above) or
+take it from the CI run's `trafficnetwork-c-abi-<os>` artifact, and point the
+package at it. The package is marked `"private": true`: `npm pack` works,
+`npm publish` refuses — publishing to a registry is a decision of its own, and
+nothing has been published.

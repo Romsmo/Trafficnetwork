@@ -60,7 +60,7 @@ The Docker image contains the UI (`server/web` is copied into it); `docker-compo
   returns nor pushes such reports.
 * **Connect** — three ways to use the network (own app with the client library, run your own node, call the API) with
   copyable `curl` examples containing this node's address, and the node's network status (node id, version, federation
-  state, other known nodes). Code examples for the client library's platform bindings will follow when those exist.
+  state, other known nodes). It points to the client library's integration guides (`client-lib/docs/`).
 * **About** — the project text, data sources, safety and privacy notice, and a prominent link to the project on GitHub.
 * **Online display** — a small "N online" at the bottom right of every page once the node offers the counter, see below.
 * German and English (browser language, switchable, remembered in `localStorage` — the only thing the page stores), mobile

@@ -1,0 +1,13 @@
+---
+# uniffi-bindgen-react-native's configuration for the React Native library
+# that scaffold.mjs creates (docs/integration-react-native.md has the steps).
+# The Rust is this repository's own UniFFI crate, the very one Kotlin and Swift
+# are generated from — React Native gets the same API, not a port of it.
+rust:
+  # The Rust workspace, relative to the library scaffold.mjs creates
+  # (bindings/react-native/library): client-lib/.
+  directory: ../../..
+  manifestPath: bindings/uniffi/Cargo.toml
+bindings:
+  ts: src/generated
+  cpp: cpp/generated

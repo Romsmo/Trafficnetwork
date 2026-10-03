@@ -28,7 +28,8 @@ Open <http://localhost:8080/wasm/example/>. It asks for a server and a
 credential, then connects, syncs and shows what is around Berlin. To try it
 against the reference server: start it (`server/README.md`), create a
 credential with `npm run create-client -- --name browser-example --scope client`
-in `server/`, and paste the id and secret into the page. The reference
+in `server/` (in the Docker stack: the snippet in `server/docs/installation.md`,
+"Create the first client"), and paste the id and secret into the page. The reference
 server answers cross-origin requests; any other server you point a browser
 at must too (see "What a browser cannot do").
 
@@ -129,7 +130,17 @@ These are real differences, not omissions waiting to be fixed:
 ## Packaging
 
 `wasm-pack build --target web` produces a self-contained package directory
-(`pkg/`: the `.wasm`, its JavaScript loader and `.d.ts`). The wrapper in
-`js/` and the shared module in `../shared/` are plain ES modules; bundlers
-(Vite, webpack, esbuild) handle them as they are. There is no npm tarball
-yet, and nothing is published to a registry.
+(`pkg/`: the `.wasm`, its JavaScript loader and `.d.ts`). The wrapper in `js/`
+and the shared module in `../shared/` are plain ES modules; bundlers (Vite,
+webpack, esbuild) handle them as they are.
+
+`node bindings/pack-npm.mjs` (after the `wasm-pack build` above) assembles
+`@trafficnetwork/client-web` as a tarball that stands on its own
+(`trafficnetwork-client-web-<version>.tgz`: wrapper, types, the WebAssembly
+package, the shared typed surface copied in, the example page, a README); in
+the repository the wrapper imports `../pkg/` and `../../shared/`, paths the
+script points at the copies inside the package. CI installs the tarball into
+an empty project, serves the installed package and opens its example page in
+headless Chrome (job `npm-packages`); the tarball is attached to the run.
+The package is marked `"private": true` — nothing has been published to a
+registry.

@@ -1,0 +1,7 @@
+include: package:flutter_lints/flutter.yaml
+
+analyzer:
+  exclude:
+    # Analyzed where it belongs: inside the app the guide has you create
+    # (it needs path_provider, which this package does not depend on).
+    - example/**

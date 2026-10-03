@@ -1,4 +1,0 @@
-# Global UniFFI config for the Swift generation; the crate's own
-# bindings/uniffi/uniffi.toml gives the module name (TrafficNetwork).
-[crate-roots]
-trafficnetwork_uniffi = "../uniffi"

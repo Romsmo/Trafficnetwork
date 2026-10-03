@@ -105,7 +105,7 @@ impl From<uniffi::UnexpectedUniFFICallbackError> for HostError {
 /// the device's credential and signing key go instead of into a file. May be
 /// called from any thread, also concurrently. `get` returns `null`/`nil` when
 /// there is nothing under `key`.
-#[uniffi::export(foreign)]
+#[uniffi::export(with_foreign)]
 pub trait SecureStore: Send + Sync {
     fn get(&self, key: String) -> Result<Option<String>, HostError>;
     fn set(&self, key: String, value: String) -> Result<(), HostError>;
@@ -115,7 +115,7 @@ pub trait SecureStore: Send + Sync {
 /// Told about every event as it happens (`api.md`, "Events"; they are also
 /// queued for `pollEvents`), from a thread of the library — hand over to the
 /// UI thread yourself.
-#[uniffi::export(foreign)]
+#[uniffi::export(with_foreign)]
 pub trait EventListener: Send + Sync {
     fn on_event(&self, event_json: String) -> Result<(), HostError>;
 }

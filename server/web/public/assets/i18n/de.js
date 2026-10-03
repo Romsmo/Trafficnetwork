@@ -130,7 +130,7 @@ export default {
   "connect.app.title": "Eigene App entwickeln",
   "connect.app.body1": "Apps binden die Client-Bibliothek ein. Sie speichert die Daten lokal, arbeitet auch ohne Netz und gleicht sich im Hintergrund mit dem Netzwerk ab. Knoten findet die Bibliothek selbst über das Verzeichnis (siehe Netzwerkstatus unten) – du musst keine Adresse festlegen.",
   "connect.app.body2": "Du brauchst einen App-Schlüssel (Scope „device-registration“) von einem Knotenbetreiber. Damit registriert deine App pro Gerät eine anonyme Identität.",
-  "connect.app.body3": "Codebeispiele für Android, iOS, Flutter, React Native, Desktop und Web folgen, sobald die Plattform-Bindings der Bibliothek fertig sind. Bis dahin steht der Stand in der Bibliotheks-README.",
+  "connect.app.body3": "Für Android, iOS, Flutter, React Native, Desktop (C, Python, Node.js) und Web gibt es je eine Anleitung mit einem Minimalbeispiel im Verzeichnis client-lib/docs; die README der Bibliothek verlinkt sie.",
   "connect.app.link": "Client-Bibliothek: README",
   "connect.node.title": "Eigenen Knoten betreiben",
   "connect.node.body": "Jeder kann einen Knoten betreiben – mit Docker in vier Schritten:",
