@@ -120,6 +120,10 @@ These are real differences, not omissions waiting to be fixed:
   every binding must pass — through this binding in headless Chrome, against
   the scripted mock server, with the same expectations as every other
   binding.
+- `conformance-web` then opens this guide's example page
+  (`wasm/example/`) in the same headless Chrome, fills in the form, and checks
+  that it syncs, shows a speed limit and nearby items, and queues a report —
+  so the build-and-serve steps above are known to work, not just plausible.
 - `typescript-types` compiles a typed usage of the `.d.ts` files.
 
 ## Packaging

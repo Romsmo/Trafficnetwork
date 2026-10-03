@@ -279,6 +279,18 @@ jobs:
           TRAFFICNETWORK_LIB: ${{ github.workspace }}/client-lib/target/debug/libtrafficnetwork.so
         run: node conformance/run_node.mjs
 
+      # What docs/integration-node.md tells a reader to run must work, not
+      # merely compile: the guide's example, against the mock, with a check
+      # that it really synced and queued a report.
+      - name: Run the integration guide's example
+        env:
+          TRAFFICNETWORK_LIB: ${{ github.workspace }}/client-lib/target/debug/libtrafficnetwork.so
+        run: |
+          URL=$(curl -sf -X POST http://127.0.0.1:18991/__instances -d '{}'             | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>console.log(JSON.parse(s).url))")
+          TN_NODE="$URL" TN_CLIENT_ID=example TN_CLIENT_SECRET=example             node bindings/node/example.mjs | tee example.out
+          grep -q "sync ok: true" example.out
+          grep -q "queued report" example.out
+
       - name: Scripted server log
         if: failure()
         run: cat mock.log
@@ -332,6 +344,14 @@ jobs:
           MOCK_URL: http://127.0.0.1:18992
           CHROME_PATH: /usr/bin/google-chrome
         run: node conformance/run_web.mjs
+
+      # Same standard as the Node guide: the browser example docs/integration-web.md
+      # tells a reader to open is driven like a person would, and must work.
+      - name: Run the integration guide's example in Chrome
+        env:
+          MOCK_URL: http://127.0.0.1:18992
+          CHROME_PATH: /usr/bin/google-chrome
+        run: node conformance/run_web_example.mjs
 
       - name: Scripted server log
         if: failure()

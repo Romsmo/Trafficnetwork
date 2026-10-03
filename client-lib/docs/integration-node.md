@@ -107,7 +107,10 @@ synchronously, and has no CORS or mixed-content rules. See
 `conformance-node` runs `conformance/scenarios.json` through this binding
 against the scripted mock server — the same scenarios, with the same
 expectations, as the Python, browser and mobile runs. `typescript-types`
-compiles a typed usage of `index.d.ts`.
+compiles a typed usage of `index.d.ts`. The same job then runs the example
+from this guide (`bindings/node/example.mjs`) against a mock server instance
+and checks what it prints, so the steps above are known to work, not just
+plausible.
 
 ## Packaging
 

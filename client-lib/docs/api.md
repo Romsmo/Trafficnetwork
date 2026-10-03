@@ -18,16 +18,20 @@ A host app creates one client per storage directory:
 init(options: ClientOptions, platform: Platform) -> Client | Error
 ```
 
-**`platform`** — the four seams the core never reaches around (`api::Platform`
-in Rust; every non-native binding gets these for free via `Platform::native`,
-reached through the C ABI's `storagePath` option):
+**`platform`** — the seams the core never reaches around (`api::Platform`
+in Rust; every other binding gets the defaults for free — `Platform::native`
+through the C ABI's `storagePath` option, `Platform::wasm` in the browser):
 
-| Seam | Native default | Override for |
-|---|---|---|
-| `store` | `SqliteStore` at `<storagePath>/trafficnetwork.db` | a browser (planned: `sqlite-wasm-rs`) |
-| `secureStore` | a JSON file at `<storagePath>/secure-store.json`, mode 0600 on Unix — **not hardware-backed** | a platform keystore (Keychain, Android Keystore, ...) — see "Secrets" below |
-| `http` | `reqwest`, gzip/brotli accepted, connect timeout 15 s, read timeout 60 s | a custom proxy or TLS pinning |
-| `clock` | the system clock | tests (inject a fixed clock) |
+| Seam | Native default | Browser default | Override for |
+|---|---|---|---|
+| `store` | `SqliteStore` at `<storagePath>/trafficnetwork.db` | `IndexedDbStore` (memory, mirrored to the IndexedDB database named `storagePath`) | another persistence layer |
+| `secureStore` | a JSON file at `<storagePath>/secure-store.json`, mode 0600 on Unix — **not hardware-backed** | `localStorage` (namespaced) — **not hardware-backed, readable by every script of the origin** | a platform keystore (Keychain, Android Keystore, ...) — see "Secrets" below |
+| `http` | `reqwest`, gzip/brotli accepted, connect timeout 15 s, read timeout 60 s | the browser's own `fetch()` | a custom proxy or TLS pinning |
+| `clock` | the system clock | `Date.now()` | tests (inject a fixed clock) |
+| `ws` | `tokio-tungstenite` | the browser's own `WebSocket` | a custom socket stack (realtime push only) |
+| `sleep` | `tokio::time::sleep` | `setTimeout` | tests (a sleep that returns at once) |
+
+What the browser can and cannot do differently is in `integration-web.md`.
 
 **`options`** (`ClientOptions`, all fields optional, `camelCase` JSON):
 
@@ -357,6 +361,20 @@ local HTTP server.
 compiler needed on the machine that uses it. `pip install`able once the
 native library is built; see `bindings/python/README.md`.
 
+### Node.js and the browser (JavaScript / TypeScript)
+
+Both share one typed surface (`bindings/shared/`): the same methods, the
+same error class (`TrafficNetworkError`, `code` from "Errors" above) and the
+same result shapes, every method returning a Promise. Only the transport
+differs:
+
+* `bindings/node` — FFI over the C ABI through `koffi`; see
+  `integration-node.md`.
+* `bindings/wasm` — the client compiled to WebAssembly (`wasm-bindgen`) with a
+  wrapper in `js/`; `Client.create` is async because opening IndexedDB is;
+  see `integration-web.md`. The WebAssembly `Client` itself speaks the same
+  `call(method, argsJson)` as the C ABI.
+
 ### Conformance
 
 `client-lib/conformance/scenarios.json` is the scenario set every binding is
@@ -365,9 +383,11 @@ Ed25519/RFC 8785, no dependency on the real server code) — cold start via a
 seed's directory, failover between two configured servers, an offline
 report that survives a dead server and goes out later, the camera-namespace
 three-way gate including a forged network configuration, a fully
-unreachable network, and the JSON-call error shapes. `run_python.py` is the
-first runner; a later binding adds `run_<language>.<ext>` alongside it and
-the CI job that runs it (`.github/workflows/client-lib-ci.yml`'s
+unreachable network, and the JSON-call error shapes. `run_python.py` was the
+first runner; `run_node.mjs` (Node.js over the C ABI) and `run_web.mjs` (the
+WebAssembly binding inside headless Chrome) share one environment-neutral
+scenario implementation, `scenario-runner.mjs`. A binding adds a runner
+alongside and the CI job that runs it (`.github/workflows/client-lib-ci.yml`'s
 `conformance-<language>` jobs).
 
 ## Network & privacy — what each server sees
