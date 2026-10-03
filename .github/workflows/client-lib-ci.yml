@@ -283,18 +283,6 @@ jobs:
         if: failure()
         run: cat mock.log
 
-      # TEMPORARY (remove once the crash is understood): a native crash gives no
-      # output of its own — this runs the real runner under gdb (debug build,
-      # so Rust frames are named) and prints the thread that took it down.
-      - name: Crash diagnosis
-        if: failure()
-        env:
-          MOCK_URL: http://127.0.0.1:18991
-          TRAFFICNETWORK_LIB: ${{ github.workspace }}/client-lib/target/debug/libtrafficnetwork.so
-        run: |
-          sudo apt-get install -y gdb > /dev/null 2>&1
-          gdb -batch -ex "set pagination off" -ex "handle SIGSEGV stop print"             -ex run -ex "bt 40" -ex "info threads" -ex "info registers rsp"             --args node conformance/run_node.mjs 2>&1 | grep -v "New Thread\|Thread .* exited" | tail -90 || true
-
   # Add-on B3: the same scenarios through the WebAssembly binding, in a real
   # headless Chrome — IndexedDB, fetch() and localStorage only exist there,
   # and a browser is the one place this binding is meant to run.

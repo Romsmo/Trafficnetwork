@@ -24,6 +24,20 @@ import { BaseClient, TrafficNetworkError, unwrap } from "../shared/index.js";
 
 export * from "../shared/index.js";
 
+// Koffi runs every native call on a stack of its own (not the thread's), and
+// its defaults — 2 MiB for a synchronous call, 128 KiB for an asynchronous one
+// — are far below what a real sync needs (an HTTP client with TLS, JSON,
+// SQLite; a debug build of the library, with its much larger frames, needs
+// more still): the library overflowed it with a segmentation fault in the
+// middle of the first real request. Sized like an ordinary thread stack
+// instead. Memory is reserved lazily, so only what a call touches is used.
+// This has to happen before any native function is declared.
+koffi.config({
+  sync_stack_size: 8 * 1024 * 1024,
+  async_stack_size: 8 * 1024 * 1024,
+  async_heap_size: 4 * 1024 * 1024,
+});
+
 const EventCallback = koffi.proto("void TnEventCallback(void *userData, const char *eventJson)");
 const SecureGet = koffi.proto(
   "int TnSecureGet(void *userData, const char *key, void *buffer, int capacity)",
