@@ -1,0 +1,33 @@
+<!doctype html>
+<meta charset="utf-8" />
+<title>trafficnetwork conformance (browser)</title>
+<p>Running conformance/scenarios.json through the WebAssembly binding — result in <code>window.__result</code>.</p>
+<script type="module">
+  // Served by run_web.mjs: /js → bindings/wasm/js, /pkg → bindings/wasm/pkg,
+  // /shared → bindings/shared, /conformance → this directory's parent.
+  import { Client } from "/js/index.js";
+  import { runAll } from "/conformance/scenario-runner.mjs";
+
+  const params = new URLSearchParams(location.search);
+  const mockUrl = params.get("mock");
+  const lines = [];
+  try {
+    const scenarios = await (await fetch("/conformance/scenarios.json")).json();
+    let counter = 0;
+    const failed = await runAll(
+      scenarios,
+      {
+        mockUrl,
+        // An IndexedDB database per scenario: `storagePath` is its name here.
+        storagePathFor: () => `tn-conformance-${Date.now()}-${(counter += 1)}`,
+        createClient: (options) => Client.create(options),
+      },
+      "web",
+      (line) => lines.push(line),
+    );
+    window.__result = { failed, lines };
+  } catch (error) {
+    lines.push(`the browser run itself failed: ${error?.stack ?? error}`);
+    window.__result = { failed: 1, lines };
+  }
+</script>

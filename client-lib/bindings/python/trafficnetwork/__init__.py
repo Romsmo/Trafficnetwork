@@ -104,6 +104,10 @@ def _load(library_path: Optional[str] = None):
         lib.tn_client_call_async.argtypes = [c_void_p, c_char_p, c_char_p, _RESULT_CALLBACK, c_void_p]
         lib.tn_client_set_event_callback.restype = None
         lib.tn_client_set_event_callback.argtypes = [c_void_p, _EVENT_CALLBACK, c_void_p]
+        lib.tn_client_start_realtime.restype = c_int32
+        lib.tn_client_start_realtime.argtypes = [c_void_p]
+        lib.tn_client_stop_realtime.restype = None
+        lib.tn_client_stop_realtime.argtypes = [c_void_p]
         lib.tn_client_free.restype = None
         lib.tn_client_free.argtypes = [c_void_p]
         lib.tn_library_version.restype = c_void_p
@@ -249,6 +253,20 @@ class Client:
         callback = _EVENT_CALLBACK(deliver)
         self._listener = callback  # keeps it alive
         self._lib.tn_client_set_event_callback(self._handle, callback, None)
+
+    def start_realtime(self) -> None:
+        """Keeps a WebSocket open and applies pushed events, on a library thread — no
+        thread or event loop of your own needed. A no-op if already running."""
+        if not self._handle:
+            raise TrafficNetworkError("closed", "the client was freed")
+        if self._lib.tn_client_start_realtime(self._handle) != 0:
+            raise TrafficNetworkError("internal", "realtime push could not be started")
+
+    def stop_realtime(self) -> None:
+        """Asks a running realtime task to stop — between connection attempts, not by
+        force-closing an open connection. A no-op if none is running."""
+        if self._handle:
+            self._lib.tn_client_stop_realtime(self._handle)
 
     def free(self) -> None:
         """Releases the client. Its data stays on disk. Safe to call twice."""

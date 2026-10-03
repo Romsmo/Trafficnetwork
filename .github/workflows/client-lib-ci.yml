@@ -115,9 +115,15 @@ jobs:
         with:
           version: "latest"
 
+      # Two different mechanisms keep native-only targets out of this build:
+      # wasm-pack first builds every *test* target (`cargo build --tests`), so
+      # `tests/multi_node.rs` is gated `#![cfg(not(target_arch = "wasm32"))]`
+      # in the file itself; the actual `cargo test` step then also builds
+      # *examples* (`examples/measure_bootstrap.rs` needs tokio, flate2 and
+      # SQLite), which `-- --lib` keeps out.
       - name: Run core's wasm32 unit tests in headless Chrome
         working-directory: client-lib/core
-        run: wasm-pack test --headless --chrome
+        run: wasm-pack test --headless --chrome -- --lib
 
       - name: Build the wasm binding for the browser
         working-directory: client-lib/bindings/wasm
@@ -232,6 +238,125 @@ jobs:
       - name: Scripted server log
         if: failure()
         run: cat mock.log
+
+  # Add-on B3: the same scenarios through the Node.js binding (bindings/node,
+  # FFI over the C ABI via koffi) — the shared scenario logic is
+  # conformance/scenario-runner.mjs, the same file the browser run uses.
+  conformance-node:
+    name: conformance (Node.js over the C ABI)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: client-lib
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Build the native library
+        run: cargo build -p trafficnetwork-c-abi
+
+      - name: Install the binding's dependencies
+        working-directory: client-lib/bindings/node
+        run: npm ci
+
+      - name: Start the scripted server
+        run: |
+          node conformance/mock-server.mjs --port 18991 > mock.log 2>&1 &
+          for i in $(seq 1 50); do
+            curl -sf -X POST http://127.0.0.1:18991/__instances -d '{}' > /dev/null && break
+            sleep 0.2
+          done
+
+      - name: Run the scenarios
+        env:
+          MOCK_URL: http://127.0.0.1:18991
+          TRAFFICNETWORK_LIB: ${{ github.workspace }}/client-lib/target/debug/libtrafficnetwork.so
+        run: node conformance/run_node.mjs
+
+      - name: Scripted server log
+        if: failure()
+        run: cat mock.log
+
+  # Add-on B3: the same scenarios through the WebAssembly binding, in a real
+  # headless Chrome — IndexedDB, fetch() and localStorage only exist there,
+  # and a browser is the one place this binding is meant to run.
+  conformance-web:
+    name: conformance (WebAssembly in headless Chrome)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: client-lib
+          key: wasm32
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - uses: jetli/wasm-pack-action@v0.4.0
+        with:
+          version: "latest"
+
+      - name: Build the browser package
+        working-directory: client-lib/bindings/wasm
+        run: wasm-pack build --target web --out-dir pkg
+
+      - name: Install the runner's dependencies
+        working-directory: client-lib/conformance
+        run: npm ci
+
+      - name: Start the scripted server
+        run: |
+          node conformance/mock-server.mjs --port 18992 > mock.log 2>&1 &
+          for i in $(seq 1 50); do
+            curl -sf -X POST http://127.0.0.1:18992/__instances -d '{}' > /dev/null && break
+            sleep 0.2
+          done
+
+      # puppeteer-core drives the Chrome already installed on the runner,
+      # instead of downloading a second browser.
+      - name: Run the scenarios in Chrome
+        env:
+          MOCK_URL: http://127.0.0.1:18992
+          CHROME_PATH: /usr/bin/google-chrome
+        run: node conformance/run_web.mjs
+
+      - name: Scripted server log
+        if: failure()
+        run: cat mock.log
+
+  # Add-on B3: the hand-written .d.ts files of both JS bindings, compiled
+  # against a typed usage file (never run) — a declaration that drifts from
+  # what the integration guides tell a host app to write stops compiling.
+  typescript-types:
+    name: typescript types (both JS bindings)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install TypeScript
+        working-directory: client-lib/bindings/types-test
+        run: npm ci
+
+      - name: Compile the typed usage
+        working-directory: client-lib/bindings/types-test
+        run: npx tsc -p tsconfig.json
 
   # Add-on B2: TrafficNetworkClient against real server processes (real
   # Postgres via Testcontainers, real federation), controlled through

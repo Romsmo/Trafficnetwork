@@ -30,7 +30,7 @@ use std::sync::Arc;
 use futures_util::FutureExt;
 use serde_json::{json, Value};
 use trafficnetwork_core::api::{
-    ApiError, ClientOptions, EventListener, Platform, TrafficNetworkClient,
+    ApiError, ClientOptions, EventListener, Platform, SecureStore, TrafficNetworkClient,
 };
 use wasm_bindgen::prelude::*;
 
@@ -66,6 +66,57 @@ struct WasmEventCallback(js_sys::Function);
 unsafe impl Send for WasmEventCallback {}
 unsafe impl Sync for WasmEventCallback {}
 
+/// A host-supplied secret store: a plain JS object with synchronous
+/// `get(key)`, `set(key, value)` and `delete(key)` methods — the JS
+/// counterpart of the C-ABI's `tn_client_new_with_secure_store` callbacks.
+/// Sync on purpose: the core reads a secret in the middle of a call.
+///
+/// Safety: the same single-threaded-wasm32 argument as `WasmEventCallback`
+/// above — `js_sys::Object` wraps a `JsValue`, conservatively `!Send`/`!Sync`.
+struct JsSecureStore(js_sys::Object);
+unsafe impl Send for JsSecureStore {}
+unsafe impl Sync for JsSecureStore {}
+
+impl JsSecureStore {
+    fn method(&self, name: &str) -> Option<js_sys::Function> {
+        js_sys::Reflect::get(&self.0, &JsValue::from_str(name))
+            .ok()?
+            .dyn_into::<js_sys::Function>()
+            .ok()
+    }
+}
+
+impl SecureStore for JsSecureStore {
+    fn get(&self, key: &str) -> Option<String> {
+        let value = self
+            .method("get")?
+            .call1(&self.0, &JsValue::from_str(key))
+            .ok()?;
+        // `null`/`undefined` (nothing stored) and anything that is not a
+        // string both read as "not there" — the same answer a failing store
+        // gives in the C-ABI and Python bindings.
+        value.as_string()
+    }
+
+    fn set(&self, key: &str, value: &str) -> Result<(), String> {
+        let method = self.method("set").ok_or("the secret store has no set()")?;
+        method
+            .call2(&self.0, &JsValue::from_str(key), &JsValue::from_str(value))
+            .map(|_| ())
+            .map_err(|e| format!("{e:?}"))
+    }
+
+    fn delete(&self, key: &str) -> Result<(), String> {
+        let method = self
+            .method("delete")
+            .ok_or("the secret store has no delete()")?;
+        method
+            .call1(&self.0, &JsValue::from_str(key))
+            .map(|_| ())
+            .map_err(|e| format!("{e:?}"))
+    }
+}
+
 /// A client. Mirrors the C-ABI's `Handle`/Python's `Client` — every binding
 /// wraps the same `TrafficNetworkClient`, none add behavior of their own.
 #[wasm_bindgen]
@@ -82,7 +133,14 @@ impl Client {
     /// `storagePath` field, used here as the IndexedDB database name (not a
     /// filesystem path — same field name as every other binding for a
     /// single shared options type across `conformance/scenarios.json`).
-    pub async fn create(options_json: String) -> Result<Client, JsValue> {
+    ///
+    /// `secure_store` (optional) is a JS object with synchronous `get`/
+    /// `set`/`delete` methods that keeps the device's secrets instead of the
+    /// default `localStorage` — see [`JsSecureStore`].
+    pub async fn create(
+        options_json: String,
+        secure_store: Option<js_sys::Object>,
+    ) -> Result<Client, JsValue> {
         console_error_panic_hook::set_once();
         let value: Value = serde_json::from_str(&options_json)
             .map_err(|e| js_error(format!("options are not JSON: {e}")))?;
@@ -93,9 +151,12 @@ impl Client {
             .to_string();
         let options: ClientOptions =
             serde_json::from_value(value).map_err(|e| js_error(format!("options: {e}")))?;
-        let platform = Platform::wasm(&db_name)
+        let mut platform = Platform::wasm(&db_name)
             .await
             .map_err(|e| JsValue::from_str(&error_envelope(&e)))?;
+        if let Some(store) = secure_store {
+            platform.secure_store = Arc::new(JsSecureStore(store));
+        }
         let client = TrafficNetworkClient::new(options, platform)
             .map_err(|e| JsValue::from_str(&error_envelope(&e)))?;
         Ok(Client {
