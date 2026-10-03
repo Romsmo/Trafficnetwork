@@ -46,4 +46,6 @@ dependencies {
     api("net.java.dev.jna:jna:5.14.0@aar")
     // `suspend` calls (`callAsync`) need the coroutines library.
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
+    // The Android flavour of the generated code is annotated with `@RequiresApi`.
+    implementation("androidx.annotation:annotation:1.8.2")
 }
