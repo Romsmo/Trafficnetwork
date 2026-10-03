@@ -86,12 +86,14 @@ types ship alongside (`index.d.ts`).
   "not there"/"refused", like in every other binding).
 - Do not call `free()` while a call on that client is still in flight.
 - **Koffi's call stacks are sized at load.** Koffi runs each native call on a
-  stack of its own, and its defaults (2 MiB sync, 128 KiB async) are far too
-  small for a real sync — the library overflowed it with a segmentation fault
-  on the first request. `index.js` raises them (`koffi.config(...)`: 8 MiB
-  each, plus a 4 MiB async heap) before declaring anything. If your
-  application configures koffi itself, do it before importing this package
-  and keep at least those values.
+  stack of its own, and its defaults (2 MiB sync, 128 KiB async) were far too
+  small for a real sync back when the library ran the call on the calling
+  thread — it overflowed with a segmentation fault on the first request.
+  `index.js` raises them (`koffi.config(...)`: 8 MiB each, plus a 4 MiB async
+  heap) before declaring anything. Since add-on B5 the library runs every call on
+  its own 8 MiB threads and the calling thread only waits, so this is no longer
+  what keeps a call alive — it stays as insurance. If your application configures
+  koffi itself, do it before importing this package.
 
 ## Differences from the browser binding
 

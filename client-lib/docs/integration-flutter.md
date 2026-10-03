@@ -69,6 +69,8 @@ the raw `{"ok"|"error"}` text.
 
 Things an app usually wants on top of that:
 
+- **Initialize once:** `initialize()` may be called again (a second screen, a
+  test) — it returns the first call's result instead of loading the library twice.
 - **Keep it fresh:** call `client.tick()` from a timer; it is cheap and syncs
   only when due. Nothing runs by itself.
 - **Live updates:** `client.startRealtime()` keeps a WebSocket open on the
