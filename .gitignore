@@ -102,3 +102,4 @@ client-lib/bindings/flutter/ios/build/
 client-lib/flutter-example-debug.apk
 client-lib/bindings/flutter/.dart_tool/
 client-lib/bindings/flutter/pubspec.lock
+client-lib/bindings/react-native/library/

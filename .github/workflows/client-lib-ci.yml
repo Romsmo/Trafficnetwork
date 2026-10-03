@@ -988,6 +988,80 @@ jobs:
             client-lib/bindings/flutter/LICENSE
           retention-days: 14
 
+  # Add-on B5: React Native. The library (a turbo module) is generated around
+  # the very UniFFI crate Kotlin and Swift come from, by
+  # uniffi-bindgen-react-native: scaffold (bindings/react-native/scaffold.mjs),
+  # build the Rust for Android and generate the TypeScript/C++ bindings, type-check
+  # the library, and build an example app that uses it. Builds only: the app is
+  # not run.
+  react-native-android:
+    name: build (React Native library + example app, Android)
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android,armv7-linux-androideabi,x86_64-linux-android,i686-linux-android
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: client-lib
+          key: rn-android
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Cache cargo-ndk
+        id: ndk-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin/cargo-ndk
+          key: cargo-ndk-${{ runner.os }}-v4
+
+      - name: Install cargo-ndk
+        if: steps.ndk-cache.outputs.cache-hit != 'true'
+        run: cargo install --locked cargo-ndk
+
+      - name: Scaffold the React Native library
+        run: node bindings/react-native/scaffold.mjs
+
+      - name: Install its dependencies
+        working-directory: client-lib/bindings/react-native/library
+        run: |
+          corepack enable
+          yarn install
+
+      - name: Build the Rust for Android and generate the bindings
+        working-directory: client-lib/bindings/react-native/library
+        run: yarn ubrn:android
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: trafficnetwork-react-native-generated
+          path: |
+            client-lib/bindings/react-native/library/src
+            client-lib/bindings/react-native/library/cpp
+            client-lib/bindings/react-native/library/android/CMakeLists.txt
+            client-lib/bindings/react-native/library/android/src/main/java
+          retention-days: 14
+
+      - name: Type-check the library
+        working-directory: client-lib/bindings/react-native/library
+        run: yarn typecheck
+
+      - name: Build the example app
+        working-directory: client-lib/bindings/react-native/library/example/android
+        run: ./gradlew assembleDebug --no-daemon --console=plain -PreactNativeArchitectures=arm64-v8a
+
   # Add-on B3: the hand-written .d.ts files of both JS bindings, compiled
   # against a typed usage file (never run) — a declaration that drifts from
   # what the integration guides tell a host app to write stops compiling.
