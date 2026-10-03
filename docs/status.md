@@ -174,6 +174,17 @@ PULL REQUEST:   https://github.com/Romsmo/Trafficnetwork/pull/10 (offen, mergeab
 - **Für die Server-Instanz:** keine Änderungswünsche aus B1 — reine Client-Anbindung an das bereits dokumentierte `GET /v1/ws`-Protokoll, keine Abweichung gefunden. Aus B2: die beiden oben genannten Cross-Language-Fehler (Zeitstempel-Format, `sequence` als String) sind reale serverseitige Abweichungen von der eigenen API-Doku, wert, an der Quelle behoben zu werden — hier nicht angefasst, da dieser Zusatz ausdrücklich keine Server-Änderungen macht. **Behoben:** siehe „Zusatz fix/api-serialization" unten.
 - **Pull Request:** https://github.com/Romsmo/Trafficnetwork/pull/11 (B1+B2, offen, mergeable, nicht selbst gemergt).
 
+### Zusatz C — Abschluss-Auftrag: B3 bis B5, dann „fertig" (1.0.0 nur bei vollständig belegten Kriterien)
+
+- **Auftrag:** „Abschluss-Auftrag für die Client-Bibliothek" (Prompt liegt bewusst außerhalb des Repos). Eigener Branch und eigener PR je Stufe, jede Stufe für sich grün, nichts selbst gemergt, keine Veröffentlichung in Registries ohne ausdrückliche Freigabe. Version bleibt `0.x`, bis alle Kriterien aus Abschnitt 2 des Auftrags belegt sind.
+- **B3 (WASM + JS/TS) — fertig, CI grün (Lauf 37122834789, alle 11 Jobs), PR https://github.com/Romsmo/Trafficnetwork/pull/14 (Branch `rework/client-lib-wasm`, offen, nicht gemergt):**
+  - `bindings/wasm/` (wasm-bindgen) + Browser-Paket mit TypeScript-Typen; `bindings/node/` (`koffi` über das C-ABI); gemeinsame Typfläche `bindings/shared/`. `IndexedDbStore` im Kern (Nutzerentscheidung: IndexedDB zählt als „gleichwertig" zu OPFS); Grenzen offen in `client-lib/docs/integration-web.md`.
+  - **Konformität:** derselbe Szenariensatz (9 Szenarien) mit gleichem Ergebnis über Python (C-ABI), Node.js (C-ABI) und WebAssembly in Headless-Chrome. Die Minimalbeispiele der Anleitungen für Web/Node werden in CI ausgeführt.
+  - Anleitungen: `client-lib/docs/integration-web.md`, `integration-node.md`.
+  - Unterwegs behoben: koffi-Standard-Stacks zu klein (SIGSEGV in CI) → in `bindings/node/index.js` heraufgesetzt und dokumentiert.
+- **B4 (Kotlin, Swift, Dart) und B5 (React Native, Paketierung, Konformität über Mobile):** noch offen, folgen je auf eigenem Branch/PR.
+- **Für die Server-Instanz:** keine Änderungswünsche aus B3 — der Browser-Build setzt voraus, dass ein Server CORS-Header sendet (der Referenzserver tut es).
+
 ## Launch L — lokaler Test (`launch/local-test`, Nutzer-PC, Windows+Docker)
 
 - **Branch:** `launch/local-test` (von `main` abgezweigt) für alles, was ins Repo kommt (Testwerkzeug, Doku). Läuft in einem eigenen Worktree (`TrafficNetwork-launch-local-test`), ebenso `rework/server-federation` in `TrafficNetwork-server-launch` — der Haupt-Checkout bleibt unangetastet, weil dort die Client-Instanz mit uncommitteten Änderungen arbeitet.
