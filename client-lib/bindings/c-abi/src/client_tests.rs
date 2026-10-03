@@ -535,5 +535,5 @@ fn the_library_version_is_a_string() {
         .unwrap()
         .to_string();
     unsafe { tn_free_string(version) };
-    assert!(text.starts_with("0."), "{text}");
+    assert_eq!(text, env!("CARGO_PKG_VERSION"));
 }
