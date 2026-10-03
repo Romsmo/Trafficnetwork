@@ -86,7 +86,10 @@ manifest.scripts = {
   "ubrn:android": "ubrn build android --and-generate",
   // The deployment target keeps the C parts of the dependencies (the crypto
   // library) and the linker agreeing about what an old-enough iOS provides.
-  "ubrn:ios": "IPHONEOS_DEPLOYMENT_TARGET=13.0 ubrn build ios --and-generate",
+  // Both simulator architectures: an app built for the simulator on an Intel Mac
+  // (or by Xcode for every architecture) needs the x86_64 slice.
+  "ubrn:ios":
+    "IPHONEOS_DEPLOYMENT_TARGET=13.0 ubrn build ios --and-generate --targets aarch64-apple-ios,aarch64-apple-ios-sim,x86_64-apple-ios",
   // After `yarn prepare`: the pods list the files React Native's codegen wrote.
   "ubrn:pods": "(cd example/ios && pod install)",
   "ubrn:clean":

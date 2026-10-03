@@ -33,18 +33,29 @@ yarn install
 # 2. The Rust for Android (4 ABIs) and/or iOS (on a Mac), and the TypeScript
 #    and C++ bindings generated from it.
 yarn ubrn:android
-yarn ubrn:ios          # also runs `pod install` in example/ios
+yarn ubrn:ios
 
 # 3. React Native's own codegen, the JavaScript build, the type declarations.
 yarn prepare
 
-# 4. The example app (needs an emulator/simulator or a device).
+# 4. iOS only: the pods, after the codegen (they list the files it wrote).
+yarn ubrn:pods
+
+# 5. The example app (needs an emulator/simulator or a device).
 yarn example android
 yarn example ios
 ```
 
 `ubrn.config.yaml` points `uniffi-bindgen-react-native` at `bindings/uniffi` —
 change the Rust and run `yarn ubrn:android` again, and the TypeScript follows.
+
+The scaffold makes one change to what `create-react-native-library` writes:
+its template registers the library's CMake project with the app as a C++ turbo
+module, but the library that `uniffi-bindgen-react-native` generates is a classic
+Android module with its own `build.gradle` that builds that CMake project itself —
+registering it twice builds the same code twice and the app's copy looks for a
+header that does not exist — so `scaffold.mjs` removes the `cxxModule*` entries
+from `react-native.config.js` (and fails if the template no longer has them).
 
 ## The smallest possible use
 
@@ -120,7 +131,7 @@ Things an app usually wants on top of that:
   `yarn prepare` (React Native codegen, JavaScript build, type declarations), a
   TypeScript type-check, and the example app built (`assembleDebug`).
 - `react-native-ios` (macOS runner): `yarn ubrn:ios` (the Rust for the iOS
-  targets as an XCFramework, the bindings, `pod install`), `yarn prepare`, and
+  targets as an XCFramework, the bindings), `yarn prepare`, `yarn ubrn:pods`, and
   the example app built for the iOS simulator.
 - Underneath, the Rust crate and the API it exports are the ones the Kotlin and
   Swift runs of `conformance/scenarios.json` exercise.
