@@ -428,6 +428,69 @@ jobs:
         if: failure()
         run: cat mock.log
 
+  # Add-on B4: the Android library. The native library for all four Android
+  # ABIs (cargo-ndk, the NDK preinstalled on the runner), the Kotlin UniFFI
+  # generates from it, packaged by Gradle into an AAR — the artifact an Android
+  # app depends on. What this proves is that it *builds* and contains what it
+  # should; running it on a device or emulator is not done here (the Kotlin
+  # layer and the Rust code it wraps are run by `conformance-kotlin`, on a
+  # JVM). docs/integration-android.md says so too.
+  android-aar:
+    name: build (Android AAR)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android,armv7-linux-androideabi,x86_64-linux-android,i686-linux-android
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: client-lib
+          key: android
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.10.2"
+
+      - name: Install cargo-ndk
+        run: cargo install --locked cargo-ndk
+
+      - name: Build the native library for every Android ABI
+        run: |
+          cargo ndk -t arm64-v8a -t armeabi-v7a -t x86_64 -t x86             -o bindings/kotlin/android/src/main/jniLibs             build --release -p trafficnetwork-uniffi
+
+      # The generator only reads the UniFFI description out of the library, so
+      # one ABI's file is as good as another's.
+      - name: Generate the Kotlin wrapper
+        run: bash bindings/kotlin/generate.sh android bindings/kotlin/android/src/main/jniLibs/arm64-v8a/libtrafficnetwork_uniffi.so
+
+      - name: Build the AAR
+        working-directory: client-lib/bindings/kotlin/android
+        run: gradle assembleRelease --no-daemon
+
+      - name: Check what is in the AAR
+        working-directory: client-lib/bindings/kotlin/android
+        run: |
+          aar=$(ls build/outputs/aar/*-release.aar)
+          unzip -l "$aar"
+          for abi in arm64-v8a armeabi-v7a x86_64 x86; do
+            unzip -l "$aar" | grep -q "jni/$abi/libtrafficnetwork_uniffi.so"
+          done
+          unzip -l "$aar" | grep -q "classes.jar"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: trafficnetwork-android-aar
+          path: client-lib/bindings/kotlin/android/build/outputs/aar/*-release.aar
+          retention-days: 14
+
   # Add-on B3: the hand-written .d.ts files of both JS bindings, compiled
   # against a typed usage file (never run) — a declaration that drifts from
   # what the integration guides tell a host app to write stops compiling.
