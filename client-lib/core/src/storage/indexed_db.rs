@@ -25,15 +25,23 @@
 //! from IndexedDB directly, so they stay synchronous and are never stale
 //! within a session.
 //!
-//! **Documented limit, not hidden:** persistence is "immediate in memory,
-//! soon after in IndexedDB", not synchronously durable per write. A tab
-//! crash between a write and its mirror finishing can lose that one write's
-//! persistence (not the session's own data — `inner` already has it). This
-//! is the same category of risk `flush_pending` already accepts for a
-//! dropped connection mid-retry, just dated here for the browser
-//! specifically (`client-lib/docs/integration-web.md`).
+//! **Documented limits, not hidden** (`client-lib/docs/integration-web.md`):
+//!
+//! * Persistence is "immediate in memory, soon after in IndexedDB", not
+//!   synchronously durable per write: writes within [`MIRROR_DEBOUNCE_MS`] of
+//!   each other share one snapshot. A tab crash inside that window (plus the
+//!   IndexedDB write itself) can lose those writes' persistence — not the
+//!   session's own data, `inner` already has it. The same category of risk
+//!   `flush_pending` already accepts for a dropped connection mid-retry,
+//!   dated here for the browser specifically.
+//! * The whole store lives in memory *and* is written as one record, so cost
+//!   grows with the amount of data held. That suits a region's dynamic data
+//!   and a modest static dataset; it is not a way to hold a country's or
+//!   Europe's static data in a tab (a native `SqliteStore` is).
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::time::Duration;
 
 use rexie::{ObjectStore, Rexie, TransactionMode};
 use wasm_bindgen::JsValue;
@@ -46,10 +54,19 @@ use crate::sync::types::{FixedSpeedCamera, HazardReport, SpeedLimitSegment, Stat
 const DB_VERSION: u32 = 1;
 const OBJECT_STORE: &str = "snapshot";
 const SNAPSHOT_KEY: &str = "state";
+/// Writes arriving within this window of the first one share one snapshot.
+/// Every write re-serializes the *whole* store (there is one record, not one
+/// per entity), so a burst — a static-data bootstrap stores a partition per
+/// network round trip — must not each pay for that.
+const MIRROR_DEBOUNCE_MS: u64 = 250;
 
 pub struct IndexedDbStore {
     inner: Arc<InMemoryStore>,
     db: Arc<Rexie>,
+    /// A mirror task is waiting out its debounce window; a write arriving
+    /// now needs no task of its own, the pending one snapshots everything
+    /// current when it runs.
+    mirror_scheduled: Arc<AtomicBool>,
 }
 
 impl IndexedDbStore {
@@ -71,18 +88,28 @@ impl IndexedDbStore {
         Ok(Self {
             inner,
             db: Arc::new(db),
+            mirror_scheduled: Arc::new(AtomicBool::new(false)),
         })
     }
 
-    /// Spawns the background mirror of the current full state into
-    /// IndexedDB. Best effort: a failure is logged to the browser console
-    /// and otherwise dropped — `inner` (already updated synchronously by the
-    /// caller before this runs) stays correct for the rest of this session
-    /// either way, see the module doc.
+    /// Schedules the background mirror of the current full state into
+    /// IndexedDB — at most one task is ever waiting (see
+    /// [`MIRROR_DEBOUNCE_MS`]). Best effort: a failure is logged to the
+    /// browser console and otherwise dropped — `inner` (already updated
+    /// synchronously by the caller before this runs) stays correct for the
+    /// rest of this session either way, see the module doc.
     fn mirror(&self) {
+        if self.mirror_scheduled.swap(true, Ordering::SeqCst) {
+            return;
+        }
         let inner = self.inner.clone();
         let db = self.db.clone();
+        let scheduled = self.mirror_scheduled.clone();
         wasm_bindgen_futures::spawn_local(async move {
+            gloo_timers::future::sleep(Duration::from_millis(MIRROR_DEBOUNCE_MS)).await;
+            // Cleared *before* snapshotting: a write that lands while this
+            // one is still being persisted must start another round.
+            scheduled.store(false, Ordering::SeqCst);
             let snapshot = match inner.to_snapshot() {
                 Ok(json) => json,
                 Err(error) => {
@@ -320,11 +347,10 @@ mod tests {
         )
     }
 
-    /// The mirror is a fire-and-forget background task — give the
-    /// microtask/task queue a turn to actually run it before asserting on
-    /// what landed in IndexedDB.
+    /// The mirror is a debounced background task — wait out its window (and
+    /// the IndexedDB write itself) before asserting on what landed there.
     async fn let_the_mirror_run() {
-        gloo_timers::future::sleep(std::time::Duration::from_millis(50)).await;
+        gloo_timers::future::sleep(Duration::from_millis(MIRROR_DEBOUNCE_MS * 3)).await;
     }
 
     #[wasm_bindgen_test::wasm_bindgen_test]

@@ -283,6 +283,19 @@ jobs:
         if: failure()
         run: cat mock.log
 
+      # TEMPORARY (remove with conformance/diag_node.mjs): a native crash gives
+      # no output of its own — this names the call that took the process down.
+      - name: Crash diagnosis
+        if: failure()
+        env:
+          TRAFFICNETWORK_LIB: ${{ github.workspace }}/client-lib/target/debug/libtrafficnetwork.so
+        run: |
+          node conformance/diag_node.mjs || true
+          sudo apt-get install -y gdb > /dev/null 2>&1
+          gdb -batch -ex "set pagination off" -ex "handle SIGSEGV stop print" \
+            -ex run -ex bt -ex continue -ex bt -ex continue -ex bt \
+            --args node conformance/diag_node.mjs 2>&1 | tail -80 || true
+
   # Add-on B3: the same scenarios through the WebAssembly binding, in a real
   # headless Chrome — IndexedDB, fetch() and localStorage only exist there,
   # and a browser is the one place this binding is meant to run.
