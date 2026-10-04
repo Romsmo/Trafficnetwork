@@ -1,6 +1,6 @@
 {
   "name": "@trafficnetwork/client-node",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Trafficnetwork client library for Node.js — FFI over the C ABI",
   "license": "Apache-2.0",
   "repository": "https://github.com/Romsmo/Trafficnetwork",

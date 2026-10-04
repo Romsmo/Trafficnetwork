@@ -64,6 +64,7 @@ mod tests {
             federation_enabled: false,
             network_config: None,
             community_corrections: None,
+            camera_policy: None,
         }
     }
 

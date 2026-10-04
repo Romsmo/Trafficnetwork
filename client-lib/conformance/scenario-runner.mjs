@@ -138,6 +138,9 @@ export async function runScenario(scenario, env) {
           status: spec.status,
           times: spec.times ?? 1,
         });
+      } else if ("mockSet" in step) {
+        const spec = step.mockSet;
+        await http("POST", `${servers[spec.server]}/__set`, spec.config);
       } else if ("mockLog" in step) {
         const spec = step.mockLog;
         const log = await http("GET", `${servers[spec.server]}/__log`);

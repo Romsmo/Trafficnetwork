@@ -13,6 +13,7 @@ use super::{
     boxes_intersect, query_box, segment_bbox, LocalCorrectionProposal, PendingWrite,
     StorageFullError, Store, StoreError, StoredEntities,
 };
+use crate::sync::camera_policy::CameraZone;
 use crate::sync::types::{HazardReport, SpeedLimitSegment, StaticSign};
 
 #[derive(Default, Serialize, Deserialize)]
@@ -25,6 +26,7 @@ struct Inner {
     #[serde(skip)]
     static_entity_limit: Option<usize>,
     static_partition_resolution: Option<u8>,
+    camera_policy_stamp: Option<String>,
 }
 
 #[derive(Default)]
@@ -109,6 +111,11 @@ impl Store for InMemoryStore {
         Ok(())
     }
 
+    fn clear_cursors(&self) -> Result<(), StoreError> {
+        self.inner.lock().unwrap().cursors.clear();
+        Ok(())
+    }
+
     fn get_partition_hash(&self, tile: &str) -> Result<Option<String>, StoreError> {
         Ok(self
             .inner
@@ -151,6 +158,19 @@ impl Store for InMemoryStore {
         Ok(())
     }
 
+    fn camera_policy_stamp(&self) -> Result<Option<String>, StoreError> {
+        Ok(self.inner.lock().unwrap().camera_policy_stamp.clone())
+    }
+
+    fn set_camera_policy_stamp(&self, stamp: &str) -> Result<(), StoreError> {
+        self.inner.lock().unwrap().camera_policy_stamp = Some(stamp.to_string());
+        Ok(())
+    }
+
+    fn camera_zones(&self) -> Result<Vec<CameraZone>, StoreError> {
+        Ok(self.inner.lock().unwrap().entities.camera_zones.clone())
+    }
+
     fn set_partition_hash(&self, tile: &str, hash: &str) -> Result<(), StoreError> {
         self.inner
             .lock()
@@ -165,6 +185,7 @@ impl Store for InMemoryStore {
         inner.entities.speed_limit_segments.clear();
         inner.entities.static_signs.clear();
         inner.entities.fixed_speed_cameras.clear();
+        inner.entities.camera_zones.clear();
         inner.partition_hashes.clear();
         inner.static_partition_resolution = None;
         Ok(())
@@ -204,6 +225,9 @@ impl Store for InMemoryStore {
             &data.fixed_speed_cameras,
             |c| &c.id,
         );
+        upsert_by_id(&mut inner.entities.camera_zones, &data.camera_zones, |z| {
+            &z.id
+        });
         Ok(())
     }
 
@@ -224,6 +248,9 @@ impl Store for InMemoryStore {
                     .entities
                     .fixed_speed_cameras
                     .retain(|c| c.id != entity_id);
+            }
+            "cameraZone" => {
+                inner.entities.camera_zones.retain(|z| z.id != entity_id);
             }
             _ => {}
         }

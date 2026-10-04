@@ -26,6 +26,7 @@ use super::{
     query_box, segment_bbox, LocalCorrectionProposal, PendingWrite, StorageFullError, Store,
     StoreError, StoredEntities,
 };
+use crate::sync::camera_policy::CameraZone;
 use crate::sync::types::{
     FixedSpeedCamera, Geometry, HazardReport, SegmentCorrection, SpeedLimitSegment, StaticSign,
 };
@@ -67,6 +68,7 @@ CREATE VIRTUAL TABLE IF NOT EXISTS sign_rtree USING rtree(
     rid, min_lng, max_lng, min_lat, max_lat
 );
 CREATE TABLE IF NOT EXISTS fixed_speed_cameras (id TEXT PRIMARY KEY, data TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS camera_zones (id TEXT PRIMARY KEY, data TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS hazard_reports (id TEXT PRIMARY KEY, data TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS pending_writes (
     seq INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -406,6 +408,9 @@ fn upsert_static(tx: &Transaction<'_>, data: &StoredEntities) -> rusqlite::Resul
     for camera in &data.fixed_speed_cameras {
         upsert_json(tx, "fixed_speed_cameras", &camera.id, camera)?;
     }
+    for zone in &data.camera_zones {
+        upsert_json(tx, "camera_zones", &zone.id, zone)?;
+    }
     Ok(())
 }
 
@@ -456,13 +461,18 @@ impl Store for SqliteStore {
         })
     }
 
+    fn clear_cursors(&self) -> Result<(), StoreError> {
+        self.with_conn(|conn| conn.execute("DELETE FROM cursors", []).map(|_| ()))
+    }
+
     fn clear_static_data(&self) -> Result<(), StoreError> {
         self.with_conn(|conn| {
             let tx = conn.transaction()?;
             tx.execute_batch(
                 "DELETE FROM segment_rtree; DELETE FROM speed_limit_segments; \
                  DELETE FROM sign_rtree; DELETE FROM static_signs; \
-                 DELETE FROM fixed_speed_cameras; DELETE FROM partition_hashes; \
+                 DELETE FROM fixed_speed_cameras; DELETE FROM camera_zones; \
+                 DELETE FROM partition_hashes; \
                  DELETE FROM meta WHERE key = 'static_partition_resolution';",
             )?;
             tx.commit()
@@ -490,6 +500,32 @@ impl Store for SqliteStore {
             )
             .map(|_| ())
         })
+    }
+
+    fn camera_policy_stamp(&self) -> Result<Option<String>, StoreError> {
+        self.with_conn(|conn| {
+            conn.query_row(
+                "SELECT value FROM meta WHERE key = 'camera_policy_stamp'",
+                [],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()
+        })
+    }
+
+    fn set_camera_policy_stamp(&self, stamp: &str) -> Result<(), StoreError> {
+        self.with_conn(|conn| {
+            conn.execute(
+                "INSERT INTO meta (key, value) VALUES ('camera_policy_stamp', ?1) \
+                 ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                [stamp],
+            )
+            .map(|_| ())
+        })
+    }
+
+    fn camera_zones(&self) -> Result<Vec<CameraZone>, StoreError> {
+        self.with_conn(|conn| read_json::<CameraZone>(conn, "camera_zones"))
     }
 
     fn upsert_static_data(&self, data: &StoredEntities) -> Result<(), StoreError> {
@@ -557,6 +593,9 @@ impl Store for SqliteStore {
                         params![entity_id],
                     )?;
                 }
+                "cameraZone" => {
+                    tx.execute("DELETE FROM camera_zones WHERE id = ?1", params![entity_id])?;
+                }
                 _ => {}
             }
             tx.commit()
@@ -593,6 +632,7 @@ impl Store for SqliteStore {
                 static_signs: read_json::<StaticSign>(conn, "static_signs")?,
                 fixed_speed_cameras: read_json::<FixedSpeedCamera>(conn, "fixed_speed_cameras")?,
                 hazard_reports: read_json::<HazardReport>(conn, "hazard_reports")?,
+                camera_zones: read_json::<CameraZone>(conn, "camera_zones")?,
             })
         })
     }

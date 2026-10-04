@@ -64,6 +64,12 @@ exercised by the full scenario set too, not only by a unit test.
 public key the mock signs its network configuration with — in `servers`,
 `options` and every step.
 
+A server instance understands `cameraNamespace`, `networkConfig` (`version`,
+`blitzerEnabled`, `cameraPolicyByCountry`), `signWith`, `peers`, `nodeId`, and
+for the country policy `cameraPolicy` (`defaultLevel`, `byCountry`, …) and
+`cameraData` (`camera`, `zone`: put a camera and/or a zone near Berlin into its
+static package) — the header of `mock-server.mjs` lists them all.
+
 Steps:
 
 | Step | Meaning |
@@ -71,6 +77,7 @@ Steps:
 | `{"call": "sync", "args": {…}}` | Run an API method. Then optionally `"expect"` (the result **contains** this — objects by key, lists by exact length and order, scalars equal), `"expectKeys"` (the result has these keys), `"expectSome": {"path", "match"}` (some element of `result[path]` contains `match`), or `"expectError": "network"` (it must fail with exactly that code). |
 | `{"mockFail": {"server", "route", "status", "times"}}` | Make the mock answer `route` (e.g. `"POST /v1/hazard-reports"`) with `status` for the next `times` requests. |
 | `{"mockLog": {"server", "route", "count"?, "bodyIncludes"?, "signatureValid"?}}` | Check what the mock saw: how often a route was asked, that the first body contains something, that every device signature on it was (in)valid. |
+| `{"mockSet": {"server", "config": {…}}}` | Replace keys of the mock's instance config mid-scenario — the mock rebuilds its static package and moves its static-data version, as a server does when its rules (the camera policy) change. |
 
 A binding that fails a scenario is wrong, or the difference is genuinely
 platform-bound and documented in that platform's integration guide

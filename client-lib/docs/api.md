@@ -48,8 +48,9 @@ What the browser can and cannot do differently is in `integration-web.md`.
 | `seeds` | the two built-in placeholders | Seeds to start discovery from. |
 | `networkRootKey` | none built in | The network's root public key (base64url) — needed to verify a signed network configuration; without it, one is simply ignored (see "Network configuration" below). |
 | `credentials` | none | See "Authentication". |
-| `cameraNamespaceEnabled` | `false` | The host app's opt-in for speed cameras (one of three yeses — see "The camera namespace"). |
+| `cameraNamespaceEnabled` | `false` | The host app's switch for showing speed cameras — the equivalent of the user's "show speed cameras" checkbox, **off by default** (see "The camera namespace and the country policy"). |
 | `syncIntervalSeconds` | `30` | How often `tick()` syncs, at the most. |
+| `configRefreshSeconds` | `120` | How long a fetched `GET /v1/config` is used before it is fetched again — also how long a change of the camera policy can go unnoticed (a server whose static-data version moved is noticed at the next sync). `0` fetches it with every sync. |
 
 `discovery: false` with an empty `nodes` is refused at construction (there
 would be no server to ever talk to) — every other combination, including an
@@ -119,10 +120,23 @@ segment decides regardless. The `unit` (`"kmh"`/`"mph"`) is never converted.
 (so a reverted correction is never lost). See `report_wrong_speed_limit`
 below for how a proposal gets there.
 
-**`getNearby`** — reports, signs, and (only when the camera namespace is on
-— see below) cameras within `radiusMeters` (1–50,000), nearest first.
+**`getNearby`** — reports, signs, and (only when the camera display is on
+— see below) cameras and camera zones within `radiusMeters` (1–50,000),
+nearest first.
 `categories` (`"hazards" | "signs" | "cameras"`) narrows the set; omitted or
-empty means all three (cameras still gated). Hazard items include this
+empty means all three (cameras still gated). The items:
+
+```
+{ kind: "hazard", id, hazardType, lat, lng, distanceMeters, expiresAt, confirmCount, denyCount, pending }
+{ kind: "sign",   id, signType, lat, lng, distanceMeters }
+{ kind: "camera", id, cameraType, lat, lng, distanceMeters }
+{ kind: "cameraZone", id, cell, resolution, outline, cameraTypes, distanceMeters }   // an area, see below
+```
+
+A **`cameraZone`** is what a country at level `zones` lets through: a coarse
+area (an H3 cell, `outline` = its `[lng, lat]` corners) in which cameras of the
+listed kinds exist, `distanceMeters` `0` when the position is inside it. It has
+**no position of a single camera** — draw it as an area, not a pin. Hazard items include this
 device's own not-yet-delivered reports (`pending: true`) at their submitted
 position, and de-duplicate across servers: two hazard reports of the same
 type within the network's `duplicateMergeRadiusMeters` are the same event
@@ -262,20 +276,83 @@ configuration, if any — see below), `cameraNamespaceEnabled`, and the
 "currently online" figures from add-on O (`onlineNode`/`onlineNetwork`/
 `onlineEstimated`/`onlineAsOf` — absent on an older server, never blocking).
 
-### The camera namespace
+### The camera namespace and the country policy
 
-Speed-camera data is shown only when **three** things all say yes:
+Speed-camera data is shown only when **all** of these say yes:
 
-1. the server offers it (`GET /v1/config` → `speedCameraNamespaceEnabled`),
+1. the server offers it (`GET /v1/config` → `speedCameraNamespaceEnabled`, and
+   — on a server with the country policy — `cameraPolicy.namespaceEnabled`, the
+   emergency brake),
 2. a **verified** signed network configuration does not switch it off
    (`blitzerEnabled`) — unverified (no `networkRootKey` given, or the
    signature does not check out against it) is treated as "no configuration
    opinion", never as "on",
-3. the host app opted in (`cameraNamespaceEnabled: true`).
+3. the **host app switched it on** (`cameraNamespaceEnabled: true`, off by
+   default — in the host's UI the user's own checkbox), and
+4. the **country policy** lets something through. Every country has a level:
+   `full` (individual cameras, like any other category), `zones` (only coarse
+   areas, never an individual camera) or `off` (nothing). Which countries are
+   restricted is the operator's signed decision; the library never releases
+   anything by itself, and a missing, malformed or unknown value is read as
+   `off`.
 
-The network configuration can only narrow, never widen, what the other two
+The network configuration can only narrow, never widen, what the other
 allow — a forged or wrongly-signed configuration is silently ignored, not
-trusted "just in case".
+trusted "just in case". A country the *verified signed* network policy lists
+is at most that level, however generous the node's own claim.
+
+What the library does with the policy:
+
+* **Delivery is the server's job**: it knows each camera's country and sends
+  only what that country allows (individual cameras, or zones). The library has
+  no country boundaries and cannot re-derive that per item — it shows what it
+  was sent, as long as the policy lets something of that kind through at all:
+  individual cameras only while some country is at `full`, zones from `zones`
+  upwards, nothing while the brake is on or every level is `off`.
+* **A policy that gets stricter removes what was stored.** The library keeps the
+  policy under which it learned its cameras; when a fetched policy lets less
+  through (the brake comes on, or any country — or the default — gets a smaller
+  level), it drops every stored camera, zone and camera report, has the static
+  packages that held cameras fetched again (they were rebuilt under the new
+  rules) and learns the live reports afresh from a snapshot. Looser or
+  otherwise changed policies also trigger the fresh snapshot, because no event
+  tells about what is now allowed. It happens within `configRefreshSeconds`
+  (sooner when the server's static-data version moved).
+* **One node speaks for the policy.** The policy is read from the server that
+  answers `GET /v1/config`; nodes of one network may be stricter than the
+  network, never more generous, but two nodes with different local caps give
+  different readings.
+
+```
+getCameraPolicy() -> CameraPolicy
+```
+
+```
+{
+  hostEnabled,      // the cameraNamespaceEnabled option — off unless the host turned it on
+  active,           // getNearby shows cameras or zones right now (hostEnabled and the policy lets something through)
+  enabled,          // the emergency brake is released (false: every country is off)
+  maxLevel,         // "off" | "zones" | "full": the most any country allows
+  defaultLevel,     // the level of every country not in byCountry
+  byCountry,        // { "DE": "full", "FR": "zones", ... } — the strictest reading of node and verified network
+  zoneResolution,   // H3 resolution of the zones, or null before the node said
+  version,          // changes whenever the node's policy changes, or null
+  notice: { version, text: { de, en, ... } }   // the legal notice, see below
+}
+```
+
+Local, no network. Before a configuration was fetched nothing is allowed
+(`maxLevel: "off"`) and the library's own notice is returned, so a host can
+always show it.
+
+**The legal notice.** Using speed-camera data while driving is forbidden in
+several countries — in Germany also for passengers, in Switzerland even as a
+mere hint. A host app shows `notice.text` once, plainly (not as a consent
+dialog), when its user first switches the camera display on, and again when
+`notice.version` grows; the node's own wording is used when it sends one, the
+library's built-in German and English text otherwise. It is a pointer to the
+law, not a legal assessment — who may offer what, in which country, is the
+operator's responsibility.
 
 ## Events
 
@@ -420,8 +497,11 @@ checked against, run against `mock-server.mjs` (a scripted server, real
 Ed25519/RFC 8785, no dependency on the real server code) — cold start via a
 seed's directory, failover between two configured servers, an offline
 report that survives a dead server and goes out later, the camera-namespace
-three-way gate including a forged network configuration, a fully
-unreachable network, and the JSON-call error shapes. `run_python.py` was the
+gate including a forged network configuration, the country policy (zones show
+areas and never a camera, a `full` country shows cameras, the host switch
+decides, a verified signed policy can only tighten, a stricter policy and the
+emergency brake remove what was stored), a fully unreachable network, and the
+JSON-call error shapes. `run_python.py` was the
 first runner; `run_node.mjs` (Node.js over the C ABI) and `run_web.mjs` (the
 WebAssembly binding inside headless Chrome) share one environment-neutral
 scenario implementation, `scenario-runner.mjs`. Kotlin, Swift and Dart run

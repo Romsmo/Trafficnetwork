@@ -49,6 +49,7 @@ use wasm_bindgen::JsValue;
 use super::{
     InMemoryStore, LocalCorrectionProposal, PendingWrite, Store, StoreError, StoredEntities,
 };
+use crate::sync::camera_policy::CameraZone;
 use crate::sync::types::{FixedSpeedCamera, HazardReport, SpeedLimitSegment, StaticSign};
 
 const DB_VERSION: u32 = 1;
@@ -315,6 +316,26 @@ impl Store for IndexedDbStore {
         self.inner.set_static_partition_resolution(resolution)?;
         self.mirror();
         Ok(())
+    }
+
+    fn clear_cursors(&self) -> Result<(), StoreError> {
+        self.inner.clear_cursors()?;
+        self.mirror();
+        Ok(())
+    }
+
+    fn camera_policy_stamp(&self) -> Result<Option<String>, StoreError> {
+        self.inner.camera_policy_stamp()
+    }
+
+    fn set_camera_policy_stamp(&self, stamp: &str) -> Result<(), StoreError> {
+        self.inner.set_camera_policy_stamp(stamp)?;
+        self.mirror();
+        Ok(())
+    }
+
+    fn camera_zones(&self) -> Result<Vec<CameraZone>, StoreError> {
+        self.inner.camera_zones()
     }
 }
 

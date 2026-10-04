@@ -6,6 +6,8 @@ import {
   Client as NodeClient,
   libraryVersion,
   TrafficNetworkError,
+  type CameraLevel,
+  type CameraPolicy,
   type ClientEvent,
   type ClientOptions,
   type NearbyItem,
@@ -51,6 +53,14 @@ async function useAnyBinding(client: TrafficNetworkClient): Promise<void> {
 
   const network = await client.getNetworkStatus();
   console.log(network.knownNodes.map((node) => node.tier), network.onlineNode);
+
+  const policy: CameraPolicy = await client.getCameraPolicy();
+  const level: CameraLevel = policy.byCountry["DE"] ?? policy.defaultLevel;
+  console.log(policy.active, policy.maxLevel, level, policy.notice.text["en"]);
+  for (const item of await client.getNearby(52.52, 13.405, 2000, ["cameras"])) {
+    if (item.kind === "cameraZone") console.log(item.outline.length, item.cameraTypes);
+    if (item.kind === "camera") console.log(item.lat, item.lng);
+  }
 
   // @ts-expect-error: not one of the eleven hazard types
   await client.submitReport("tsunami", 1, 2);

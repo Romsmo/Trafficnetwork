@@ -9,6 +9,7 @@
 //! write buffer.
 
 pub mod auth;
+pub mod camera_policy;
 pub mod corrections;
 pub mod engine;
 pub mod expiry;
@@ -22,6 +23,10 @@ pub mod writebuffer;
 pub use auth::{
     bind_device_key, device_token, exchange_client_secret, register_device, AuthError,
     BindKeyResponse, DeviceRegistration, TokenResponse,
+};
+pub use camera_policy::{
+    effective_camera_policy, purge_camera_data, CameraLevel, CameraNotice, CameraPolicyConfig,
+    CameraZone, EffectiveCameraPolicy, ZoneBoundary,
 };
 pub use corrections::{
     confirm_speed_limit_correction, correction_id, fetch_corrections, report_wrong_speed_limit,

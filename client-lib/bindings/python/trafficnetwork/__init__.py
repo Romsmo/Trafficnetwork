@@ -365,6 +365,11 @@ class Client:
     def get_network_status(self):
         return self.call("getNetworkStatus")
 
+    def get_camera_policy(self):
+        """What the network's camera policy allows right now (levels per country, the
+        host switch, the legal notice to show before cameras are switched on)."""
+        return self.call("getCameraPolicy")
+
     def poll_events(self) -> List[Dict[str, Any]]:
         return self.call("pollEvents")["events"]
 

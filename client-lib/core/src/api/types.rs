@@ -1,12 +1,14 @@
 //! What the public calls hand back. Plain data with `camelCase` JSON names —
 //! the shapes are identical in every binding.
 
+use std::collections::BTreeMap;
+
 use serde::{Deserialize, Serialize};
 
 use crate::discovery::KnownServer;
 use crate::status::NetworkStatus;
 use crate::storage::{LocalCorrectionProposal, ProposalState};
-use crate::sync::{NearestSpeedLimit, SpeedLimitOrigin};
+use crate::sync::{CameraLevel, CameraNotice, NearestSpeedLimit, SpeedLimitOrigin};
 
 /// The speed limit in effect at a position, and where it comes from.
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -157,6 +159,22 @@ pub enum NearbyItem {
         lng: f64,
         distance_meters: f64,
     },
+    /// A coarse area in which cameras of some kinds exist — all a country at
+    /// level `zones` lets through. There is deliberately no position of a
+    /// single camera: draw `outline` as an area, not a pin.
+    #[serde(rename_all = "camelCase")]
+    CameraZone {
+        id: String,
+        /// The H3 index of the cell.
+        cell: String,
+        resolution: u8,
+        /// The cell's outline as `[lng, lat]` positions (the outer ring).
+        outline: Vec<[f64; 2]>,
+        /// The kinds of camera present, sorted.
+        camera_types: Vec<String>,
+        /// `0` when the position is inside the zone.
+        distance_meters: f64,
+    },
 }
 
 impl NearbyItem {
@@ -169,6 +187,9 @@ impl NearbyItem {
                 distance_meters, ..
             }
             | NearbyItem::Camera {
+                distance_meters, ..
+            }
+            | NearbyItem::CameraZone {
                 distance_meters, ..
             } => *distance_meters,
         }
@@ -265,6 +286,37 @@ pub struct NetworkStatusView {
     pub camera_namespace_enabled: bool,
     #[serde(flatten)]
     pub online: NetworkStatus,
+}
+
+/// What the camera policy of the network allows right now, and the notice a
+/// host app shows before it lets a user switch cameras on.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CameraPolicyView {
+    /// The host app's own switch (the `cameraNamespaceEnabled` option): off
+    /// unless the host turned it on — the equivalent of the user's
+    /// "show speed cameras" checkbox.
+    pub host_enabled: bool,
+    /// Cameras (or zones) are shown by `getNearby` right now: the host
+    /// switch is on and the policy lets something through.
+    pub active: bool,
+    /// The emergency brake is released. `false`: every country is off.
+    pub enabled: bool,
+    /// The most any country allows: `off` shows nothing, `zones` only zones,
+    /// `full` individual cameras too.
+    pub max_level: CameraLevel,
+    /// The level of every country not in `by_country`.
+    pub default_level: CameraLevel,
+    /// ISO 3166-1 alpha-2 → level, the strictest reading of the node's
+    /// policy and the verified network policy.
+    pub by_country: BTreeMap<String, CameraLevel>,
+    /// The H3 resolution zones are cut at, once the node said.
+    pub zone_resolution: Option<u8>,
+    /// Changes whenever the node's policy changes.
+    pub version: Option<String>,
+    /// The legal notice, by language. Show it once when the user first
+    /// switches cameras on, and again when `notice.version` grows.
+    pub notice: CameraNotice,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]

@@ -159,12 +159,14 @@ Konformitätstests darüber sind seit Version 1.0.0 fertig — Einzelheiten in
 - [ ] Offen (Betreiber/Reviewer): PR #13 grün prüfen und mergen — lokal durch abstürzendes Docker Desktop nicht vollständig durchgelaufen, siehe Lagebericht in `docs/status.md`
 
 ## Client-Bibliothek nach 1.0 — nie zugesagt, aber offen benannt
-- [ ] Release auslösen: Tag `client-lib-v1.0.0` setzen (hängt die Build-Artefakte mit Prüfsummen an ein GitHub-Release; bewusst **nicht** von der Client-Instanz gesetzt — deine Freigabe)
+- [ ] Release auslösen: Tag `client-lib-v1.1.0` setzen (`1.0.0` wäre der Stand ohne die Blitzer-Länderrichtlinie) (hängt die Build-Artefakte mit Prüfsummen an ein GitHub-Release; bewusst **nicht** von der Client-Instanz gesetzt — deine Freigabe)
 - [ ] Pakete in Registern veröffentlichen (npm, Maven, pub.dev, CocoaPods) — jede Veröffentlichung ist eine eigene Freigabe; bis dahin `"private"` bzw. `publish_to: none`
 - [ ] Kotlin/Android, Swift/iOS und React Native auf Emulator/Simulator/Gerät *ausführen* (heute: gebaut und gelinkt; Konformität auf JVM bzw. macOS mit derselben Rust-Bibliothek; nur die Flutter-App läuft auf einem Android-Emulator)
 - [ ] Das von `uniffi-bindgen-react-native` erzeugte JSI-Zwischenstück in einem Test ausführen
 - [ ] Einen echten TLS-Handshake gegen einen Server mit gültigem Zertifikat testen (alle Tests laufen heute über `http://`; sinnvoll, sobald Domain und Seed-Server stehen)
 - [ ] Flutter-Plugin auch für Desktop bündeln (heute Android und iOS)
+- [ ] Blitzer-Länderrichtlinie (Teil C, Version 1.1.0): die Bibliothek liest die Politik von *dem* Knoten, der `GET /v1/config` beantwortet — Knoten desselben Netzes mit unterschiedlichen lokalen Obergrenzen geben unterschiedliche Lesarten; strengstes über alle Knoten wäre eine eigene Entscheidung
+- [ ] Blitzer-Länderrichtlinie: das Land des *Fahrers* berücksichtigt weder Server noch Bibliothek (`server/docs/camera-country-policy.md`, Abschnitt 9) — eine Host-App, die es kennt, kann `byCountry` selbst auswerten; ob die Bibliothek das übernehmen soll, ist offen
 - [ ] `tools/test-client/` (Launch L) auf die Bibliothek umstellen, statt direkt gegen HTTP/WebSocket zu sprechen
 
 ## Launch P — Öffentlicher Betrieb (gemieteter Server + Domain)

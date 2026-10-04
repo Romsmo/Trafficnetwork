@@ -533,3 +533,154 @@ async fn a_static_package_that_does_not_match_its_hash_is_rejected() {
 
     harness.stop_node(&node).await;
 }
+
+// ----------------------------------------------------------- camera policy
+
+/// A client of `node` whose host app switched the camera display on (it is
+/// off by default).
+fn client_with_cameras_on(node: &Node, storage: &std::path::Path) -> TrafficNetworkClient {
+    TrafficNetworkClient::new(
+        ClientOptions {
+            nodes: vec![node.address.clone()],
+            discovery: false,
+            camera_namespace_enabled: true,
+            // So the client notices a change of the policy within a second
+            // instead of within two minutes.
+            config_refresh_seconds: 1,
+            credentials: Some(Credentials::Client {
+                client_id: node.client_id.clone(),
+                client_secret: node.client_secret.clone(),
+            }),
+            ..ClientOptions::default()
+        },
+        Platform {
+            secure_store: std::sync::Arc::new(MemorySecureStore::new()),
+            ..Platform::native(storage).expect("native platform")
+        },
+    )
+    .expect("client construction")
+}
+
+/// What a client standing at `(lat, lng)` sees of cameras: whether the report
+/// of a camera type is there as an individual report, and the zones.
+fn camera_view(client: &TrafficNetworkClient, lat: f64, lng: f64) -> (bool, usize) {
+    let items = client
+        .get_nearby(
+            lat,
+            lng,
+            3_000.0,
+            &[NearbyCategory::Hazards, NearbyCategory::Cameras],
+        )
+        .expect("a read");
+    let individual = items.iter().any(
+        |item| matches!(item, NearbyItem::Hazard { hazard_type, .. } if hazard_type == "mobileSpeedCamera"),
+    );
+    let zones = items
+        .iter()
+        .filter(|item| matches!(item, NearbyItem::CameraZone { .. }))
+        .count();
+    (individual, zones)
+}
+
+#[tokio::test]
+async fn a_country_policy_reaches_the_client_and_a_tightening_removes_what_it_held() {
+    use trafficnetwork_core::sync::CameraLevel;
+
+    let Some(harness) = Harness::connect().await else {
+        eprintln!(
+            "skipped: no multi-node harness at {} (see the module doc)",
+            harness_url()
+        );
+        return;
+    };
+    // Germany individually, France as zones, Switzerland not at all (the
+    // harness gives the node synthetic country boundaries, see
+    // `server/tests/integration/camera-policy-helper.ts`).
+    let node = harness
+        .start_node(json!({ "cameraPolicy": { "DE": "full", "FR": "zones", "CH": "off" } }))
+        .await;
+    harness
+        .seed_hazard_report(&node, "mobileSpeedCamera", 50.0, 10.0)
+        .await;
+    harness
+        .seed_hazard_report(&node, "mobileSpeedCamera", 47.0, 2.0)
+        .await;
+    harness
+        .seed_hazard_report(&node, "mobileSpeedCamera", 46.5, 8.5)
+        .await;
+
+    let learn = |name: &str, lat: f64, lng: f64| {
+        let client = client_with_cameras_on(&node, &temp_storage(name));
+        client.update_position(lat, lng, None).unwrap();
+        client
+    };
+    let germany = learn("camera-policy-de", 50.0, 10.0);
+    let france = learn("camera-policy-fr", 47.0, 2.0);
+    let switzerland = learn("camera-policy-ch", 46.5, 8.5);
+    for client in [&germany, &france, &switzerland] {
+        let report = client.sync().await.unwrap();
+        assert!(report.ok, "{report:?}");
+    }
+
+    // Each gets what its country allows — and the host app can read the rules.
+    assert_eq!(
+        camera_view(&germany, 50.0, 10.0),
+        (true, 0),
+        "Germany: the camera itself"
+    );
+    assert_eq!(
+        camera_view(&france, 47.0, 2.0),
+        (false, 1),
+        "France: only an area"
+    );
+    assert_eq!(
+        camera_view(&switzerland, 46.5, 8.5),
+        (false, 0),
+        "Switzerland: nothing"
+    );
+    let policy = germany.get_camera_policy().unwrap();
+    assert!(policy.active && policy.enabled);
+    assert_eq!(policy.max_level, CameraLevel::Full);
+    // A country the node does not list has the default level (a country at
+    // the default is simply not listed).
+    let level_of = |country: &str| {
+        policy
+            .by_country
+            .get(country)
+            .copied()
+            .unwrap_or(policy.default_level)
+    };
+    assert_eq!(level_of("DE"), CameraLevel::Full);
+    assert_eq!(level_of("FR"), CameraLevel::Zones);
+    assert_eq!(level_of("CH"), CameraLevel::Off);
+    assert!(!policy.notice.text.is_empty());
+
+    // The operator cuts Germany to zones. The node reloads its policy without
+    // a restart; the client, at its next syncs, notices the packages moved,
+    // reads the new rules, drops what it held and learns the live state afresh.
+    harness
+        .post(
+            &format!("/nodes/{}/camera-policy", node.id),
+            json!({ "levels": { "DE": "zones", "FR": "zones", "CH": "off" } }),
+        )
+        .await;
+    wait_for(
+        || async {
+            germany.sync().await.ok()?;
+            (camera_view(&germany, 50.0, 10.0) == (false, 1)).then_some(())
+        },
+        Duration::from_secs(30),
+    )
+    .await;
+    let tightened = germany.get_camera_policy().unwrap();
+    assert_eq!(
+        tightened
+            .by_country
+            .get("DE")
+            .copied()
+            .unwrap_or(tightened.default_level),
+        CameraLevel::Zones
+    );
+
+    harness.stop_node(&node).await;
+}

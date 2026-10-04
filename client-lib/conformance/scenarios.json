@@ -193,6 +193,104 @@
         { "call": "sync", "expect": { "ok": true } },
         { "call": "getNetworkStatus", "expect": { "cameraNamespaceEnabled": true, "configVersion": null } }
       ]
+    },
+    {
+      "name": "country policy: a zones level shows areas and never an individual camera",
+      "servers": { "main": { "cameraNamespace": true, "cameraPolicy": { "defaultLevel": "zones" }, "cameraData": { "camera": true, "zone": true } } },
+      "options": {
+        "nodes": ["${main}"],
+        "discovery": false,
+        "cameraNamespaceEnabled": true,
+        "credentials": { "type": "client", "clientId": "conformance", "clientSecret": "secret" }
+      },
+      "steps": [
+        { "call": "sync", "expect": { "ok": true } },
+        { "call": "getNearby", "args": { "lat": 52.52, "lng": 13.405, "radiusMeters": 500, "categories": ["cameras"] }, "expect": { "items": [ { "kind": "cameraZone", "id": "zone-1", "cameraTypes": ["fixedSpeedCamera", "mobileSpeedCamera"], "distanceMeters": 0 } ] } },
+        { "call": "getCameraPolicy", "expect": { "hostEnabled": true, "active": true, "maxLevel": "zones", "defaultLevel": "zones", "notice": { "version": 1 } } }
+      ]
+    },
+    {
+      "name": "country policy: a country at full shows individual cameras, a zones country its area",
+      "servers": { "main": { "cameraNamespace": true, "cameraPolicy": { "defaultLevel": "off", "byCountry": { "DE": "full", "FR": "zones" } }, "cameraData": { "camera": true, "zone": true } } },
+      "options": {
+        "nodes": ["${main}"],
+        "discovery": false,
+        "cameraNamespaceEnabled": true,
+        "credentials": { "type": "client", "clientId": "conformance", "clientSecret": "secret" }
+      },
+      "steps": [
+        { "call": "sync", "expect": { "ok": true } },
+        { "call": "getNearby", "args": { "lat": 52.52, "lng": 13.405, "radiusMeters": 500, "categories": ["cameras"] }, "expectSome": { "path": "items", "match": { "kind": "camera", "id": "cam-1" } } },
+        { "call": "getNearby", "args": { "lat": 52.52, "lng": 13.405, "radiusMeters": 500, "categories": ["cameras"] }, "expectSome": { "path": "items", "match": { "kind": "cameraZone", "id": "zone-1" } } },
+        { "call": "getCameraPolicy", "expect": { "maxLevel": "full", "defaultLevel": "off", "byCountry": { "DE": "full", "FR": "zones" } } }
+      ]
+    },
+    {
+      "name": "country policy: nothing shows until the host app switches cameras on",
+      "servers": { "main": { "cameraNamespace": true, "cameraPolicy": { "defaultLevel": "full" }, "cameraData": { "camera": true, "zone": true } } },
+      "options": {
+        "nodes": ["${main}"],
+        "discovery": false,
+        "credentials": { "type": "client", "clientId": "conformance", "clientSecret": "secret" }
+      },
+      "steps": [
+        { "call": "sync", "expect": { "ok": true } },
+        { "call": "getNearby", "args": { "lat": 52.52, "lng": 13.405, "radiusMeters": 500, "categories": ["cameras"] }, "expect": { "items": [] } },
+        { "call": "getCameraPolicy", "expect": { "hostEnabled": false, "active": false, "maxLevel": "full", "notice": { "text": { "de": "Hinweis (Mock)" } } } }
+      ]
+    },
+    {
+      "name": "country policy: a verified signed network policy can only tighten what the node claims",
+      "servers": { "main": { "cameraNamespace": true, "cameraPolicy": { "defaultLevel": "off", "byCountry": { "DE": "full" } }, "cameraData": { "camera": true, "zone": true }, "networkConfig": { "version": 4, "blitzerEnabled": true, "cameraPolicyByCountry": { "DE": "off" } } } },
+      "options": {
+        "nodes": ["${main}"],
+        "discovery": false,
+        "networkRootKey": "${main.rootKey}",
+        "cameraNamespaceEnabled": true,
+        "credentials": { "type": "client", "clientId": "conformance", "clientSecret": "secret" }
+      },
+      "steps": [
+        { "call": "sync", "expect": { "ok": true } },
+        { "call": "getNetworkStatus", "expect": { "configVersion": 4 } },
+        { "call": "getNearby", "args": { "lat": 52.52, "lng": 13.405, "radiusMeters": 500, "categories": ["cameras"] }, "expect": { "items": [] } },
+        { "call": "getCameraPolicy", "expect": { "maxLevel": "off", "active": false, "byCountry": { "DE": "off" } } }
+      ]
+    },
+    {
+      "name": "country policy: a stricter policy removes what was stored",
+      "servers": { "main": { "cameraNamespace": true, "cameraPolicy": { "defaultLevel": "full" }, "cameraData": { "camera": true, "zone": true } } },
+      "options": {
+        "nodes": ["${main}"],
+        "discovery": false,
+        "cameraNamespaceEnabled": true,
+        "credentials": { "type": "client", "clientId": "conformance", "clientSecret": "secret" }
+      },
+      "steps": [
+        { "call": "sync", "expect": { "ok": true } },
+        { "call": "getNearby", "args": { "lat": 52.52, "lng": 13.405, "radiusMeters": 500, "categories": ["cameras"] }, "expectSome": { "path": "items", "match": { "kind": "camera", "id": "cam-1" } } },
+        { "mockSet": { "server": "main", "config": { "cameraPolicy": { "defaultLevel": "full", "byCountry": { "DE": "zones" }, "version": "p2" }, "cameraData": { "camera": false, "zone": true } } } },
+        { "call": "sync", "expect": { "ok": true } },
+        { "call": "getNearby", "args": { "lat": 52.52, "lng": 13.405, "radiusMeters": 500, "categories": ["cameras"] }, "expect": { "items": [ { "kind": "cameraZone", "id": "zone-1" } ] } },
+        { "call": "getCameraPolicy", "expect": { "version": "p2", "byCountry": { "DE": "zones" } } }
+      ]
+    },
+    {
+      "name": "country policy: the emergency brake removes every camera locally",
+      "servers": { "main": { "cameraNamespace": true, "cameraPolicy": { "defaultLevel": "full" }, "cameraData": { "camera": true, "zone": true } } },
+      "options": {
+        "nodes": ["${main}"],
+        "discovery": false,
+        "cameraNamespaceEnabled": true,
+        "credentials": { "type": "client", "clientId": "conformance", "clientSecret": "secret" }
+      },
+      "steps": [
+        { "call": "sync", "expect": { "ok": true } },
+        { "call": "getNearby", "args": { "lat": 52.52, "lng": 13.405, "radiusMeters": 500, "categories": ["cameras"] }, "expectSome": { "path": "items", "match": { "kind": "camera", "id": "cam-1" } } },
+        { "mockSet": { "server": "main", "config": { "cameraNamespace": false, "cameraPolicy": { "namespaceEnabled": false, "defaultLevel": "full" }, "cameraData": { "camera": false, "zone": false } } } },
+        { "call": "sync", "expect": { "ok": true } },
+        { "call": "getNearby", "args": { "lat": 52.52, "lng": 13.405, "radiusMeters": 500, "categories": ["cameras"] }, "expect": { "items": [] } },
+        { "call": "getCameraPolicy", "expect": { "enabled": false, "active": false, "maxLevel": "off" } }
+      ]
     }
   ]
 }

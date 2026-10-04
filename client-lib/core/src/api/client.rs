@@ -27,10 +27,11 @@ use crate::status::OnlineStatusService;
 use crate::storage::{Store, WriteKind};
 use crate::sync::{
     bind_device_key, confirm_hazard_report, confirm_speed_limit_correction,
-    effective_camera_namespace_enabled, exchange_client_secret, fetch_corrections, flush_pending,
-    haversine_distance_meters, nearby_hazard_reports, register_device, report_camera_removed,
-    report_wrong_speed_limit, run_realtime as run_realtime_protocol, speed_limit_at, submit_report,
-    ClientConfig, Correction, CorrectionTarget, FlushOutcome, HazardType, NetworkConfigPayload,
+    effective_camera_policy, exchange_client_secret, fetch_corrections, flush_pending,
+    haversine_distance_meters, nearby_hazard_reports, purge_camera_data, register_device,
+    report_camera_removed, report_wrong_speed_limit, run_realtime as run_realtime_protocol,
+    speed_limit_at, submit_report, CameraLevel, CameraNotice, ClientConfig, Correction,
+    CorrectionTarget, EffectiveCameraPolicy, FlushOutcome, HazardType, NetworkConfigPayload,
     ReportSubmission, SegmentRef, SyncEngine, WrongSpeedLimitReport,
 };
 
@@ -43,12 +44,10 @@ use super::secure_store::{
 };
 use super::tiles::{ring_for_speed, tiles_around, DEFAULT_REGION_RESOLUTION};
 use super::types::{
-    BootstrapPlanView, NearbyCategory, NearbyItem, NetworkStatusView, NodeView, PositionUpdate,
-    ProposalView, SpeedLimitAnswer, SyncReport, SyncStatus, TickResult,
+    BootstrapPlanView, CameraPolicyView, NearbyCategory, NearbyItem, NetworkStatusView, NodeView,
+    PositionUpdate, ProposalView, SpeedLimitAnswer, SyncReport, SyncStatus, TickResult,
 };
 
-/// How long a fetched `GET /v1/config` is used before it is fetched again.
-const CONFIG_TTL_MS: i64 = 10 * 60 * 1000;
 /// A token is renewed this long before it runs out.
 const TOKEN_MARGIN_MS: i64 = 30_000;
 /// How far from a position `getSpeedLimitAt` looks, until the server's
@@ -212,7 +211,26 @@ struct CachedConfig {
     /// The network configuration, only if its signature verified against the
     /// root key.
     network: Option<NetworkConfigPayload>,
+    /// What the camera policy allows: the strictest reading of the node's
+    /// policy and the verified network configuration.
+    policy: EffectiveCameraPolicy,
     fetched_at_ms: i64,
+}
+
+impl CachedConfig {
+    fn new(
+        config: ClientConfig,
+        network: Option<NetworkConfigPayload>,
+        fetched_at_ms: i64,
+    ) -> Self {
+        let policy = effective_camera_policy(&config, network.as_ref());
+        CachedConfig {
+            config,
+            network,
+            policy,
+            fetched_at_ms,
+        }
+    }
 }
 
 #[derive(Default)]
@@ -229,6 +247,9 @@ struct State {
     last_error: Option<ApiError>,
     syncing: bool,
     closed: bool,
+    /// The static-data version the last sync's manifest named — when it
+    /// moves, the configuration fetched before is stale.
+    manifest_version: Option<u64>,
 }
 
 pub struct TrafficNetworkClient {
@@ -321,6 +342,14 @@ impl TrafficNetworkClient {
         self.clock.now_unix_ms()
     }
 
+    /// How long a fetched `GET /v1/config` is used before it is fetched
+    /// again — see `ClientOptions::config_refresh_seconds`.
+    fn config_ttl_ms(&self) -> i64 {
+        i64::try_from(self.options.config_refresh_seconds)
+            .unwrap_or(i64::MAX)
+            .saturating_mul(1000)
+    }
+
     fn cached_config(&self) -> Option<ClientConfig> {
         self.state().config.as_ref().map(|c| c.config.clone())
     }
@@ -333,20 +362,104 @@ impl TrafficNetworkClient {
             .unwrap_or(DEFAULT_REGION_RESOLUTION)
     }
 
-    /// The camera namespace is on only when the server, the (verified)
-    /// network configuration and the host app all say so. Without a fetched
-    /// configuration it is off.
-    fn camera_namespace_enabled(&self) -> bool {
+    /// What the camera policy allows: the strictest reading of the node's
+    /// policy and the verified network configuration. Without a fetched
+    /// configuration it allows nothing.
+    fn camera_policy(&self) -> EffectiveCameraPolicy {
+        self.state()
+            .config
+            .as_ref()
+            .map_or_else(EffectiveCameraPolicy::off, |cached| cached.policy.clone())
+    }
+
+    /// How much of the cameras `get_nearby` may show: only when the host app
+    /// asked for them (it is off by default), and then no more than the most
+    /// any country allows — nothing, zones, or individual cameras.
+    fn camera_level(&self) -> CameraLevel {
         if !self.options.camera_namespace_enabled {
-            return false;
+            return CameraLevel::Off;
         }
-        let state = self.state();
-        match &state.config {
-            Some(cached) => {
-                effective_camera_namespace_enabled(&cached.config, cached.network.as_ref())
+        self.camera_policy().max_level()
+    }
+
+    /// Whether any camera data (zones included) is shown right now.
+    fn camera_namespace_enabled(&self) -> bool {
+        self.camera_level() > CameraLevel::Off
+    }
+
+    /// Called with every freshly fetched configuration: when the policy lets
+    /// less through than the one the stored cameras were learned under (no
+    /// record of that = the old single switch, individual cameras
+    /// everywhere), they are removed locally and the packages that held them
+    /// are fetched again; and whenever the policy differs at all, the live
+    /// reports are learned afresh from a snapshot. Failing to purge is
+    /// retried the next time.
+    fn reconcile_camera_data(&self, policy: &EffectiveCameraPolicy, config: &ClientConfig) {
+        let before = self
+            .store
+            .camera_policy_stamp()
+            .ok()
+            .flatten()
+            .and_then(|stamp| serde_json::from_str::<EffectiveCameraPolicy>(&stamp).ok())
+            .unwrap_or_else(EffectiveCameraPolicy::unrestricted);
+        if policy != &before {
+            if policy.is_stricter_than(&before)
+                && purge_camera_data(&*self.store, &config.camera_namespace_hazard_types).is_err()
+            {
+                return;
             }
-            None => false,
+            // What the node delivers changed, and no event tells about what is
+            // now allowed (or not) of the live reports: learn them afresh, from
+            // a snapshot, in this very sync.
+            let _ = self.store.clear_cursors();
         }
+        if let Ok(stamp) = serde_json::to_string(policy) {
+            let _ = self.store.set_camera_policy_stamp(&stamp);
+        }
+    }
+
+    /// Whether the manifest of the last static-data sync names another
+    /// version than the one before it (the first one does not count).
+    fn manifest_version_moved(&self) -> bool {
+        let Some(seen) = self.engine.last_static_data_version() else {
+            return false;
+        };
+        let mut state = self.state();
+        let moved = state.manifest_version.is_some_and(|before| before != seen);
+        state.manifest_version = Some(seen);
+        moved
+    }
+
+    /// What the camera policy of the network allows right now, and the notice
+    /// to show before cameras are switched on — see [`CameraPolicyView`].
+    pub fn get_camera_policy(&self) -> Result<CameraPolicyView, ApiError> {
+        self.check_open()?;
+        let (policy, node) = {
+            let state = self.state();
+            match &state.config {
+                Some(cached) => (cached.policy.clone(), cached.config.camera_policy.clone()),
+                None => (EffectiveCameraPolicy::off(), None),
+            }
+        };
+        let notice = node
+            .as_ref()
+            .and_then(|node| node.notice.clone())
+            .filter(|notice| !notice.text.is_empty())
+            .unwrap_or_else(CameraNotice::built_in);
+        Ok(CameraPolicyView {
+            host_enabled: self.options.camera_namespace_enabled,
+            active: self.camera_namespace_enabled(),
+            enabled: policy.enabled,
+            max_level: policy.max_level(),
+            default_level: policy.default_level,
+            by_country: policy.by_country,
+            zone_resolution: node.as_ref().and_then(|node| node.zone_resolution),
+            version: node
+                .as_ref()
+                .map(|node| node.version.clone())
+                .filter(|version| !version.is_empty()),
+            notice,
+        })
     }
 
     // ---------------------------------------------------------------- auth
@@ -467,7 +580,7 @@ impl TrafficNetworkClient {
         {
             let state = self.state();
             if let Some(cached) = &state.config {
-                if now - cached.fetched_at_ms < CONFIG_TTL_MS {
+                if now - cached.fetched_at_ms < self.config_ttl_ms() {
                     return Ok(cached.config.clone());
                 }
             }
@@ -483,11 +596,9 @@ impl TrafficNetworkClient {
             }
             _ => None,
         };
-        self.state().config = Some(CachedConfig {
-            config: config.clone(),
-            network,
-            fetched_at_ms: now,
-        });
+        let cached = CachedConfig::new(config.clone(), network, now);
+        self.reconcile_camera_data(&cached.policy, &config);
+        self.state().config = Some(cached);
         Ok(config)
     }
 
@@ -531,7 +642,12 @@ impl TrafficNetworkClient {
         }
         let wanted =
             |category: NearbyCategory| categories.is_empty() || categories.contains(&category);
-        let namespace_on = self.camera_namespace_enabled();
+        // Individual cameras (and the stored reports of camera types) only
+        // where some country is at `full`; zones from `zones` upwards; and
+        // nothing at all unless the host app switched cameras on.
+        let camera_level = self.camera_level();
+        let individual_on = camera_level == CameraLevel::Full;
+        let zones_on = camera_level >= CameraLevel::Zones;
         let config = self.cached_config();
         let now = self.now();
         let mut items: Vec<NearbyItem> = Vec::new();
@@ -539,7 +655,7 @@ impl TrafficNetworkClient {
         if wanted(NearbyCategory::Hazards) {
             let mut reports = self.store.hazard_reports()?;
             // The camera types are the camera namespace's, wherever they turn up.
-            if !namespace_on {
+            if !individual_on {
                 let camera_types = config
                     .as_ref()
                     .map(|c| c.camera_namespace_hazard_types.clone())
@@ -599,7 +715,26 @@ impl TrafficNetworkClient {
             }
         }
 
-        if wanted(NearbyCategory::Cameras) && namespace_on {
+        if wanted(NearbyCategory::Cameras) && zones_on {
+            for zone in self.store.camera_zones()? {
+                if zone.status != "active" {
+                    continue;
+                }
+                let distance = zone.distance_meters(lat, lng);
+                if distance <= radius_meters {
+                    items.push(NearbyItem::CameraZone {
+                        outline: zone.outline(),
+                        id: zone.id,
+                        cell: zone.cell,
+                        resolution: zone.resolution,
+                        camera_types: zone.camera_types,
+                        distance_meters: distance,
+                    });
+                }
+            }
+        }
+
+        if wanted(NearbyCategory::Cameras) && individual_on {
             for camera in self.store.fixed_speed_cameras()? {
                 if camera.status != "active" {
                     continue;
@@ -850,6 +985,18 @@ impl TrafficNetworkClient {
             }
             report.ok = false;
             report.static_data_error = Some(error.code);
+        }
+        // The server rebuilt its packages (a change of the camera policy
+        // always does): what the configuration says may be out of date, so it
+        // is fetched again now rather than after its time is up, and the
+        // packages a stricter policy emptied are fetched once more.
+        if self.manifest_version_moved() {
+            if let Some(cached) = self.state().config.as_mut() {
+                cached.fetched_at_ms = 0;
+            }
+            if self.ensure_config(&token).await.is_ok() {
+                let _ = self.engine.sync_static_data(&token).await;
+            }
         }
         if let Err(error) = self.engine.sync_dynamic(&token, &tiles).await {
             let error = ApiError::from(error);
@@ -1116,11 +1263,11 @@ impl TrafficNetworkClient {
 
     /// As if `GET /v1/config` had been fetched.
     pub(super) fn set_test_config(&self, config: serde_json::Value) {
-        self.state().config = Some(CachedConfig {
-            config: serde_json::from_value(config).unwrap(),
-            network: None,
-            fetched_at_ms: self.now(),
-        });
+        self.state().config = Some(CachedConfig::new(
+            serde_json::from_value(config).unwrap(),
+            None,
+            self.now(),
+        ));
     }
 }
 

@@ -60,6 +60,11 @@ pub struct ClientOptions {
     pub camera_namespace_enabled: bool,
     /// How often [`super::TrafficNetworkClient::tick`] syncs, at the most.
     pub sync_interval_seconds: u64,
+    /// How long a fetched `GET /v1/config` is used before it is fetched
+    /// again. This is also how long a change of the network's camera policy
+    /// can go unnoticed (a node whose packages were rebuilt is noticed
+    /// earlier, at the next sync). `0` fetches it with every sync.
+    pub config_refresh_seconds: u64,
 }
 
 impl Default for ClientOptions {
@@ -72,6 +77,7 @@ impl Default for ClientOptions {
             credentials: None,
             camera_namespace_enabled: false,
             sync_interval_seconds: 30,
+            config_refresh_seconds: 120,
         }
     }
 }
