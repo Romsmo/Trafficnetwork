@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 import type { Env } from "../../config/env.js";
 import { verifySignedEnvelope, type SignedEnvelope } from "../crypto/envelope.js";
+import { CameraPolicyError, parseCountryLevels, type CameraLevel } from "../cameras/policy/levels.js";
 
 /**
  * The network-wide config a root-key holder signs offline (see
@@ -12,7 +13,14 @@ import { verifySignedEnvelope, type SignedEnvelope } from "../crypto/envelope.js
  */
 export interface NetworkConfigPayload {
   version: number;
+  /** Network-wide emergency brake: false switches every country off, whatever `cameraPolicyByCountry` says. */
   blitzerEnabled: boolean;
+  /**
+   * What the camera categories may deliver, per ISO 3166-1 alpha-2 country (docs/camera-country-policy.md). A country
+   * that is not listed — and an absent field — is `off`. This is the operator's legal decision, signed offline; the
+   * code never fills it in.
+   */
+  cameraPolicyByCountry?: Record<string, CameraLevel>;
   eventLogRetentionDaysDynamic: number;
   eventLogRetentionDaysStatic: number;
   minVersion: string;
@@ -58,20 +66,14 @@ export async function loadSignedNetworkConfig(env: Env): Promise<SignedEnvelope<
     throw new NetworkConfigError("Signed network config failed signature verification against NETWORK_ROOT_PUBLIC_KEY");
   }
 
-  return envelope;
-}
+  // The signature proves who wrote the file, not that it is well-formed: refuse a policy that cannot be understood
+  // completely instead of applying part of it.
+  try {
+    parseCountryLevels(envelope.payload.cameraPolicyByCountry);
+  } catch (err) {
+    if (err instanceof CameraPolicyError) throw new NetworkConfigError(`Signed network config: ${err.message}`);
+    throw err;
+  }
 
-/**
- * Mutates env in place — deliberately narrow (touches only this one field)
- * rather than a generic "apply all overrides" mechanism, so the one thing
- * that changes (the camera-namespace flag) stays easy to find and audit.
- * AND-gated, not OR-gated: per docs/prompt-rework-server-federation.md's
- * binding decision, "ein lokales Env-Flag darf die Netzwerkvorgabe nicht
- * aufheben" — a signed config saying `blitzerEnabled: true` never forces a
- * solo/non-federating operator's own `false` on; it can only ever prevent an
- * operator's local `true` from taking effect, never grant one.
- */
-export function applyNetworkConfigCameraOverride(env: Env, networkConfig: NetworkConfigPayload | null): void {
-  if (!networkConfig) return;
-  env.SPEED_CAMERA_NAMESPACE_ENABLED = env.SPEED_CAMERA_NAMESPACE_ENABLED && networkConfig.blitzerEnabled;
+  return envelope;
 }

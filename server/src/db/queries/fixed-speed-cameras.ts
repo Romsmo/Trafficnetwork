@@ -2,7 +2,7 @@ import { sql, type SQL } from "drizzle-orm";
 import type { Queryable } from "../client.js";
 import { envelopeOverlap, type Envelope } from "../../lib/geo-bbox.js";
 import type { PersistentCameraType } from "../../config/constants.js";
-import { pgArray } from "../pg-array.js";
+import { toRecord, type CameraRecord } from "./camera-record.js";
 
 /**
  * A permanently installed enforcement device (add-on D: the table holds speed cameras, red-light
@@ -38,6 +38,7 @@ interface Row extends Record<string, unknown> {
   id: string;
   camera_type: PersistentCameraType;
   position_geojson: unknown;
+  countries: string[] | null;
   status: "active" | "removed";
   removed_at: string | null;
   source: string;
@@ -63,69 +64,49 @@ function toApi(row: Row): FixedSpeedCameraApi {
   };
 }
 
+/** A persistent device with its country set and position, as every query here returns it (see camera-record.ts). */
+export type DeviceRecord = CameraRecord<FixedSpeedCameraApi>;
+
+export function toDeviceRecord(row: Record<string, unknown>): DeviceRecord {
+  const typed = row as Row;
+  return toRecord(toApi(typed), typed.countries);
+}
+
 const SELECT_COLUMNS = sql`
-  c.id, c.camera_type, ST_AsGeoJSON(c.position)::json as position_geojson, c.status, c.removed_at,
+  c.id, c.camera_type, ST_AsGeoJSON(c.position)::json as position_geojson, c.countries, c.status, c.removed_at,
   c.source, c.source_license, c.imported_at, c.last_confirmed_at,
   (select count(*)::int from camera_removal_reports r where r.camera_id = c.id) as removal_report_count
 `;
 
-/**
- * The classic speed cameras only — what `fixedSpeedCameras` in the snapshot and in the packages has always
- * meant. Used by the snapshot endpoint when the namespace flag is on (docs/concept.md section 3.1: synced
- * globally like other static entities, not tile-filtered). Every persistent device: findAllActiveEnforcementDevices.
+/*
+ * None of the reads below applies the camera policy: they return candidates. The policy is applied once, afterwards, in
+ * modules/cameras/policy/ (docs/camera-country-policy.md, section 4) — so there is exactly one copy of the rule.
  */
-export async function findAllActiveFixedSpeedCameras(db: Queryable): Promise<FixedSpeedCameraApi[]> {
-  const rows = await db.execute<Row>(sql`
-    select ${SELECT_COLUMNS} from fixed_speed_cameras c
-    where c.status = 'active' and c.camera_type = 'fixedSpeedCamera'
-  `);
-  return rows.map(toApi);
+
+/** Every active persistent device of every kind (snapshot, zones). */
+export async function findAllActiveDeviceRecords(db: Queryable): Promise<DeviceRecord[]> {
+  const rows = await db.execute<Row>(sql`select ${SELECT_COLUMNS} from fixed_speed_cameras c where c.status = 'active'`);
+  return rows.map(toDeviceRecord);
 }
 
-/** Every active persistent device of every kind (snapshot field `enforcementDevices`). */
-export async function findAllActiveEnforcementDevices(db: Queryable): Promise<FixedSpeedCameraApi[]> {
-  const rows = await db.execute<Row>(sql`
-    select ${SELECT_COLUMNS} from fixed_speed_cameras c where c.status = 'active'
-  `);
-  return rows.map(toApi);
-}
-
-/** Active persistent devices of the given kinds within a radius. */
-export async function findEnforcementDevicesNearby(
-  db: Queryable,
-  lat: number,
-  lng: number,
-  radiusM: number,
-  types: readonly PersistentCameraType[],
-): Promise<FixedSpeedCameraApi[]> {
-  if (types.length === 0) return [];
+/** Active persistent devices within a radius of a point (exact distance — a candidate set for the projection). */
+export async function findDeviceRecordsNearby(db: Queryable, lat: number, lng: number, radiusM: number): Promise<DeviceRecord[]> {
   const rows = await db.execute<Row>(sql`
     select ${SELECT_COLUMNS} from fixed_speed_cameras c
     where c.status = 'active'
-      and c.camera_type = any(${pgArray(types)}::camera_type[])
       and ST_DWithin(c.position::geography, ST_SetSRID(ST_MakePoint(${lng}, ${lat}), 4326)::geography, ${radiusM})
   `);
-  return rows.map(toApi);
+  return rows.map(toDeviceRecord);
 }
 
-/**
- * Candidate active persistent devices of the given kinds whose position lies in one of the envelopes
- * (a superset of the tiles asked for, found through the GiST index) — the caller keeps the ones that are
- * really in a requested tile. Persistent devices have no region_tile column: adding one would need a backfill.
- */
-export async function findEnforcementDeviceCandidatesInEnvelopes(
-  db: Queryable,
-  envelopes: readonly Envelope[],
-  types: readonly PersistentCameraType[],
-): Promise<FixedSpeedCameraApi[]> {
-  if (types.length === 0 || envelopes.length === 0) return [];
+/** Active persistent devices whose position lies in one of the envelopes (index-assisted, a superset the caller narrows). */
+export async function findDeviceRecordsInEnvelopes(db: Queryable, envelopes: readonly Envelope[]): Promise<DeviceRecord[]> {
+  if (envelopes.length === 0) return [];
   const rows = await db.execute<Row>(sql`
     select ${SELECT_COLUMNS} from fixed_speed_cameras c
-    where c.status = 'active'
-      and c.camera_type = any(${pgArray(types)}::camera_type[])
-      and ${envelopeOverlap(sql`c.position`, envelopes)}
+    where c.status = 'active' and ${envelopeOverlap(sql`c.position`, envelopes)}
   `);
-  return rows.map(toApi);
+  return rows.map(toDeviceRecord);
 }
 
 /**
@@ -138,7 +119,7 @@ export async function findDuplicateFixedSpeedCamera(
   lat: number,
   lng: number,
   radiusM: number,
-): Promise<FixedSpeedCameraApi | null> {
+): Promise<DeviceRecord | null> {
   const rows = await db.execute<Row>(sql`
     select ${SELECT_COLUMNS} from fixed_speed_cameras c
     where c.status = 'active'
@@ -149,24 +130,29 @@ export async function findDuplicateFixedSpeedCamera(
     for update of c
   `);
   const row = rows[0];
-  return row ? toApi(row) : null;
+  return row ? toDeviceRecord(row) : null;
 }
 
-export async function findFixedSpeedCameraByIdForUpdate(db: Queryable, id: string): Promise<FixedSpeedCameraApi | null> {
+export async function findFixedSpeedCameraByIdForUpdate(db: Queryable, id: string): Promise<DeviceRecord | null> {
   const rows = await db.execute<Row>(sql`
     select ${SELECT_COLUMNS} from fixed_speed_cameras c where c.id = ${id} for update of c
   `);
   const row = rows[0];
-  return row ? toApi(row) : null;
+  return row ? toDeviceRecord(row) : null;
 }
 
+/** `marginM` is CAMERA_POLICY_BORDER_MARGIN_M: the country set is computed here, once, and stored with the row. */
 export async function insertFixedSpeedCamera(
   db: Queryable,
-  input: { lat: number; lng: number; source: string },
-): Promise<FixedSpeedCameraApi> {
+  input: { lat: number; lng: number; source: string; marginM: number },
+): Promise<DeviceRecord> {
   const rows = await db.execute<{ id: string } & Record<string, unknown>>(sql`
-    insert into fixed_speed_cameras (position, source, last_confirmed_at)
-    values (ST_SetSRID(ST_MakePoint(${input.lng}, ${input.lat}), 4326), ${input.source}, now())
+    insert into fixed_speed_cameras (position, countries, source, last_confirmed_at)
+    values (
+      ST_SetSRID(ST_MakePoint(${input.lng}, ${input.lat}), 4326),
+      camera_countries(ST_SetSRID(ST_MakePoint(${input.lng}, ${input.lat}), 4326), ${input.marginM}),
+      ${input.source}, now()
+    )
     returning id
   `);
   const id = rows[0]?.id;
@@ -176,7 +162,7 @@ export async function insertFixedSpeedCamera(
   return created;
 }
 
-export async function touchFixedSpeedCameraConfirmed(db: Queryable, id: string): Promise<FixedSpeedCameraApi> {
+export async function touchFixedSpeedCameraConfirmed(db: Queryable, id: string): Promise<DeviceRecord> {
   await db.execute(sql`update fixed_speed_cameras set last_confirmed_at = now() where id = ${id}`);
   const updated = await findFixedSpeedCameraByIdForUpdate(db, id);
   if (!updated) throw new Error("touchFixedSpeedCameraConfirmed: row disappeared");
@@ -194,31 +180,20 @@ export async function insertRemovalReportIfAbsent(db: Queryable, cameraId: strin
   return rows.length > 0;
 }
 
-export async function markFixedSpeedCameraRemoved(db: Queryable, id: string): Promise<FixedSpeedCameraApi> {
+export async function markFixedSpeedCameraRemoved(db: Queryable, id: string): Promise<DeviceRecord> {
   await db.execute(sql`update fixed_speed_cameras set status = 'removed', removed_at = now() where id = ${id}`);
   const updated = await findFixedSpeedCameraByIdForUpdate(db, id);
   if (!updated) throw new Error("markFixedSpeedCameraRemoved: row disappeared");
   return updated;
 }
 
-/** Candidate active speed cameras of one partition tile, ordered by id — see tileStaticSignsQuery. */
-export function tileFixedSpeedCamerasQuery(envelopes: readonly Envelope[]): { query: SQL; map: (row: Record<string, unknown>) => FixedSpeedCameraApi } {
-  return {
-    query: sql`
-      select ${SELECT_COLUMNS} from fixed_speed_cameras c
-      where c.status = 'active' and c.camera_type = 'fixedSpeedCamera' and ${envelopeOverlap(sql`c.position`, envelopes)} order by c.id
-    `,
-    map: (row) => toApi(row as Row),
-  };
-}
-
-/** Candidate active persistent devices of every kind of one partition tile (package key `enforcementDevices`), ordered by id. */
-export function tileEnforcementDevicesQuery(envelopes: readonly Envelope[]): { query: SQL; map: (row: Record<string, unknown>) => FixedSpeedCameraApi } {
+/** Candidate active persistent devices of one envelope set, ordered by id — see tileStaticSignsQuery. The builder narrows by policy and tile. */
+export function tileDeviceRecordsQuery(envelopes: readonly Envelope[]): { query: SQL; map: (row: Record<string, unknown>) => DeviceRecord } {
   return {
     query: sql`
       select ${SELECT_COLUMNS} from fixed_speed_cameras c
       where c.status = 'active' and ${envelopeOverlap(sql`c.position`, envelopes)} order by c.id
     `,
-    map: (row) => toApi(row as Row),
+    map: toDeviceRecord,
   };
 }

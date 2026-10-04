@@ -135,6 +135,25 @@ reputation signals, can produce this on its own. This is a deliberate,
 binding design choice, not an oversight: unilateral algorithmic exclusion of
 an operator is exactly the failure mode open federation is trying to avoid.
 
+### 4.4a The signed network config carries the camera policy (`cameraPolicyByCountry`)
+
+The root-signed network config (`NetworkConfigPayload`, the same document as `excludedNodeIds`) has one more optional field:
+
+```
+cameraPolicyByCountry?: { [ISO 3166-1 alpha-2, upper case]: "off" | "zones" | "full" }
+```
+
+It says, per country, what camera data a node may **deliver to its own clients** (individual cameras, coarse zones, nothing).
+A country that is not listed - and an absent field - is `off`; `blitzerEnabled: false` remains the network-wide emergency brake
+that turns every country off. A node reads the file itself (`NETWORK_CONFIG_PATH`, re-read while running) and may only be
+**stricter** than it (`CAMERA_POLICY_LOCAL_CAPS`, `SPEED_CAMERA_NAMESPACE_ENABLED`); the policy is *not* distributed by
+federation messages - exactly like `excludedNodeIds` it is a file the operator signs and hands to every node. The field is
+optional and additive: a node that predates it ignores it (and has no country policy at all), a node that knows it treats a
+file without it as "nothing released". Validation is all-or-nothing: a key that is not `^[A-Z]{2}$`, a value that is not one of
+the three levels or more than 300 entries make the **whole file invalid** (refused at start-up, fail-closed while running),
+because a policy that cannot be understood completely must not be applied partly. Reload rule: `version` must not go down, and the
+same `version` with different content is refused. See [`camera-country-policy.md`](camera-country-policy.md).
+
 ### 4.5 Directory
 
 `GET /v1/network/directory` — always registered (unlike every other
@@ -211,6 +230,25 @@ A background worker (`FEDERATION_ANTI_ENTROPY_INTERVAL_SECONDS`, default
 300s) pulls from every known peer, closing any gap left by a missed or
 failed push — a server that was briefly offline, or a peer relationship
 established after an event was already pushed elsewhere, both heal this way.
+
+### 5.2a Camera reports leave a node only where the camera may be delivered individually
+
+A device-signed camera report (`fixedSpeedCamera` is not federated at all; `mobileSpeedCamera`, `trailerCamera`,
+`redLightCamera`, `distanceControl` are) carries its exact coordinates in the envelope. A node therefore **forwards** such an event
+- in `GET /v1/federation/events` (pull) and in the gossip fan-out after a push or a local report - **only if its own effective
+level for the camera's country is `full`**: not at `zones` (a zone must not become a precise position one hop away), not at `off`, and
+not when the country is unknown (no boundary data, outside every boundary). Every other event type is unaffected. Details:
+
+- The country set of a camera is computed by the node that stores it (`camera_countries()` against its own boundary table, with
+  the border strip - the stricter country wins) and stored on the event row. A node that **receives** the event stores it the same
+  way (writing is never blocked) and decides for its own clients and its own onward forwarding by *its* policy.
+  Two nodes with different boundary data or different local caps can therefore decide differently; that is intended.
+- The pull cursor (`nextAfter`) advances over events that were withheld, so a peer never stalls on a page it may not read.
+- Before this rule `GET /v1/federation/events` - which needs no credential - returned every device-signed camera report with its
+  coordinates whatever the camera switch said. Closing that is part of the country policy; a peer cannot rely on getting camera
+  reports from a node that does not deliver them, and a node that does not deliver them to its own clients does not hand them to others.
+- `tests/integration/camera-policy-multi-node.test.ts` runs three real nodes (one follows the network, one caps Germany at
+  `zones`, one refuses every camera) and checks both directions: what federates and what each node serves.
 
 ### 5.3 Speed-limit votes (add-on K-A)
 
@@ -301,6 +339,9 @@ sections, so it reads as a tracked gap rather than an unstated limitation:
   Making the camera table federate needs the merge semantics above plus a
   cross-node device identity and provenance for rows that carry no device signature —
   a project of its own (see `docs/persistent-enforcement-devices.md`, §5).
+- **Distribution of the camera policy.** The signed `cameraPolicyByCountry` travels as a file, like `excludedNodeIds`; there is no
+  federation message that carries it, and a node does not learn a newer one from a peer. Automatic distribution (and a network-wide
+  rule for "which version is newest") is a separate piece of work.
 - **Withholding detection.** The original concept's "event X is known
   elsewhere, absent here" anti-entropy hash comparison needs a
   peer-graph-wide comparable summary of what each server knows — materially

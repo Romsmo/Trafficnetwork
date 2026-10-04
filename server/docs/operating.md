@@ -341,6 +341,93 @@ label; nothing writes it any more). Then start the previous release; it rebuilds
 red-light or distance devices is only for servers that have this feature — an older server would store them as speed
 cameras (it ignores the unknown `cameraType`), so take them out of the import until every server you feed has been upgraded.
 
+## Camera policy: releasing camera data per country
+
+> **This is a legal decision of the operator, not a technical one.** The server can deliver speed-camera data
+> individually (`full`), as coarse zones (`zones`) or not at all (`off`), per country - it cannot tell you which of these is
+> lawful where. That depends on each country's law *and on your role as the operator of a service*, which is not the driver's
+> role. Have it reviewed for every country you release **before** you sign a level above `off`; nothing in this repository,
+> its defaults or its tests is legal advice. Nothing is released out of the box: until you deposit a signed policy the server
+> delivers no camera data of any kind, on any path (REST, snapshot, delta, WebSocket, static packages, federation).
+
+Design and wire contract: [`camera-country-policy.md`](camera-country-policy.md). What has to be true for a camera to be
+delivered: **(1)** its country is known, **(2)** the root-signed config lists that country above `off` *and* has
+`blitzerEnabled: true`, **(3)** this node's own brake `SPEED_CAMERA_NAMESPACE_ENABLED=true` is released and no local cap
+(`CAMERA_POLICY_LOCAL_CAPS`) lowers it. Any one of them missing means the country is `off` on this node.
+
+**1. Load the country boundaries once.** The server ships no geodata. Download a country dataset yourself (Natural Earth
+"Admin 0 - Countries" at 1:10m is public domain and accurate to a few hundred metres; 1:50m needs a border margin of several
+kilometres) and load it:
+
+```bash
+npm run cameras -- load-boundaries ./ne_10m_admin_0_countries.geojson --property ISO_A2_EH --name "Natural Earth 1:10m"
+npm run cameras -- status          # boundaries, how many cameras are resolved / in a border strip / in no country, the policy in force
+```
+
+The loader stores the polygons subdivided, then computes the country set of every stored camera, and marks the affected
+static-data packages. A dataset in which a country has no usable two-letter code (Natural Earth's `ISO_A2` is `-99` for France
+and Norway - use `ISO_A2_EH`) is refused as a whole. A camera within `CAMERA_POLICY_BORDER_MARGIN_M` (default 1000 m) of a border
+belongs to **both** countries and the **stricter** level wins; the margin must exceed the positional error of the dataset - raise
+it, never lower it, for a coarser dataset. After changing the margin or the boundaries run `npm run cameras -- resolve-countries --all`.
+A camera whose country is not resolved yet (written before the boundaries were loaded, imported before the first run) or that lies
+in no known country (sea, outside the dataset) is **not delivered** - the server fails closed - until it is resolved.
+
+**2. Sign a policy** (offline, with the network root key from `npm run network:generate-root-key`; the private key never touches a
+server):
+
+```bash
+npm run network:sign-config -- --root-key ./network-root-key.json --blitzer-enabled true --camera-policy "DE=full,FR=zones,CH=off"
+```
+
+The example is an illustration, **not a recommendation** - choose the levels yourself. The command takes the next `version` from
+the existing output file, lists exactly the countries you pass (signing again without `--camera-policy` withdraws all of them, it never
+carries an old policy over), and prints what it signed. Countries that are not listed are `off`.
+
+**3. Distribute and release.** Put the signed file on every node at `NETWORK_CONFIG_PATH` (replace it atomically: write a temp file
+in the same directory, then rename) with the matching `NETWORK_ROOT_PUBLIC_KEY`. A node re-reads the file every
+`CAMERA_POLICY_RELOAD_SECONDS` (default 30; `0` = only at start) - **no restart is needed** to apply, change or withdraw a policy.
+Each node's brake stays under its operator's control: `SPEED_CAMERA_NAMESPACE_ENABLED=true` to take part, and optionally
+`CAMERA_POLICY_LOCAL_CAPS=DE=zones,CH=off,*=full` to be stricter than the network for some countries (a cap can only lower a
+level, never raise one, and a country the network does not list stays off whatever the cap says).
+
+**4. Check.**
+
+```bash
+npm run cameras -- status
+curl -H "Authorization: Bearer $TOKEN" https://your-server.example/v1/config | jq .cameraPolicy
+```
+
+`cameraPolicy.byCountry` is what *this node* delivers (network policy, local caps and brake combined; absent = off) and
+`cameraPolicy.version` changes exactly when that changes.
+
+**Withdrawing.** Sign a higher `version` without the country (or with `--blitzer-enabled false` to turn every country off at once)
+and distribute it: within the reload interval the node stops serving the country on every path, rebuilds only the static-data
+packages of the tiles that held its cameras, and bumps the static-data version so clients drop the data. For an immediate local
+cut-off set `SPEED_CAMERA_NAMESPACE_ENABLED=false` and restart. The cameras stay in the database; re-releasing brings them back.
+
+**What happens to the static-data packages.** When a country gets *stricter* (a withdrawal, `full` -> `zones`, a lower local cap) the
+packages of the tiles with its cameras are not served until they have been rebuilt - the manifest and those packages answer `503
+PACKAGES_BUILDING` meanwhile, and the old files are deleted at once rather than kept for downloads in progress. On a node with a small
+dataset (up to `STATIC_PACKAGES_INLINE_BUILD_MAX_ROWS`) the first request rebuilds them; on a large one the rebuild starts immediately in the
+background (watch `static packages: policy-stale tiles rebuilt` in the log, or `npm run static-packages -- status`). A looser policy only
+marks tiles dirty for the ordinary background build.
+
+**What the server protects you from.** An older, still validly signed file (a lower `version`) and the same version with different
+content are refused and the running policy stays. A file that is unreadable or not signed by the root key makes the node **fail closed**
+(every country off, logged as `camera policy fails closed`) until a valid file is read again; everything else on the node keeps working.
+A signed file with an invalid camera policy stops a starting server (like every signed-config error).
+
+**Upgrading from a version without the country policy.** Migration `0011` is additive. Behaviour changes in two ways you must know
+about: `SPEED_CAMERA_NAMESPACE_ENABLED=true` **alone no longer delivers anything** (it only releases the node's brake; a signed policy
+must list a country), and cameras written before the upgrade have no country until you load boundaries (see step 1) - the first
+`load-boundaries` also fills in the country of the retained camera events. The static-data packages are not rebuilt by the upgrade
+if they were built with the camera switch off (the default - that set is current); a set built with the switch on is
+rebuilt once, because it held cameras no policy has released yet. Clients that relied on delta events of cameras should fetch a fresh snapshot or
+the packages when `cameraPolicy.version` changes. Rolling back the migration is not needed: the added columns and tables are ignored by older code.
+
+**Federation.** A camera report is forwarded to other nodes (pull and gossip) only from a node whose level for that camera's country is
+`full`; the policy file itself is not distributed by federation (federation-protocol.md, 4.4a and 5.2a).
+
 ## Restarting, upgrading, backing up
 
 An upgrade that includes a migration with a heavy lock (0007, above) needs a maintenance window on a big node;
@@ -417,6 +504,10 @@ away from their defaults:
 | Users get `422 CORRECTION_VALUE_NOT_ON_STEP` / `..._OUT_OF_RANGE` | The configured step/range (`GET /v1/config` → `communityCorrections`); relax `COMMUNITY_CORRECTIONS_VALUE_STEP` or the bounds if real limits are being refused |
 | Migration 0007 seems stuck | It is rewriting the segment table (20–30 s per million rows, 6 min at 12 M); check `pg_stat_activity` before interrupting |
 | `FEDERATION_PUBLIC_ADDRESS is required whenever FEDERATION_ENABLED=true` at startup | Set both together — see "Joining the network" step 2 |
+| I set `SPEED_CAMERA_NAMESPACE_ENABLED=true` and still get no cameras | That only releases this node's brake. A signed config with `blitzerEnabled: true` and `cameraPolicyByCountry` listing the country above `off` is needed too, the cameras need a resolved country (`npm run cameras -- status`), and `CAMERA_POLICY_LOCAL_CAPS` must not lower it. `GET /v1/config` -> `cameraPolicy` shows what this node delivers |
+| `camera policy fails closed` in the log | The signed config file is unreadable or does not verify against `NETWORK_ROOT_PUBLIC_KEY` (or its `cameraPolicyByCountry` is invalid); every country is off until a valid file is read. Fix the file - no restart needed |
+| `signed network config version N is older than the version in use` | Rollback protection: sign a file with a higher `version` |
+| Cameras exist but `status` shows them as "country not resolved" or "in no known country" | No boundaries loaded yet, or the camera is outside the dataset / the margin is smaller than the dataset's error. `load-boundaries`, then `resolve-countries --all` |
 | Join to a seed fails at startup, logged as a warning | Seed unreachable, wrong URL, or its `excludedNodeIds` includes you — check the seed's own logs/directory if you can reach an operator |
 | A peer never shows up in `GET /v1/federation/peers` even though you're sure they joined | Discovery is one-hop, join-time only (`federation-protocol.md` §7) — if you learned about them only via a third party's gossip and never joined them directly, and that third party never re-gossips, you may simply never have a direct relationship; join them directly if you need one |
 | Reports created elsewhere never show up locally | Confirm the *originating* client actually attached `deviceAssertion` (only device-signed creates federate — see `docs/api.md`'s `POST /v1/hazard-reports`); a symmetric-secret-only client's reports never leave their own server |

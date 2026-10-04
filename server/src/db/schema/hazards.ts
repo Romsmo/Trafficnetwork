@@ -49,6 +49,11 @@ export const hazardReports = pgTable(
     externalId: text("external_id"),
     /** The import run (client-generated id) that last saw this row — a run that finished complete retires every active row of its feed that it did not see. */
     lastSeenRun: text("last_seen_run"),
+    /**
+     * Country set of a camera-type report (docs/camera-country-policy.md section 3) — computed once, at insert, by
+     * camera_countries(); null for every other type and for rows that predate the policy (= unresolved = not delivered).
+     */
+    countries: text("countries").array(),
     confirmCount: integer("confirm_count").notNull().default(0),
     denyCount: integer("deny_count").notNull().default(0),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),

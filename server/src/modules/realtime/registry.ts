@@ -1,5 +1,5 @@
 import type { WebSocket } from "ws";
-import { CAMERA_NAMESPACE_TYPES } from "../../config/constants.js";
+import { CLOSED_GATE, type CameraGate } from "../cameras/policy/events.js";
 
 /**
  * In-process only — Map<tile, Set<connection>> plus a set of every connection for
@@ -11,18 +11,11 @@ import { CAMERA_NAMESPACE_TYPES } from "../../config/constants.js";
  */
 export class SubscriptionRegistry {
   /**
-   * `cameraNamespaceEnabled` is the effective speed-camera flag. While it is off, camera-namespace events are not
-   * pushed to anyone: the REST/sync endpoints already withhold that data, and a WebSocket must not be the back door.
+   * `cameraGate` is the camera policy as it applies right now (modules/cameras/policy/). A camera event is pushed as it is
+   * at level `full`, as a zone event at level `zones` and not at all otherwise: the REST/sync endpoints already work that
+   * way, and a WebSocket must not be the back door. Without a gate (unit tests) no camera event is ever pushed.
    */
-  constructor(private readonly cameraNamespaceEnabled: () => boolean = () => true) {}
-
-  /** Whether an event may be pushed at all under the current camera-namespace flag. */
-  allowsEvent(event: { entityType?: string; payload?: unknown }): boolean {
-    if (this.cameraNamespaceEnabled()) return true;
-    if (event.entityType === "fixedSpeedCamera") return false;
-    const type = (event.payload as { type?: string } | null | undefined)?.type;
-    return !(typeof type === "string" && (CAMERA_NAMESPACE_TYPES as readonly string[]).includes(type));
-  }
+  constructor(readonly cameraGate: CameraGate = CLOSED_GATE) {}
 
   private readonly byTile = new Map<string, Set<WebSocket>>();
   private readonly tilesByConnection = new Map<WebSocket, Set<string>>();
@@ -78,6 +71,13 @@ export class SubscriptionRegistry {
       conns?.delete(ws);
       if (conns && conns.size === 0) this.byTile.delete(tile);
     }
+  }
+
+  /** Every connection subscribed to at least one of these tiles (once each). */
+  connectionsForTiles(tiles: readonly string[]): Set<WebSocket> {
+    const out = new Set<WebSocket>();
+    for (const tile of tiles) for (const ws of this.byTile.get(tile) ?? []) out.add(ws);
+    return out;
   }
 
   /** null tile means "global" (e.g. static-data events, which have no regionTile). */

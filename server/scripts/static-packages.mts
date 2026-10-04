@@ -2,8 +2,9 @@ import "dotenv/config";
 import { parseArgs } from "node:util";
 import { loadEnv } from "../src/config/env.js";
 import { createDb } from "../src/db/client.js";
-import { countDirtyTiles, getPackageState, listPackageRows, markTilesDirty, currentStaticDataVersion } from "../src/db/queries/static-packages.js";
-import { packageFingerprint, runBuild } from "../src/modules/static-data/package-builder.js";
+import { countDirtyTiles, countPolicyStale, getPackageState, listPackageRows, markTilesDirty, currentStaticDataVersion } from "../src/db/queries/static-packages.js";
+import { isCurrentFingerprint, runBuild } from "../src/modules/static-data/package-builder.js";
+import { CameraPolicyService } from "../src/modules/cameras/policy/policy.js";
 import { getPackageService } from "../src/modules/static-data/package-service.js";
 
 /**
@@ -37,7 +38,9 @@ async function main() {
   const [command] = positionals;
   const env = loadEnv();
   const { db, client } = createDb(env);
-  const service = getPackageService(db, env);
+  // The packages are built under the camera policy of the signed config this CLI is run with (the same file as the server's).
+  const cameraPolicy = await CameraPolicyService.load(env);
+  const service = getPackageService(db, env, undefined, () => cameraPolicy.current());
 
   try {
     switch (command) {
@@ -50,9 +53,9 @@ async function main() {
         const gz = rows.reduce((a, r) => a + (r.gzipBytes ?? 0), 0);
         const br = rows.reduce((a, r) => a + (r.brotliBytes ?? 0), 0);
         console.log(`directory:        ${env.STATIC_PACKAGES_DIR}`);
-        console.log(`ready:            ${state.ready}${state.fingerprint === packageFingerprint(env) ? "" : "  (settings changed since the last build — a rebuild is due)"}`);
+        console.log(`ready:            ${state.ready}${isCurrentFingerprint(state.fingerprint, env) ? "" : "  (settings changed since the last build — a rebuild is due)"}`);
         console.log(`static version:   ${await currentStaticDataVersion(db)}  (packages built for ${state.builtVersion})`);
-        console.log(`tiles with data:  ${rows.length}   dirty: ${dirty.dirty}`);
+        console.log(`tiles with data:  ${rows.length}   dirty: ${dirty.dirty}   not served until rebuilt (stricter camera policy): ${await countPolicyStale(db)}`);
         console.log(`content:          ${mb(raw)} uncompressed, ${mb(gz)} gzip, ${mb(br)} brotli`);
         console.log(`on disk:          ${disk.files} files, ${mb(disk.bytes)}`);
         console.log(`builder lease:    ${state.leaseOwner ?? "free"}${state.leaseUntil ? ` (until ${state.leaseUntil})` : ""}`);

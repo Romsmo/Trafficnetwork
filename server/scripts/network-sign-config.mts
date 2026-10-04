@@ -2,6 +2,7 @@ import { readFileSync, writeFileSync, existsSync } from "node:fs";
 import { signEnvelope } from "../src/modules/crypto/envelope.js";
 import type { NetworkConfigPayload } from "../src/modules/network/config.js";
 import type { Ed25519KeyPair } from "../src/modules/crypto/keys.js";
+import { CameraPolicyError, parseCountryLevels, type CameraLevel } from "../src/modules/cameras/policy/levels.js";
 
 /**
  * Run this OFFLINE, using the root key file from
@@ -20,7 +21,13 @@ import type { Ed25519KeyPair } from "../src/modules/crypto/keys.js";
  *   --retention-static-days <n>     default: 30
  *   --min-version <semver>          default: 0.1.0
  *   --excluded-node-ids <a,b,c>     default: (none)
+ *   --camera-policy <CC=level,...>  default: (none) = every country off. e.g. "DE=full,FR=zones,CH=off"
  *   --version <n>                   default: existing --out file's version + 1, or 1
+ *
+ * The camera policy is part of what you sign: a re-signed file lists exactly the countries given here, so signing again
+ * without --camera-policy withdraws every country (it never carries an old, more generous policy over by accident).
+ * Which country may be "zones" or "full" is a LEGAL decision of the operator, not a technical one -
+ * docs/camera-country-policy.md and docs/operating.md ("Camera policy").
  */
 
 interface Args {
@@ -31,7 +38,25 @@ interface Args {
   retentionStaticDays: number;
   minVersion: string;
   excludedNodeIds: string[];
+  cameraPolicyByCountry: Record<string, CameraLevel>;
   version?: number;
+}
+
+/** "DE=full,FR=zones" -> { DE: "full", FR: "zones" }; validated by the same parser the servers use. */
+function parseCameraPolicyArg(spec: string | undefined): Record<string, CameraLevel> {
+  if (!spec || spec === "none") return {};
+  const entries: Record<string, string> = {};
+  for (const part of spec.split(",").map((s) => s.trim()).filter(Boolean)) {
+    const [country, level, ...rest] = part.split("=").map((s) => s.trim());
+    if (!country || !level || rest.length > 0) throw new Error(`--camera-policy: "${part}" is not of the form CC=level`);
+    entries[country] = level;
+  }
+  try {
+    return parseCountryLevels(entries, "--camera-policy");
+  } catch (err) {
+    if (err instanceof CameraPolicyError) throw new Error(err.message);
+    throw err;
+  }
 }
 
 function parseArgs(argv: string[]): Args {
@@ -51,6 +76,7 @@ function parseArgs(argv: string[]): Args {
     retentionStaticDays: Number(get("--retention-static-days") ?? "30"),
     minVersion: get("--min-version") ?? "0.1.0",
     excludedNodeIds: (get("--excluded-node-ids") ?? "").split(",").map((s) => s.trim()).filter(Boolean),
+    cameraPolicyByCountry: parseCameraPolicyArg(get("--camera-policy")),
     version: get("--version") ? Number(get("--version")) : undefined,
   };
 }
@@ -82,6 +108,8 @@ function main() {
     eventLogRetentionDaysStatic: args.retentionStaticDays,
     minVersion: args.minVersion,
     excludedNodeIds: args.excludedNodeIds,
+    // Written only when something is released: a file without the field means "every country off", exactly like an empty object.
+    ...(Object.keys(args.cameraPolicyByCountry).length > 0 ? { cameraPolicyByCountry: args.cameraPolicyByCountry } : {}),
     issuedAt: new Date().toISOString(),
   };
 
@@ -90,10 +118,24 @@ function main() {
 
   console.log(`Signed network config (version ${payload.version}) written to ${args.out}.`);
   console.log("Distribute this file and point every server's NETWORK_CONFIG_PATH at it.");
-  if (payload.blitzerEnabled) {
+  const released = Object.entries(args.cameraPolicyByCountry).filter(([, level]) => level !== "off");
+  console.log("");
+  console.log(
+    released.length === 0
+      ? "Camera policy: none — every country is off, no camera data is delivered."
+      : `Camera policy: ${released.map(([country, level]) => `${country}=${level}`).join(", ")} (every other country: off).`,
+  );
+  if (payload.blitzerEnabled && released.length === 0) {
+    console.log("Note: blitzerEnabled is true, but no country is released (--camera-policy), so nothing is delivered.");
+  }
+  if (!payload.blitzerEnabled && released.length > 0) {
+    console.log("Note: blitzerEnabled is false — the emergency brake is on, so nothing is delivered despite the policy above.");
+  }
+  if (released.length > 0) {
     console.log("");
-    console.log("WARNING: blitzerEnabled is true — this activates the speed-camera namespace");
-    console.log("network-wide. Only sign this after the legal review docs/concept.md section 8 requires.");
+    console.log("WARNING: this releases camera data for the countries above. Which country may be \"zones\" or \"full\" is a");
+    console.log("legal decision of the operator (and depends on the operator's role, not only the driver's): sign it only after");
+    console.log("that review — docs/camera-country-policy.md, docs/operating.md (\"Camera policy\"), docs/concept.md section 8.");
   }
 }
 

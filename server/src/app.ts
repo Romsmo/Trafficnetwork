@@ -19,7 +19,10 @@ import { registerRealtimeModule } from "./modules/realtime/plugin.js";
 import type { SubscriptionRegistry } from "./modules/realtime/registry.js";
 import { loadOrCreateNodeIdentity, type NodeIdentity } from "./modules/network/node-identity.js";
 import { registerNetworkRoutes } from "./modules/network/routes.js";
-import { applyNetworkConfigCameraOverride, loadSignedNetworkConfig, type NetworkConfigPayload } from "./modules/network/config.js";
+import type { NetworkConfigPayload } from "./modules/network/config.js";
+import { CameraPolicyService } from "./modules/cameras/policy/policy.js";
+import { syncCameraPolicy } from "./modules/cameras/policy/sync.js";
+import { getPackageService } from "./modules/static-data/package-service.js";
 import type { SignedEnvelope } from "./modules/crypto/envelope.js";
 import { registerFederationRoutes } from "./modules/federation/routes.js";
 import { registerSpeedLimitCorrectionRoutes } from "./modules/speed-limit-corrections/routes.js";
@@ -43,8 +46,13 @@ declare module "fastify" {
     nodeIdentity: NodeIdentity;
     /** "Currently online" head count (numbers only, in memory) — see modules/online/. */
     online: OnlineTracker;
-    /** Full signed envelope (not just the payload) so /v1/config can expose the raw signature for independent client verification. */
+    /**
+     * Full signed envelope (not just the payload) so /v1/config can expose the raw signature for independent client verification.
+     * A getter: the signed config is re-read while the node runs (modules/cameras/policy/policy.ts), so this is the one in force *now*.
+     */
     networkConfig: SignedEnvelope<NetworkConfigPayload> | null;
+    /** The country-based camera policy (docs/camera-country-policy.md): what camera data this node may deliver, per country. */
+    cameraPolicy: CameraPolicyService;
   }
 }
 
@@ -61,14 +69,13 @@ export async function buildApp(deps: AppDependencies): Promise<FastifyInstance> 
 
   app.decorate("deps", deps);
 
-  // Load and apply the signed network config (if any) before anything else
-  // reads deps.env.SPEED_CAMERA_NAMESPACE_ENABLED, so every downstream call
-  // site (routes, snapshot/delta, static-data manifest) automatically sees
-  // the already-AND-gated effective value without each needing its own
-  // network-config-awareness — see modules/network/config.ts.
-  const networkConfig = await loadSignedNetworkConfig(deps.env);
-  applyNetworkConfigCameraOverride(deps.env, networkConfig?.payload ?? null);
-  app.decorate("networkConfig", networkConfig);
+  // Load the signed network config (if any) before anything else is registered. What camera data may be delivered is
+  // decided by the camera policy derived from it (per country; the global flag is the emergency brake) — every
+  // delivery path asks app.cameraPolicy, none reads the flag itself. See modules/cameras/policy/.
+  const cameraPolicy = await CameraPolicyService.load(deps.env, app.log);
+  app.decorate("cameraPolicy", cameraPolicy);
+  app.decorate("networkConfig", { getter: () => cameraPolicy.current().envelope });
+  app.addHook("onClose", async () => cameraPolicy.stop());
 
   await app.register(cors, { origin: true });
   // global: false — only routes that opt in via `config: { rateLimit: {...} }`
@@ -105,6 +112,16 @@ export async function buildApp(deps: AppDependencies): Promise<FastifyInstance> 
   });
 
   app.decorate("nodeIdentity", await loadOrCreateNodeIdentity(deps.db));
+
+  // Bring the static-data packages in line with the policy in force: now (a change made while the node was down) and on
+  // every change while it runs. Only the tiles of countries whose level changed are marked.
+  const logPolicySync = (result: Awaited<ReturnType<typeof syncCameraPolicy>>) => {
+    if (result.changedCountries.length > 0) app.log.info(result, "camera policy: static-data packages marked for rebuild");
+    // A country got stricter: the packages of its tiles are not served until rebuilt, so start rebuilding now.
+    if (result.staleTiles > 0) getPackageService(deps.db, deps.env, app.log, () => cameraPolicy.current()).kickPolicyRebuild();
+  };
+  logPolicySync(await syncCameraPolicy(deps.db, deps.env, cameraPolicy.current()));
+  cameraPolicy.onChange(async (next) => logPolicySync(await syncCameraPolicy(deps.db, deps.env, next)));
 
   app.decorate(
     "online",

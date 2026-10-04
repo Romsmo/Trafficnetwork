@@ -9,6 +9,7 @@ import { positionToRegionTile } from "../../src/lib/h3.js";
 import { startTestDatabase, type TestDatabase } from "./setup.js";
 import { authHeader, testToken } from "./auth-helper.js";
 import { insertHazardReport, insertSpeedLimitSegment } from "./helpers.js";
+import { createPolicyFixture, loadBoundaries, WORLD_AS_DE, type PolicyFixture } from "./camera-policy-helper.js";
 
 const MUNICH = { lat: 48.1374, lng: 11.5755 };
 
@@ -22,6 +23,7 @@ describe("web UI (server/web)", () => {
   let cameras: FastifyInstance;
   let corrections: FastifyInstance; // its own node: the session-minting limit is per app, and these tests mint a few sessions
   let off: FastifyInstance;
+  let cameraPolicy: PolicyFixture;
   const closers: (() => Promise<void>)[] = [];
 
   async function build(extra: Record<string, string> = {}): Promise<{ app: FastifyInstance; env: Env }> {
@@ -52,7 +54,11 @@ describe("web UI (server/web)", () => {
       WEB_REPORT_LIMIT_PER_IP_PER_HOUR: "4",
       WEB_WS_MAX_TILES_PER_CONNECTION: "10",
     }));
-    ({ app: cameras } = await build({ SPEED_CAMERA_NAMESPACE_ENABLED: "true" }));
+    // Cameras are released for the one synthetic country that covers the test coordinates.
+    cameraPolicy = createPolicyFixture();
+    await loadBoundaries(testDb.db, WORLD_AS_DE);
+    cameraPolicy.write({ DE: "full" });
+    ({ app: cameras } = await build(cameraPolicy.env()));
     ({ app: off } = await build({ WEB_UI_ENABLED: "false" }));
     ({ app: corrections } = await build());
 
@@ -70,6 +76,7 @@ describe("web UI (server/web)", () => {
 
   afterAll(async () => {
     for (const close of closers) await close();
+    cameraPolicy.cleanup();
     await testDb.teardown();
   });
 

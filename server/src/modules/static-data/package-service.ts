@@ -4,6 +4,7 @@ import type { Database } from "../../db/client.js";
 import type { Env } from "../../config/env.js";
 import {
   countDirtyTiles,
+  countPolicyStale,
   findPackageRow,
   getPackageState,
   listPackageRows,
@@ -12,7 +13,8 @@ import {
   type PackageRow,
 } from "../../db/queries/static-packages.js";
 import { PackageStore } from "./package-store.js";
-import { packageFingerprint, runBuild, type BuilderDeps } from "./package-builder.js";
+import { isCurrentFingerprint, rebuildPolicyStale, runBuild, type BuilderDeps } from "./package-builder.js";
+import { buildEffectivePolicy, type EffectiveCameraPolicy } from "../cameras/policy/policy.js";
 
 /**
  * What the static-data endpoints talk to (add-on E-B, docs/europe-scale.md):
@@ -78,7 +80,10 @@ function render(body: ManifestBody): RenderedManifest {
 export class StaticPackageService {
   store: PackageStore;
   private inflight: Promise<unknown> | null = null;
+  private policyRebuild: Promise<unknown> | null = null;
   private cache: { key: string; manifest: RenderedManifest } | null = null;
+  /** The camera policy in force; until an app or a CLI hands one in, nothing camera-related is packaged. */
+  private policy: (() => EffectiveCameraPolicy) | null = null;
 
   constructor(
     private readonly db: Database["db"],
@@ -96,7 +101,8 @@ export class StaticPackageService {
   }
 
   /** Several apps in one process (the tests) may share a database handle with different settings; a request always runs with its own app's. */
-  use(env: Env, log?: BuilderDeps["log"]): this {
+  use(env: Env, log?: BuilderDeps["log"], policy?: () => EffectiveCameraPolicy): this {
+    if (policy) this.policy = policy;
     if (env !== this.env) {
       if (env.STATIC_PACKAGES_DIR !== this.env.STATIC_PACKAGES_DIR) this.store = StaticPackageService.storeFor(env);
       this.env = env;
@@ -107,7 +113,8 @@ export class StaticPackageService {
   }
 
   get builderDeps(): BuilderDeps {
-    return { db: this.db, env: this.env, store: this.store, log: this.log };
+    const env = this.env;
+    return { db: this.db, env, store: this.store, log: this.log, policy: this.policy ?? (() => buildEffectivePolicy(env, null)) };
   }
 
   /** One build at a time per process; concurrent callers wait for the same one. */
@@ -128,7 +135,7 @@ export class StaticPackageService {
    */
   async ensureFresh(): Promise<{ ready: boolean; reason?: string }> {
     const state = await getPackageState(this.db);
-    const current = state.ready && state.fingerprint === packageFingerprint(this.env);
+    const current = state.ready && isCurrentFingerprint(state.fingerprint, this.env);
     const dirty = current ? (await countDirtyTiles(this.db)).dirty : 0;
     if (current && dirty === 0) return { ready: true };
 
@@ -143,9 +150,55 @@ export class StaticPackageService {
     return { ready: false, reason: "the initial build of the static-data packages is still running" };
   }
 
+  /**
+   * Starts the rebuild of the policy-stale tiles (those whose packages may hold camera data a stricter policy withdrew) in the background,
+   * unless one is already running. Their packages are not served until it has replaced them, so this is not left to the debounce of the
+   * ordinary worker.
+   */
+  kickPolicyRebuild(): void {
+    if (this.policyRebuild) return;
+    this.policyRebuild = rebuildPolicyStale(this.builderDeps)
+      .catch((err) => this.log?.warn({ err }, "static packages: rebuilding the policy-stale tiles failed"))
+      .finally(() => {
+        this.policyRebuild = null;
+        this.cache = null; // the manifest it rendered lists packages that have just been replaced
+      });
+  }
+
+  /** Resolves when the policy-stale rebuild that is running (if any) has finished - for tests and shutdown. */
+  async idle(): Promise<void> {
+    await this.policyRebuild;
+  }
+
+  /**
+   * Gets the policy-stale tiles rebuilt and reports whether none is left. A small dataset is rebuilt right here (like every other build on
+   * demand: the request pays); a large one is rebuilt in the background and the caller answers "building" meanwhile.
+   */
+  private async settlePolicyStale(): Promise<boolean> {
+    if ((await countPolicyStale(this.db)) === 0) return true;
+    this.kickPolicyRebuild();
+    const inlineMax = this.env.STATIC_PACKAGES_INLINE_BUILD_MAX_ROWS;
+    if ((await staticRowsAtLeast(this.db, inlineMax)) > inlineMax) return false;
+    await this.policyRebuild;
+    return (await countPolicyStale(this.db)) === 0;
+  }
+
+  /** Is this tile's package possibly outdated in a way that matters for the camera policy (see static_packages.policy_stale)? */
+  async isPolicyStale(tile: string): Promise<boolean> {
+    const row = await findPackageRow(this.db, tile);
+    if (!row?.policyStale) return false;
+    await this.settlePolicyStale();
+    return (await findPackageRow(this.db, tile))?.policyStale === true;
+  }
+
   async manifest(since?: number): Promise<ManifestResult> {
     const fresh = await this.ensureFresh();
     if (!fresh.ready) return { status: "building", reason: fresh.reason ?? "packages are being built" };
+    // A manifest lists hashes; while any listed package may hold withdrawn camera data it is not offered at all (listing a tile as gone
+    // would make a client drop its other data, so the whole answer waits for the rebuild).
+    if (!(await this.settlePolicyStale())) {
+      return { status: "building", reason: "a change of the camera policy is being applied to the packages" };
+    }
     const state = await getPackageState(this.db);
 
     const key = `${state.updatedAt}|${since ?? ""}`;
@@ -182,11 +235,16 @@ export class StaticPackageService {
 const services = new WeakMap<object, StaticPackageService>();
 
 /** One service per database handle (as the old manifest cache was) — so several servers in one process never share packages. */
-export function getPackageService(db: Database["db"], env: Env, log?: BuilderDeps["log"]): StaticPackageService {
+export function getPackageService(
+  db: Database["db"],
+  env: Env,
+  log?: BuilderDeps["log"],
+  policy?: () => EffectiveCameraPolicy,
+): StaticPackageService {
   let service = services.get(db);
   if (!service) {
     service = new StaticPackageService(db, env, log);
     services.set(db, service);
   }
-  return service.use(env, log);
+  return service.use(env, log, policy);
 }

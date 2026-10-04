@@ -3,7 +3,8 @@ import { z } from "zod";
 import { isFreshTimestamp, verifySignedEnvelope, type SignedEnvelope } from "../crypto/envelope.js";
 import { keyId } from "../crypto/keys.js";
 import { findPeerByNodeId, listPeers, recordInvalidSignature, recordPeerVersion, upsertPeer } from "../../db/queries/network-peers.js";
-import { getFederationEventsSince } from "../../db/queries/event-log.js";
+import { getFederationEventPage } from "./egress.js";
+import { eventMayLeaveNode } from "../cameras/policy/events.js";
 import { publishEvent } from "../realtime/publisher.js";
 import { badRequest, forbidden, notFound } from "../../lib/errors.js";
 import { joinRequestPayloadSchema, heartbeatPayloadSchema, type JoinRequestPayload, type HeartbeatPayload } from "./protocol.js";
@@ -205,7 +206,8 @@ export async function registerFederationRoutes(app: FastifyInstance) {
           results.push({ federationEventId: outcome.federationEventId, status: outcome.status });
           if (outcome.status === "created" || outcome.status === "merged") {
             publishEvent(app.realtime, outcome.event);
-            toGossip.push(envelope);
+            // A camera report is passed on only where this node delivers the individual camera (modules/cameras/policy/).
+            if (eventMayLeaveNode(app.cameraPolicy.current(), outcome.event)) toGossip.push(envelope);
           }
         }
 
@@ -251,7 +253,7 @@ export async function registerFederationRoutes(app: FastifyInstance) {
     if (!afterResult.success || !limitResult.success) {
       throw badRequest("after/limit must be non-negative integers");
     }
-    return getFederationEventsSince(app.deps.db, afterResult.data, limitResult.data);
+    return getFederationEventPage(app.deps.db, app.cameraPolicy.current(), afterResult.data, limitResult.data);
   });
 
   // Pull stream of device-signed speed-limit votes (add-on K-A) — separate from

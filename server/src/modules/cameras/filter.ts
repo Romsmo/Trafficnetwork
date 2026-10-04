@@ -6,7 +6,7 @@ export function isCameraType(type: HazardType): boolean {
 
 /**
  * The allow-list for /v1/snapshot and /v1/delta, where "nothing requested" should
- * mean "everything the flag currently permits" — unlike /v1/hazard-reports/* and
+ * mean "everything the camera policy currently permits" (`camerasDeliverable`: some country is above `off`) — unlike /v1/hazard-reports/* and
  * /v1/speed-cameras/*, which each hard-restrict to their own fixed subset
  * regardless of the flag (see modules/hazard-reports/routes.ts's resolveTypes and
  * modules/cameras/routes.ts).
@@ -19,8 +19,8 @@ export function isCameraType(type: HazardType): boolean {
  * Excluding it here would make it permanently unrequestable via delta even with
  * the flag on.
  */
-export function resolveSyncHazardTypes(requested: HazardType[] | undefined, cameraNamespaceEnabled: boolean): HazardType[] {
-  const allowed = cameraNamespaceEnabled ? HAZARD_TYPES : NON_CAMERA_HAZARD_TYPES;
+export function resolveSyncHazardTypes(requested: HazardType[] | undefined, camerasDeliverable: boolean): HazardType[] {
+  const allowed = camerasDeliverable ? HAZARD_TYPES : NON_CAMERA_HAZARD_TYPES;
   if (!requested) return [...allowed];
   const filtered = requested.filter((t) => (allowed as readonly HazardType[]).includes(t));
   return filtered.length > 0 ? filtered : [...allowed];
