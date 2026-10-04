@@ -177,3 +177,10 @@ Konformitätstests darüber sind seit Version 1.0.0 fertig — Einzelheiten in
 ## Danach / separate Projekte
 - [ ] Flutter-App (eigenes Projekt, startet erst wenn Backend steht)
 - [ ] ESP32-Firmware — bereits spezifiziert (`prompt-esp32-blitzer-display.md`), unverändert eigenständig
+
+## Zusatz Blitzer-Funktion länderabhängig
+
+- [x] Teil A (Server, `feature/camera-country-policy`): Blitzer freigeschaltet, Standard `full` je Land, Notbremse `SPEED_CAMERA_NAMESPACE_ENABLED` Standard `true`; Länder-Ausnahmen `cameraPolicyByCountry` (`zones`/`off`), zentrale Ausliefer-Schicht, Zonen, Richtlinienwechsel ohne Neustart, Doku, Tests — gepusht, PR wartet auf Freigabe
+- [ ] Teil B (Web, `feature/camera-ui`): Kategorien mit Filter, beim ersten Besuch aus; Fläche statt Nadel bei `zones`; Kategorie fehlt bei `off`; Rechtshinweis beim Anhaken (`cameraPolicy.notice`)
+- [ ] Teil C (Client-Bibliothek, `feature/camera-policy`): Politik aus `GET /v1/config`, lokale Daten bei Verschärfung entfernen, Stufe + Hinweis in der öffentlichen API, Host-Option „Blitzer anzeigen“ Standard aus
+- [ ] Betreiber: rechtliche Einschätzung je Land (Schweiz, Frankreich zuerst), ggf. Grenzdatensatz laden und Einschränkungen signieren (`server/docs/operating.md`, „Camera policy“); `docs/launch-checklist.md` Punkt 7 anpassen

@@ -4,6 +4,8 @@ Stand: 2026-09-23. Durchgeführt auf dem Nutzer-PC (Windows 11, Ryzen 7 5800X, 1
 
 > **Nachtrag der Abschluss-Instanz (2026-09-27):** `launch/ingestion-fix-maxspeed-zero` wurde nicht separat gemergt — die Ingestion-Instanz hatte denselben Fix bereits unabhängig unter einem anderen Commit eingebracht (inhaltlich identisch, siehe `docs/audit.md` Abschnitt 8); der hier verlinkte Branch ist mittlerweile gelöscht. `client-lib` hat inzwischen ein C-ABI+Python-Binding und einen echten WebSocket-Transport (F-C4/B1, siehe `docs/prompt-client-lib-finish.md`) — der Satz zu "kein Binding" unten in Abschnitt "Was fehlt" ist entsprechend überholt. Alles andere hier ist unverändert der Originalbefund dieser Session.
 
+> **Nachtrag der Server-Instanz (2026-10-04) — Prüfung 7 und der Blitzer-Punkt unten sind überholt:** Der Betreiber hat die Blitzer-Kategorien freigeschaltet (Zusatz „Blitzer-Funktion länderabhängig“, Teil A: `server/docs/camera-country-policy.md`). Neuer Standard: `full` für jedes Land, `SPEED_CAMERA_NAMESPACE_ENABLED` steht auf `true` und ist nur noch die Notbremse (aus = alles aus); einzelne Länder schränkt der Betreiber über `cameraPolicyByCountry` in der signierten Netzwerk-Konfiguration ein. Die Prüfung 7 gilt damit für **gezogene Notbremse** (`SPEED_CAMERA_NAMESPACE_ENABLED=false`: alle Kamera-Abfragen leer, `GET /v1/config` → `speedCameraNamespaceEnabled: false`) bzw. für ein auf `off` gestelltes Land, nicht mehr für den Auslieferungszustand. Die Ergebnisse unten sind der Stand vom 2026-09-23 und bleiben unverändert stehen. Die rechtliche Bewertung je Land (bekannte Sonderfälle: Schweiz, Frankreich) bleibt Sache des Betreibers.
+
 ## Ergebnis auf einen Blick
 
 | # | Prüfung | Ergebnis |
@@ -63,7 +65,7 @@ Stand: 2026-09-23. Durchgeführt auf dem Nutzer-PC (Windows 11, Ryzen 7 5800X, 1
 ## Was fehlt vor einem öffentlichen Betrieb
 
 - **Echter Netzwerk-Wurzelschlüssel**, offline erzeugt; die Test-Schlüssel in `server/local-secrets/` sind ausdrücklich nur für diesen Test. Domain, TLS (Caddy-Profil), Portfreigabe — eigener Prompt `docs/prompt-launch-public-server.md`.
-- **Blitzer-Flag** bleibt aus, bis die rechtliche Prüfung (`docs/concept.md` Abschnitt 8) erfolgt ist.
+- **Blitzer-Flag** bleibt aus, bis die rechtliche Prüfung (`docs/concept.md` Abschnitt 8) erfolgt ist. *(Stand 2026-10-04 überholt: siehe Nachtrag oben — Standard ist jetzt `full`, die Notbremse bleibt; offen ist die Einschätzung je Land.)*
 - **Skalierung der Statikdaten:** Ein Bayern-Vollstand ist 195 MB im Snapshot und 25–100 MB pro Partition; für Mobilgeräte ist die H3-Auflösung 2 zu grob, und das Manifest sollte nicht bei jedem Aufruf 6 s rechnen. Der Server hat außerdem keine Deduplizierung beim Bulk-Import (nur das Ingestion-Tool schützt davor).
 - **Föderation:** Knotenübergreifende Meldungs-ID (`federationEventId`) fehlt in der API (Bestätigungen sind pro Knoten); Statikdaten werden nicht repliziert (jeder Knoten braucht eine eigene Ingestion oder ein Paket-Sync); Erkennung „Server hält Daten zurück“ und periodisches Re-Gossip sind laut Protokoll-Spezifikation zurückgestellt.
 - **`client-lib`:** Das Testwerkzeug spricht direkt HTTP. Die Sync-Engine der Bibliothek (F-C3) ist fertig, aber ohne Bindings (F-C4, noch nicht begonnen) nicht aus einem Node-/CLI-Werkzeug aufrufbar — die Bibliothek wird hiermit also noch nicht mitgetestet; sobald es ein Binding gibt, sollte das Werkzeug darauf umgestellt werden.
