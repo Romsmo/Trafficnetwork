@@ -46,8 +46,9 @@ otherwise need a second pass for, and already extracts both entities the OSM tag
 
 - **Fixed speed cameras** (`highway=speed_camera`, node only) — [Tag:highway=speed_camera](https://wiki.openstreetmap.org/wiki/Tag:highway%3Dspeed_camera)
   (page last edited 2026-04-20; de-facto status, not an officially standardized tag). `normalize.ts` emits a
-  `fixed-speed-camera` row with `source=osm, sourceLicense=ODbL`. **The server's speed-camera namespace stays disabled**
-  (`SPEED_CAMERA_NAMESPACE_ENABLED`) regardless — rows are stored, never served, unchanged from the existing policy.
+  `fixed-speed-camera` row with `source=osm, sourceLicense=ODbL`. **Whether they are served is the server's
+  decision** (its emergency brake `SPEED_CAMERA_NAMESPACE_ENABLED` and the per-country camera policy, `server/docs/camera-country-policy.md`;
+  default since 2026-10-04: delivered in full, single countries can be restricted) — the importer only stores the rows.
   Related tags the wiki documents (`direction`, `maxspeed`, `ref`, `surveillance:type=ALPR`) are **not** captured —
   matches the project's existing "don't guess, only what's evidenced" stance; could be added later as optional columns
   if a real use case needs them.

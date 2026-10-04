@@ -535,6 +535,29 @@ describe("country-based camera policy", () => {
     });
   });
 
+  describe("restarting a node with its emergency brake released", () => {
+    it("serves the cameras it stored while the brake was on: its packages are rebuilt for the new policy at start-up", async () => {
+      await reset();
+      await seed();
+      // the node runs with the brake on: nothing of the cameras is packaged or served
+      const braked = await startApp(null, { SPEED_CAMERA_NAMESPACE_ENABLED: "false" });
+      try {
+        const asBraked = async (url: string) => (await braked.app.inject({ method: "GET", url, headers: authHeader(await testToken(braked.env)) })).json() as Json;
+        expect((await asBraked("/v1/static-data/manifest")).partitions).toEqual([]);
+        expect(await asBraked(`/v1/speed-cameras/nearby?lat=${BERLIN.lat}&lng=${BERLIN.lng}&radiusM=5000`)).toEqual({ cameras: [], zones: [] });
+
+        // the operator releases the brake and restarts (the old process may still be shutting down): the new one finds the change itself
+        await withApp(null, async (ctx) => {
+          const tiles = ((await ctx.get("/v1/static-data/manifest")).partitions as Json[]).map((p) => p.tile);
+          expect(tiles).toContain(cellOf(BERLIN, PARTITION_RES));
+          expect((await ctx.get(`/v1/speed-cameras/nearby?lat=${BERLIN.lat}&lng=${BERLIN.lng}&radiusM=5000`)).cameras.length).toBeGreaterThan(0);
+        });
+      } finally {
+        await stop(braked.app);
+      }
+    });
+  });
+
   // ------------------------------------------------------------------ the node's own limits
 
   describe("the node operator can only be stricter", () => {
@@ -832,17 +855,21 @@ describe("country-based camera policy", () => {
         const messages: Json[] = [];
         const ws = await connect();
         ws.on("message", (raw) => messages.push(JSON.parse(raw.toString())));
-        ws.send(JSON.stringify({ type: "auth", token }));
         const regionOf = (p: Site) => cellOf(p, env.REGION_TILE_H3_RESOLUTION);
         // the Lyon cell: subscribe to a sibling tile of the one the camera will be in
         const lyonOwn = regionOf(LYON);
         const lyonSibling = cellToChildren(cellOf(LYON), 7).find((t) => t !== lyonOwn)!;
-        for (const tile of [regionOf(BERLIN), lyonSibling, regionOf(ZURICH)]) ws.send(JSON.stringify({ type: "subscribe", tile, k: 0 }));
-        const until = async (predicate: () => boolean, ms = 3000) => {
+        const until = async (predicate: () => boolean, ms = 10_000) => {
           const deadline = Date.now() + ms;
           while (!predicate() && Date.now() < deadline) await new Promise((r) => setTimeout(r, 25));
         };
+        // Authenticate first and subscribe only once the server has said so: messages are handled asynchronously, and a subscribe that
+        // overtakes the token check is answered "Not authenticated" (it passed on a fast machine and lost the race on CI).
+        ws.send(JSON.stringify({ type: "auth", token }));
         await until(() => messages.some((m) => m.type === "auth_ok"));
+        expect(messages.some((m) => m.type === "auth_ok")).toBe(true);
+        for (const tile of [regionOf(BERLIN), lyonSibling, regionOf(ZURICH)]) ws.send(JSON.stringify({ type: "subscribe", tile, k: 0 }));
+        await new Promise((r) => setTimeout(r, 300)); // subscribe has no acknowledgement; give the server a moment to register it
 
         const post = async (sub: string, site: Site) =>
           fetch(`http://127.0.0.1:${address.port}/v1/hazard-reports`, {
@@ -854,7 +881,7 @@ describe("country-based camera policy", () => {
         await post("w2", LYON); // FR zones
         await post("w3", ZURICH); // CH off
         await until(() => messages.filter((m) => m.type === "event").length >= 2);
-        await new Promise((r) => setTimeout(r, 400)); // room for an event that must NOT come
+        await new Promise((r) => setTimeout(r, 600)); // room for an event that must NOT come
         ws.close();
 
         const events = messages.filter((m) => m.type === "event").map((m) => m.event as Json);
