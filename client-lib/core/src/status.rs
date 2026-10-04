@@ -1,6 +1,6 @@
 //! Network-status snapshot for host apps. Currently carries the "how many
 //! are online" figures from `GET /v1/stats/online` (add-on O,
-//! `docs/prompt-addon-online-counter.md`) — a public, unauthenticated
+//! `work order "addon-online-counter" (kept outside the repo)`) — a public, unauthenticated
 //! endpoint that reports the answering node's own count plus an *estimated*
 //! network-wide sum.
 //!

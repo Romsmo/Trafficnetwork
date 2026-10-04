@@ -4,7 +4,7 @@ on:
   push:
     # main plus any rework/* branch (e.g. rework/server-federation) — a
     # feature branch needs its own CI signal per milestone, per
-    # docs/prompt-rework-server-federation.md's "nach jedem Meilenstein:
+    # work order "rework-server-federation" (kept outside the repo)'s "nach jedem Meilenstein:
     # Build + Tests (auch CI) grün" — not just once at PR time.
     branches: [main, "rework/**"]
     paths:
@@ -87,7 +87,7 @@ jobs:
       - uses: docker/setup-buildx-action@v3
 
       # Build only, both architectures — no push/publish without explicit
-      # approval (see docs/prompt-rework-server-federation.md section 5).
+      # approval (see work order "rework-server-federation" (kept outside the repo) section 5).
       - name: Build multi-arch image (validation only, no push)
         uses: docker/build-push-action@v6
         with:

@@ -30,7 +30,7 @@ export interface AppendEventInput {
  * same transaction handle used for the corresponding materialized-table write
  * (insert/update on hazard_reports, fixed_speed_cameras, etc.) — never on its own
  * connection — so the event and the materialized state can never diverge (see
- * docs/prompt-phase1-server.md section 5.1/5.2 and the plan's "transaktionaler
+ * work order "phase1-server" (kept outside the repo) section 5.1/5.2 and the plan's "transaktionaler
  * Schreibpfad" note). Callers publish to WebSocket subscribers only after the
  * transaction that calls this has committed.
  */

@@ -78,7 +78,7 @@ const BULK_BODY_LIMIT_BYTES = 64 * 1024 * 1024;
 /**
  * A normal, publicly documented API endpoint with an elevated permission level —
  * not a special access path hardcoded for one future ingestion program (see
- * docs/prompt-phase1-server.md section 1 and docs/concept.md section 7). Any
+ * work order "phase1-server" (kept outside the repo) section 1 and docs/concept.md section 7). Any
  * authenticated client holding the bulk-import scope may call these.
  */
 export async function registerBulkImportRoutes(app: FastifyInstance) {

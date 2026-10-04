@@ -3,7 +3,7 @@ import { installRawSqlTypeParsers } from "../../src/db/raw-sql-types.js";
 
 /**
  * Root-cause fix for the two JSON-shape bugs found by client-lib's multi-node tests
- * (see docs/status.md): raw-SQL reads (`db.execute(sql\`...\`)`, used throughout
+ * (see the retired status log (git history)): raw-SQL reads (`db.execute(sql\`...\`)`, used throughout
  * `db/queries/*.ts`) returned bigint columns as a JSON string and timestamptz columns
  * as Postgres's own text form instead of RFC 3339. Both are fixed by re-registering
  * postgres.js's OID parser table (see raw-sql-types.ts for the full root-cause writeup);

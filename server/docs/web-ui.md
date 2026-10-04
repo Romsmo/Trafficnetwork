@@ -46,6 +46,9 @@ The Docker image contains the UI (`server/web` is copied into it); `docker-compo
 * **Map** — the node's reports as markers (category icons, not just colours), a list next to or below the map, category
   filters, live updates over the node's WebSocket (a "Live" indicator shows the connection state), reports disappear when they
   expire. The map opens on the region the node has data for. Clicking it shows the speed limit at that spot.
+  Live subscriptions are capped (`WEB_WS_MAX_TILES_PER_CONNECTION`): in a very large view (the page says "Ausschnitt sehr groß")
+  not every tile is subscribed, and a new report shows up with the page's once-a-minute refresh instead of at once (measured: about
+  45 s in a country-sized view, a few seconds when zoomed in).
 * **Speed-limit layer** — road colours by limit (zoomed in far enough). Only roads that have a recorded limit exist in the
   data (OpenStreetMap `maxspeed`); other roads stay uncoloured and the legend says so ("no limit recorded" — the general legal
   rule applies there). The page never claims completeness.
@@ -95,7 +98,7 @@ not verified — and a note that only counting happens. It is text, not a colour
 number moves anything, and it stays out of the way on a phone.
 
 **Contract.** The server part is add-on O-A (`GET /v1/stats/online`, documented in `docs/api.md`; branch `feature/online-counter`).
-The page was first written against the shape proposed in `docs/prompt-addon-online-counter.md` and then checked against O-A's
+The page was first written against the shape proposed in `work order "addon-online-counter" (kept outside the repo)` and then checked against O-A's
 real endpoint in a trial merge of both branches — the two agree:
 
 ```json

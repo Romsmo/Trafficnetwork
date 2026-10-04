@@ -7,7 +7,7 @@ import { startTestServer, type RunningServer, type TestServer } from "./setup.js
 
 /**
  * Speed cameras are imported but not delivered while the server's emergency brake (SPEED_CAMERA_NAMESPACE_ENABLED=false) is on
- * (docs/prompt-addon-source-catalogue.md §3.1: "Import ja, Auslieferung nein" — the importer never touches the flag; the server's
+ * (work order "addon-source-catalogue" (kept outside the repo) §3.1: "Import ja, Auslieferung nein" — the importer never touches the flag; the server's
  * default is now "delivered", see server/docs/camera-country-policy.md).
  *
  * The camera rows are posted through the same ApiClient call the OSM worker uses. The test then proves both halves on ONE database:

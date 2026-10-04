@@ -1,94 +1,89 @@
-# Abschlussbericht (R5)
+# Abschlussbericht
 
-Stand: 2026-09-28. Server ist als `v1.0.0` freigegeben, Ingestion als `v0.2.0` (siehe [`CHANGELOG.md`](../CHANGELOG.md), Releases: [server-v1.0.0](https://github.com/Romsmo/Trafficnetwork/releases/tag/server-v1.0.0), [ingestion-v0.2.0](https://github.com/Romsmo/Trafficnetwork/releases/tag/ingestion-v0.2.0)). Vollständige Belege, jeder Fund einzeln nachvollziehbar: [`docs/audit.md`](audit.md).
+Stand: 2026-10-05. Der Bericht hat drei Teile: was fertig und benutzbar ist, was bewusst offen ist, was beim Betreiber liegt. Dahinter steht der Beleg — ein Durchstich, den die Abschluss-Instanz selbst aus einem frischen Klon gemacht hat, ohne sich auf die Meldungen der anderen Instanzen zu stützen. Die früheren Prüfungen stehen in [`docs/audit.md`](audit.md), der Weg bis hierher in [`CHANGELOG.md`](../CHANGELOG.md), die Reste in [`docs/todo.md`](todo.md).
 
-Kurz und ehrlich, ohne Beschönigung.
+## 1. Fertig und benutzbar
 
----
-
-## 1. Was fertig und benutzbar ist
-
-**Server (`server/`, v1.0.0):** Läuft self-hosted (Docker oder ohne Docker hinter Apache/nginx/Caddy), einzeln oder föderiert mit anderen Knoten (offene Mitgliedschaft, Reputation, signierte Daten). Ereignisprotokoll, Snapshot-/Delta-Sync, Moderationsgate, Bulk-Import, WebSocket-Push, Blitzer-Namensraum standardmäßig aus. Zusatzfunktionen: eingebaute Weboberfläche, „aktuell online"-Anzeige, Community-Tempolimit-Korrekturen, Europa-Maßstab (vorgebaute Statikdaten-Pakete), dauerhafte Überwachungsanlagen (Rotlicht/Abstand). Selbst durchgespielt, nicht nur behauptet: frischer Klon → `docker compose up` → `GET /v1/health` → Meldung über die echte Client-Bibliothek abgesetzt → im Browser auf der Karte gefunden.
-
-**Client-Bibliothek (`client-lib/`, v1.1.0 — 1.0.0 plus Blitzer-Länderrichtlinie, siehe `CHANGELOG.md`):** Ein Rust-Kern mit dünnen Anbindungen für alle zugesagten Plattformen — C-ABI (Linux, macOS, Windows) mit Python und Node.js, WebAssembly für den Browser, Kotlin/Android, Swift/iOS/macOS, Dart/Flutter, React Native —, an einem gemeinsamen Szenariensatz gemessen (gleiches Ergebnis über Python, Node.js, WebAssembly, Kotlin, Swift, Dart), gegen ein echtes Mehrknoten-Testnetz und gegen den Docker-Server vom frischen Klon aus verifiziert (Abschnitt 4). Je Plattform eine Integrationsanleitung mit nachbaubarem Minimalbeispiel in [`client-lib/docs/`](../client-lib/docs/); die Pakete entstehen als Build-Artefakte in CI, veröffentlicht ist nichts. Was nicht belegt ist, steht in [`client-lib/README.md`](../client-lib/README.md) unter „Was noch fehlt“.
-
-**Ingestion (`ingestion/`, v0.2.0):** OSM-Bulk-Import mit Wiederaufnahme nach Abbruch, Europa-Grundstock einmalig importiert (13,68 Mio. Zeilen), Baustellen-Import (DATEX II, Autobahn-JSON), amtliche Schilder aus Norwegen, Qualitätsbericht. Läuft ausschließlich als gewöhnlicher Client gegen die öffentliche API — kein privilegierter Zugriff, jederzeit abschaltbar.
-
-**Rundherum:** keine echten Geheimnisse im Repo oder in der Historie (gitleaks über 217 Commits geprüft), keine Lizenzkonflikte in den Node-Paketen, ODbL-Attribution sichtbar, Apache-2.0-`LICENSE` vorhanden, `README.md` mit Schnellstart oben, `CHANGELOG.md` mit dem Weg bis hierher, GitHub Actions grün auf allen vier Workflows.
-
-## 2. Was bewusst offen ist (keine Betreiber-Aufgabe, sondern weitere Entwicklung)
-
-- **Client-Bibliothek nach 1.0 (nie zugesagt, aber wichtig zu wissen):** Veröffentlichung in Paketregistern (npm, Maven, pub.dev, CocoaPods) wartet auf eine ausdrückliche Freigabe; Kotlin/Android, Swift/iOS und React Native werden gebaut, aber nicht auf Gerät, Emulator oder Simulator ausgeführt (nur die Flutter-App läuft auf einem Android-Emulator); ein echter TLS-Handshake gegen einen Server ist nirgends getestet (alle Tests laufen über `http://`). Das Release selbst (`client-lib-v1.0.0`) löst erst ein Tag aus, das du setzt.
-- **Baustellen-Dauerbetrieb:** Der Import ist gebaut und getestet, aber nicht als wiederkehrender Lauf eingerichtet — das war für diesen Stand bewusst nicht der Auftrag (`ingestion/docs/roadworks.md`).
-- **Ungeklärte Quellen:** HERE, TomTom, Mobilithek sind katalogisiert, aber abgeschaltet (keine Zugänge, keine belastbare Lizenz-/Preisrecherche). NDW (Niederlande) wartet auf Lizenzklärung. Schweden-Schilder brauchen einen Lastkajen-Zugang, den es nicht gibt.
-- **Kleinere, benannte Lücken ohne Betreiber-Bezug:** `federationEventId` fehlt weiterhin in Snapshot/Delta (Confirm/Deny-Föderation braucht das später); Abschnittskontrolle (`enforcement=average_speed`) nicht gebaut; acht kleinere Konfigurationsfragen zu den dauerhaften Überwachungsanlagen sind mit dokumentierten Standardwerten entschieden, nicht mit dir abgestimmt (`server/docs/persistent-enforcement-devices.md` §10) — jede davon ist eine kleine, spätere Änderung.
-
-## 3. Was bei dir als Betreiber liegt
-
-Das sind die Punkte, die einen öffentlichen Start verhindern, unabhängig vom Code-Zustand:
-
-- **`docs/privacy.md` (DSGVO):** existiert nur als Entwurf, keine rechtliche Prüfung.
-- **Betreiberbedingungen für fremde Knoten:** fehlen komplett — wer föderiert beitreten darf und unter welchen Bedingungen, ist nirgends fixiert.
-- **Rechtliche Prüfung des Blitzer-Betreiberrisikos (§23 Abs. 1b StVO):** steht aus. Das Flag bleibt technisch aus, bis das geklärt ist — das ist absichtlich hart verdrahtet, nicht nur eine Empfehlung.
-- **Domain `trafficnetwork.info`:** in Code und Doku bereits als die feste Adresse eingetragen (eine konfigurierbare Stelle je Paket) — aber real weder registriert noch im DNS. Ohne das laufen `client-lib`s eingebaute Seeds ins Leere.
-- **Netzwerk-Wurzelschlüssel:** muss offline erzeugt und sicher verwahrt werden, bevor die signierte Netzwerk-Konfiguration (und damit z. B. eine spätere Blitzer-Freigabe) irgendeine Bedeutung hat. Die Werkzeuge dafür sind fertig (`server/scripts/network-*.mts`), der eigentliche Schlüssel nicht.
-- **Mindestens zwei Seed-Server, verschiedene Anbieter:** noch nicht bereitgestellt — ohne die findet ein neuer Knoten das Netzwerk nicht.
-- **Autobahn-API-Lizenz:** direkt bei der Autobahn GmbH/BMV erfragen — die Quelle bleibt bis dahin abgeschaltet.
-- **`tn-europe` selbst:** die 2.000 doppelt importierten Segmente entfernen, danach `pg_dump` als Grundstock ziehen (SQL liegt im Europa-Bericht bereit, ausgeführt werden muss es auf dem echten Knoten).
-
-Keiner dieser Punkte ist ein Code-Mangel — das sind durchweg Entscheidungen und Handlungen, die nur du treffen bzw. ausführen kannst.
-
----
-
-## 4. Ende-zu-Ende-Lauf vom frischen Klon (client-lib 1.0.0, 2026-10-03/04)
-
-Vorgeführt, nicht behauptet: Server in Docker, API, Weboberfläche und die Client-Bibliothek über zwei Anbindungen — von einem frischen Klon und den **veröffentlichten Artefakten** aus, wie ein Fremder es täte. Befehle, Ausgaben und Bilder liegen unter [`docs/durchstich/evidence/`](durchstich/evidence/), die Skripte in [`docs/durchstich/`](durchstich/README.md) (jede Datei dort ist die Handarbeit dieses Laufs, keine Testsuite).
-
-**Aufbau.** Windows-11-PC, Docker Desktop 29.8, Python 3.12, Node. Klon: `git clone --branch rework/client-lib-release https://github.com/Romsmo/Trafficnetwork` (anonym, ohne Anmeldung; Stand `6171c1e`). Bibliothek: die Datei-Sammlung `trafficnetwork-release-files` des grünen CI-Laufs [37155564992](https://github.com/Romsmo/Trafficnetwork/actions/runs/37155564992) (Commit `cf84324`, 13 Dateien, `sha256sum -c checksums.txt` → alle OK, [`step0-checksum-verify.log`](durchstich/evidence/step0-checksum-verify.log)). Benutzt wurden daraus `trafficnetwork-1.0.0-py3-none-any.whl`, `trafficnetwork-c-abi-1.0.0-windows-x86_64.zip` und `trafficnetwork-client-web-1.0.0.tgz`. Nichts davon ist in einer Registry veröffentlicht; das GitHub-Release `client-lib-v1.0.0` gibt es noch nicht (Tag erst nach deiner Freigabe).
-
-**Umgebungsabweichung, offen genannt:** ein TLS-prüfender Virenscanner dieses PCs bricht `npm ci` im Docker-Build ab. Nur im Wegwerf-Klon steht deshalb `npm config set strict-ssl false &&` vor `npm ci` im `server/Dockerfile` — nicht committet, nicht Teil des Repos, auf einem PC ohne solchen Proxy nicht nötig. Das GHCR-Image `ghcr.io/romsmo/trafficnetwork-server` ist anonym **nicht** abrufbar (`unauthorized`); der Schnellstart baut deshalb lokal, wie die README es ohnehin beschreibt.
-
-### Punkt 1 — Server in Docker: bestanden
-`cp .env.example .env` (zwei Werte gesetzt), `docker compose up -d` → Postgres, Migrationen, Server; `GET /v1/health` → `{"status":"ok","database":"ok"}`, 19 Tabellen ([`step1-health.log`](durchstich/evidence/step1-health.log), [`step1-compose-up.log`](durchstich/evidence/step1-compose-up.log)). Kein verstecktes Zwischenstück — außer einem, das **bei der ersten Durchführung auffiel und repariert ist:** nach `docker compose down -v` hat `up -d` ein *vorhandenes altes Image* weiterverwendet (die Weboberfläche zeigte noch den alten Text). Das ist Compose-Standardverhalten; `server/docs/installation.md` sagt jetzt, dass nach neuem Code `up -d --build` nötig ist. Der gezeigte Lauf wurde danach mit `down -v --rmi local` ohne vorhandenes Image wiederholt (gebaut aus dem Klon; lokaler Layer-Cache, 17 s).
-
-### Punkt 2 — echte API-Aufrufe nach `server/docs/api.md`: bestanden
-Zugänge mit dem Snippet aus `server/docs/installation.md` („Create the first client“), dann [`api.sh`](durchstich/api.sh): Tempolimit-Segment importieren (Scope `bulk-import`), `GET /v1/speed-limit?lat=52.52&lng=13.405` → 30 km/h, `GET …/nearby` leer → `POST /v1/hazard-reports` (`201`, `merged:false`) → `POST …/confirmations` (anderer Zugang) → `GET …/nearby` zeigt die Meldung mit `confirmCount: 1` ([`step2-api.log`](durchstich/evidence/step2-api.log)). **Gefunden:** diesen ersten Zugang konnte man im Docker-Stack nach der damaligen Anleitung nicht anlegen (`server/scripts/` liegt nicht im Image) — repariert (Doku, keine Serveränderung).
-
-### Punkt 3 — Weboberfläche: bestanden, mit einem Fund, der behoben ist
-Karte lädt, auf Berlin zentriert; die per API gemeldete Meldung ist zu sehen ([`web-1`](durchstich/evidence/web-1-report-posted-via-api.jpg)); „Gefahr melden“ → Glätte → Kartenmitte → Melden: „Danke! Deine Meldung ist jetzt auf der Karte.“, der Marker erscheint **ohne Neuladen** ([`web-2`](durchstich/evidence/web-2-report-posted-via-ui.jpg)). Die Seite „Verbinden“ ([`web-3`](durchstich/evidence/web-3-connect-page.jpg)): die Docker-Schritte und die `curl`-Beispiele der Seite wurden wortgleich ausgeführt und stimmen ([`step3-connect-page-commands.log`](durchstich/evidence/step3-connect-page-commands.log)). **Gefunden:** die Seite versprach noch Codebeispiele „sobald die Plattform-Bindings der Bibliothek fertig sind“ — überholt. Text korrigiert (de/en, nur Text in `server/web/public/assets/i18n/`, eigener Commit im B5-PR; das ist eine kleine, bewusste Ausnahme von „keine Server-Änderungen“, siehe dort). Nicht auf der Seite, aber nötig: wie man den ersten Zugang anlegt — das steht in der verlinkten Installationsanleitung.
-
-### Punkt 4 — Bibliothek über zwei Anbindungen, nach den Anleitungen: bestanden
-**Native (Python-Wheel + C-ABI-DLL aus dem Release-Archiv, Windows)** — [`native.py`](durchstich/native.py), [`step4-native.log`](durchstich/evidence/step4-native.log): `native library 1.0.0`; Registrieren per App-Schlüssel (Scope `device-registration`; eigene Geräte-`clientId`, Schlüssel im `secure-store.json`) und Bootstrap beim ersten `sync()` → `ok=True`; `getSpeedLimitAt(52.52, 13.405)` → 30 km/h aus dem Bootstrap; Meldung abgesetzt (lokal sofort sichtbar, `sync` → `submitted=1`, beim Server unter der Geräte-ID); **Push** — eine Meldung eines anderen Geräts kommt als `dataChanged` an und ist danach lokal sichtbar; **Server gestoppt**, Meldung gepuffert (`sync` → `ok=False`, `dynamicDataError=network`, `pendingWrites=1`, lokal weiter sichtbar), Server gestartet, `sync` → `submitted=1`, beim Server angekommen.
-
-**Browser (`trafficnetwork-client-web-1.0.0.tgz` in ein leeres Projekt installiert, mit `python -m http.server` bedient)** — [`step4-web-example.log`](durchstich/evidence/step4-web-example.log), [`step4-browser.log`](durchstich/evidence/step4-browser.log): die **Beispielseite des Pakets** (`example/index.html`, so wie die Anleitung sie vorgibt) → `sync ok: true`, Tempolimit 30 km/h, „Report an accident“ → beim Server. Danach die Schritte aus [`browser.html`](durchstich/browser.html) (README-Muster des Pakets): Registrieren/Bootstrap, Tempolimit, Meldung (lokal sofort sichtbar, dann gesendet), **Push** (`startRealtime()`; eine Meldung eines anderen Zugangs kommt als `dataChanged` an, ohne ein weiteres `sync()`), **Offline-Puffer** (Server gestoppt → `ok:false, network, pendingWrites:1`; Server gestartet → `submitted:1`).
-
-### Punkt 5 — Zusammenspiel: bestanden
-Eine Meldung der Bibliothek (Browser) erscheint in der bereits offenen, nie neu geladenen Weboberfläche innerhalb von 4 s als „Hindernis“ ([`web-4`](durchstich/evidence/web-4-report-from-browser-library.jpg)); die Meldung, die dort über das Formular gemacht wird („Glätte“, [`web-5`](durchstich/evidence/web-5-report-posted-via-ui-seen-by-library.jpg)), liefert `getNearby` der Bibliothek nach dem nächsten `sync()` (`ice`, 0 m). Die Meldungen der nativen Anbindung und der Beispielseite stehen in der Weboberfläche (Stau, Unfall) und umgekehrt in der Bibliothek.
-
-### Was dieser Lauf gefunden hat (alles behoben, außer wo es steht)
-| Fund | Wirkung | Stand |
+| Paket | Version | Stand |
 |---|---|---|
-| **Push erreichte einen echten Server nie** — die Bibliothek öffnete `http://…/v1/ws` statt `ws://` | in keinem Mock-Test sichtbar; jede Anbindung ohne Push gegen einen echten Server | behoben im Kern (`push_url`), URL-Tests + Mehrknoten-Test gegen einen echten Server (CI) |
-| Erster Zugang im Docker-Stack nicht anlegbar | Fremder kommt nach dem Start nicht weiter | Doku: `server/docs/installation.md`; Anleitungen verweisen darauf |
-| `docker compose up` nutzt ein vorhandenes altes Image | „frischer“ Start zeigt alten Stand | Doku-Hinweis (`--build`) |
-| „Verbinden“-Seite versprach schon Fertiges als künftig | irreführend | Text korrigiert (B5-PR, eigener Commit) |
-| Windows-Archiv enthält die DLL, aber nicht deren Importbibliothek | MSVC-Nutzer können damit nicht linken | **offen, dokumentiert** in `client-lib/docs/releases.md` (MinGW/Laufzeitladen oder aus dem Quelltext bauen); verletzt keine Zusage, die Anleitung beschreibt den MinGW-Weg |
-| GHCR-Image anonym nicht abrufbar | `docker pull` scheitert | **offen**, Sache des Betreibers (Sichtbarkeit des Pakets); der Schnellstart baut lokal und ist davon unberührt |
-| TLS-prüfender Virenscanner dieses PCs | `npm ci` im Docker-Build scheitert | nur lokale Umgebung, nicht im Repo (siehe oben) |
-| Docker Desktop startete nach einem Neustart nicht | Wartezeit | bekannter Fehler, `tools/start-docker-desktop.ps1` |
+| `server/` (mit eingebauter Weboberfläche) | **1.0.0** | Release `server-v1.0.0`, Image `ghcr.io/romsmo/trafficnetwork-server:1.0.0` (privat). `main` enthält danach die Länder-Politik für Blitzer, die Serialisierungs-Korrektur und die Weboberfläche dazu; ein neues Server-Release (Image mit diesen Änderungen) ist noch nicht geschnitten. |
+| `ingestion/` | **0.2.0** | Release `ingestion-v0.2.0`; bewusst kein 1.0 (Quellenkatalog in Bewegung, mehrere Quellen ohne geklärte Lizenz abgeschaltet). |
+| `client-lib/` | **1.1.0** im Code | Kern plus Anbindungen für C/C++, Python, Node.js, Browser (WebAssembly), Android, iOS/macOS, Flutter und React Native, derselbe Szenariensatz über alle. Release/Tag siehe Schlussmeldung. |
 
-### Grenzen dieses Nachweises (so, wie sie sind)
-- **Ausgeführt** wurde die Bibliothek in diesem Lauf nur über Python/C-ABI (Windows) und den Browser (Chromium im eingebetteten Browser der Claude-Desktop-App). Kotlin/Android, Swift/iOS und React Native sind in CI gebaut, aber nicht ausgeführt (Konformität: JVM, macOS); die Flutter-App läuft in CI auf einem Android-Emulator. Das steht auch in den Anleitungen und in `client-lib/README.md`.
-- Alle Verbindungen dieses Laufs gingen über `http://localhost` — ein echter TLS-Handshake gegen einen Server ist hier wie in CI **nicht** geprüft.
-- Das Release-Workflow (`client-lib-v*`) ist nicht ausgeführt, weil es erst ein Tag auslöst; die Montage der Dateien (`release-files`) läuft dagegen in jedem CI-Lauf.
-- Der gezeigte Klon steht auf `6171c1e`; seitdem sind nur ein Test (`tn_library_version`-Prüfung), Doku und Dateien dieses Berichts dazugekommen, kein Bibliothekscode.
+Benutzbar heißt: Ein Fremder kann den Server mit zwei Einträgen in `.env` und einem `docker compose up -d` starten, hat sofort Weboberfläche und API, kann Zugangsdaten anlegen (Anleitung in `server/docs/installation.md`) und mit einer der Bibliotheken Daten holen, melden, bestätigen und offline nachreichen. Föderation, Reputation, signierte Daten, Europa-Maßstab, Tempolimit-Korrekturen, dauerhafte Anlagen (Rotlicht/Abstand) und die „aktuell online"-Anzeige sind eingebaut und getestet.
+
+**Blitzer** sind freigeschaltet, wie jede andere Kategorie: Standard `full` in jedem Land. In der Weboberfläche steht der Filter beim ersten Besuch auf aus, und beim ersten Anhaken erscheint der Rechtshinweis; in der Client-Bibliothek ist die Host-Option „Blitzer anzeigen" standardmäßig aus. Einzelne Länder lassen sich per signierter Politik auf `zones` (nur grobe Flächen) oder `off` setzen; die Notbremse `SPEED_CAMERA_NAMESPACE_ENABLED=false` schlägt alles. **Der Code gibt nichts davon von allein frei oder schränkt von allein ein:** Ohne eine vom Betreiber signierte Politik gilt `full` überall.
+
+## 2. Bewusst offen
+
+Was nie zugesagt war oder bewusst zurückgestellt ist — Einzelheiten in [`docs/todo.md`](todo.md), Abschnitt 4:
+
+- Baustellen-Dauerbetrieb (der Import ist gebaut, läuft aber nicht als wiederkehrender Lauf); Quellen mit ungeklärter Lizenz bleiben aus (Autobahn-API, NDW; HERE/TomTom/Mobilithek sind nur katalogisiert); Schweden-Schilder brauchen einen Zugang, den es nicht gibt.
+- Veröffentlichung der Client-Pakete in Registern (npm, Maven, pub.dev, CocoaPods) — jede eine eigene Freigabe.
+- Kotlin/Android, Swift/iOS und React Native sind gebaut und auf JVM bzw. macOS in der Konformität geprüft, aber nicht auf Emulator/Gerät ausgeführt (nur die Flutter-App läuft auf einem Android-Emulator); kein TLS-Handshake gegen einen echten Server getestet (alle Tests über `http://`).
+- Weboberfläche: „Stimmt nicht?"-Formular, Startansicht Europa/Cluster, Quellen-Attribution; in sehr großen Kartenausschnitten kommen neue Meldungen erst mit dem Minutentakt statt live.
+- Abschnittskontrolle, Land des Fahrers bei der Blitzer-Politik, `federationEventId` für föderiertes Bestätigen.
+- Zwei Beobachtungen aus dem Durchstich (unten, Funde 4 und 5), die nicht in diesem Bericht behoben sind.
+
+## 3. Beim Betreiber
+
+Nichts davon kann der Code oder diese Instanz erledigen:
+
+- **`docs/privacy.md`** (DSGVO) fertigstellen und rechtlich prüfen lassen; **Betreiberbedingungen** für fremde Knoten schreiben und prüfen lassen.
+- **Domain `trafficnetwork.info`** registrieren und DNS einrichten; **zwei Seed-Server** bei verschiedenen Anbietern; **Netzwerk-Wurzelschlüssel** offline erzeugen und verwahren; Backups, Überwachung, Update-Weg.
+- **Autobahn-API-Lizenz** erfragen; NDW-Lizenz klären.
+- **Öffentliche Sichtbarkeit** von Repository und Container-Images entscheiden (beides ist privat).
+- **Blitzer-Politik:** rechtliche Prüfung je Land, vor allem Schweiz und Frankreich; Entscheidung `off`/`zones`/`full` je Land; **echten Grenzdatensatz laden** (der Durchstich hat nur drei selbstgezeichnete Rechtecke verwendet) und die Einschränkung mit dem Wurzelschlüssel **signieren**; Wortlaut des Rechtshinweises freigeben. Ausgeliefert wird mit „Standard `full`, Oberflächen blenden Blitzer aus" — jede Einschränkung muss der Betreiber selbst hinterlegen.
+- **`tn-europe`:** die 2.000 doppelten Segmente entfernen, `pg_dump` ziehen, dann das neue Image starten (Migrationsfenster etwa 6 Minuten).
 
 ---
 
-## `docs/status.md` — mein Vorschlag
+## Durchstich vom frischen Klon (2026-10-04/05)
 
-**Bleibt vorerst.** Die Client-Bibliothek-Instanz arbeitet aktiv weiter (B3–B5), und `docs/status.md` ist genau dafür da: laufende Arbeit zwischen Instanzen zu koordinieren, ohne dass jede ihren eigenen Kontext neu aufbauen muss. Sie jetzt zu entfernen, würde diese Koordination beenden, während sie noch gebraucht wird.
+Neues leeres Verzeichnis, `git clone` von `main` (`99ac441`), nur das, was im Repo steht. Eigene Skripte und Bilder: [`docs/durchstich/r6/`](durchstich/r6/README.md). Lokale Besonderheiten dieses Windows-Rechners (Norton prüft TLS und signiert neu: der Docker-Build brauchte lokal sein Wurzelzertifikat; `wasm-opt` ließ sich nicht herunterladen, deshalb `wasm-pack build --no-opt`) sind keine Repo-Fehler und stehen nur hier.
 
-Mein Vorschlag: Wenn B3–B5 abgeschlossen sind (oder du die Arbeit an der Client-Bibliothek anderweitig für beendet erklärst), räumt die dann tätige Instanz `docs/status.md` in einem letzten, kurzen Schritt weg — Inhalt, der noch von Dauer ist (z. B. offene Nebenbefunde), wandert vorher nach `docs/todo.md`, der Rest ist dann wirklich nur noch Verlaufsprotokoll und kann raus. Das ist keine große Aufgabe, aber eine eigene, nicht Teil von R5 selbst, weil R5 explizit *vor* dem Abschluss der Client-Bibliothek stattfindet.
+### 1 — Compose-Stack: bestanden
+`cp .env.example .env`, nur `POSTGRES_PASSWORD` und `JWT_SECRET` gesetzt (`# DATABASE_URL=…` bleibt auskommentiert), `docker compose up -d --build`:
+```
+postgres Up 19 seconds (healthy)
+server   Up 8 seconds (healthy)
+server-1 | Migrations complete.
+$ curl localhost:3000/v1/health
+{"status":"ok","database":"ok"}
+```
 
-**Update (Client-Bibliothek-Instanz, 2026-10-03): B3–B5 sind abgeschlossen** (Version `1.0.0`, siehe `CHANGELOG.md`). Die Abschluss-Instanz kann `docs/status.md` jetzt entfernen; was darin noch von Dauer ist, steht in `docs/todo.md` (Eintrag „Client-Bibliothek nach 1.0“) und in `client-lib/README.md` („Was noch fehlt“).
+### 2 — API gegen `server/docs/api.md` (Typ und Format): bestanden
+`docs/durchstich/r6/api_check.py` prüft u. a.: `POST /v1/auth/token` → `accessToken` als String; Tempolimit (`speedLimit` ganzzahlig, `speedLimitUnit` = `kmh`; 404 weit weg, wie dokumentiert); `POST /v1/hazard-reports` → 201, `report.id` UUID, `reportedAt`/`expiresAt` **RFC 3339**, `confirmCount` ganzzahlig, `merged: false`; zweite Meldung derselben Art binnen 500 m → 200, `merged: true`; `hazard-reports/nearby` genau 1 Eintrag; Snapshot `snapshotSequence` und Delta `nextSince`/`events[].sequence` **Zahlen**, `occurredAt` RFC 3339; `GET /v1/config` → `cameraPolicy.defaultLevel: "full"`, `byCountry: {}`.
+Eine Prüfung schlug zunächst fehl — Ursache war mein Skript (Feld `confirmation` statt dokumentiert `kind`); mit `{"kind":"stillThere"}` durch einen zweiten Zugang: `200, recorded=true, confirmCount 0→1, expiresAt verlängert`; dieselbe Person ein zweites Mal: `recorded=false` (dokumentiert).
+
+### 3 — Weboberfläche im Browser: bestanden, mit zwei Funden
+Karte lädt (Version 1.0.0 in der Fußzeile, OSM-Attribution), die Meldungen aus API und Bibliothek erscheinen als Marker und in der Liste ([Bild 1](durchstich/r6/web-1-library-and-api-reports-on-map.jpg)). Eine neue Meldung per API erscheint **ohne Neuladen**: bei nahem Zoom innerhalb weniger Sekunden (Marker und Liste); in einem landesgroßen Ausschnitt erst nach rund 45 s — Fund 3. Die Seite „Verbinden" (`/connect`) zeigt die vier Docker-Schritte, die API-Beispiele und den Knotenstatus (Knoten-ID, Version 1.0.0, „Föderation: nicht aktiv", 0 weitere Knoten); `health`, `network/node-info`, `network/directory` antworten ohne Token mit 200, wie dort behauptet. Melden aus der Oberfläche: Dialog mit allen Kategorien inklusive Blitzer, Rückmeldung „Danke! Deine Meldung ist jetzt auf der Karte." ([Bild 4](durchstich/r6/web-4-report-from-web-ui-confirmed.jpg)); bei Blitzer-Meldungen erklärt die Seite, dass sie erst mit eingeschaltetem Filter sichtbar wird.
+
+### 4 — Client-Bibliothek von zwei Anbindungen, streng nach den Anleitungen: bestanden
+**Native (Python über das C-ABI)**, `integration-python.md`: `cargo build -p trafficnetwork-c-abi --release` (1 min 36 s), dann das Beispielprogramm wie dort beschrieben:
+```
+native library 1.1.0
+sync ok: true, pending writes: 0
+speed limit here: {… 'unit': 'kmh', 'value': 30.0 …}
+4 things within 2 km
+queued report 1e109a94…; sync ok: true
+```
+Danach `py_flow.py`: Registrierung mit App-Schlüssel (Scope `device-registration`) beim ersten `sync()`, Bootstrap, Tempolimit lokal 30 km/h, 4 Meldungen aus der Umgebung, eigene Meldung sofort sichtbar und `pending`, gesendet (`submitted: 1`), **Push** (`start_realtime()`: eine per REST abgesetzte Baustelle ist nach 0,01 s in `get_nearby`, 7 Ereignisse im Callback), **Offline**: Server gestoppt → Meldung sofort sichtbar und `pending`, `sync()` → `dynamicDataError: network, pendingWrites: 1`, kein Absturz; Server gestartet → `submitted: 1, pendingWrites: 0`, die Meldung steht auf dem Server. (Ein Prüfpunkt meines ersten Offline-Laufs schlug fehl, weil ich die Offline-Meldung 480 m neben eine gleichartige gesetzt hatte und die Bibliothek sie wie der Server zusammenführt; mit einem freien Ort bestanden.)
+**Browser (WebAssembly)**, `integration-web.md`: `wasm32`-Ziel und `wasm-pack` installiert, `wasm-pack build --target web --out-dir pkg` (lokal mit `--no-opt`, siehe oben), `client-lib/bindings/` mit `python -m http.server` ausgeliefert, Beispielseite `/wasm/example/`: `sync ok: true`, Tempolimit 30, „6 things within 2 km". Dann im Browser mit der Bibliothek selbst: Registrierung mit App-Schlüssel, Bootstrap (6 Meldungen, Tempolimit 30), `startRealtime()`, Push einer REST-Meldung ohne `sync()` sichtbar, Offline-Meldung (Server gestoppt: `ownVisiblePending: true`, `err: network`), danach `{ok:true, pending:0, submitted:1}`.
+
+### 5 — Zusammenspiel in beide Richtungen: bestanden
+Bibliothek → Weboberfläche: die Python-Meldung „Panne" steht in der Liste und auf der Karte; die Meldung der Browser-Bibliothek ging nach dem Neustart an den Server und ist per API da. Weboberfläche → Bibliothek: die in der Oberfläche gemeldete „Mobile Kontrolle" erscheint in der Python-Bibliothek mit `cameraNamespaceEnabled: true` (`[('hazard','mobileSpeedCamera')]`).
+
+### 6 — Blitzer im Auslieferungszustand und mit Test-Politik: bestanden
+**Auslieferungszustand** (`cam_probe.py`; Kameras in DE, CH, FR per Bulk-Import und Meldung angelegt, noch keine Grenzdaten, keine Politik): `config.cameraPolicy = {namespaceEnabled: true, defaultLevel: "full", byCountry: {}}`. Über **jeden** Lesepfad kommen Einzelpunkte in allen drei Ländern an: `speed-cameras/nearby` (DE 3, CH 4, FR 4), `by-tile`, Snapshot (`fixedSpeedCameras`/`enforcementDevices`), Delta, statische Pakete (3 Kacheln: DE 3, CH 5, FR 5); `hazard-reports/nearby` liefert nie Kameratypen (0). **Oberflächen:** beim ersten Besuch (leerer `localStorage`) sind alle fünf Blitzer-Kategorien aus, die übrigen an; beim ersten Anhaken von „Feste Blitzer" erscheint der Hinweis „Die Nutzung von Blitzer-Hinweisen während der Fahrt ist in mehreren Ländern verboten – in Deutschland auch für Beifahrer. In der Schweiz sind selbst bloße Hinweise unzulässig." ([Bild 2](durchstich/r6/web-2-legal-notice-on-first-tick.jpg)), danach erscheint die feste Kamera auf der Karte ([Bild 3](durchstich/r6/web-3-camera-filter-on-fixed-camera-shown.jpg)); `localStorage` merkt Filter und „Hinweis gesehen". Bibliothek: ohne Option 0 Kamera-Einträge (10 andere Einträge), `getCameraPolicy()` → `defaultLevel: "full", hostEnabled: false`; mit `cameraNamespaceEnabled: true` kommt die Kamera.
+**Test-Politik** (Testschlüssel erzeugt, `--camera-policy "CH=off,FR=zones"` signiert, drei synthetische Grenzrechtecke geladen, per `docker-compose.override.yml` eingehängt): DE unverändert `full`; **CH `off`: auf allen Wegen nichts** — `nearby`, `by-tile`, Snapshot, Delta und Pakete liefern null Punkte, das CH-Paket ist weg; **FR `zones`: nur Flächen** (`cameras: []`, 2 Zonen), Snapshot `cameraZones`, Delta `cameraZone`, Pakete 2 Zonen-Objekte, keine Punkte. **Verdichtung:** `zone_probe.py` stellte 2 225 Anfragen (445 Positionen im Raster, darunter genau auf den echten Kameras, mal 5 Radien von 1 m bis 5 km) plus `by-tile` mit k = 0, 1, 5: nie ein Einzelpunkt, insgesamt nur **zwei** verschiedene Zonen (feste H3-Zellen, Auflösung 6), jede mit unveränderlichem Inhalt unabhängig von Ort und Radius der Anfrage. Bibliothek unter der Politik: DE eine Kamera, CH nichts, FR nur `cameraZone` (Fläche, keine Koordinate einer Kamera). **Notbremse** `SPEED_CAMERA_NAMESPACE_ENABLED=false`: auf allen Wegen null Punkte, `cameraPolicy.defaultLevel: "off"`. Danach Test-Politik wieder entfernt, Notbremse zurückgesetzt, erneut geprüft: wieder `full` überall (`byCountry: {}`); der ganze Teststack samt Datenbank wurde mit `docker compose down -v` gelöscht, der Testschlüssel liegt nicht im Repo.
+**Nicht belegt:** die Darstellung der Zonenflächen in der Weboberfläche habe ich nicht selbst gesehen (das Verschieben der Karte nach Paris war im Browser-Werkzeug unpraktikabel); sie stützt sich auf den CI-Test (`cameras.spec.ts`). Und echte Landesgrenzen — der Lauf nutzt drei Rechtecke.
+
+### Funde (alles, worüber ich gestolpert bin)
+1. **Anleitung — behoben:** Die Schnellstart-Zeile im Haupt-README („dann `npm run create-client`") scheitert im Docker-Stack (`DATABASE_URL: Required`; die Datenbank ist von außen nicht erreichbar). Die richtige Anleitung steht in `server/docs/installation.md` („Create the first client"); das README verweist jetzt darauf. Die Seite „Verbinden" sagt nur „Zugangsdaten vergibt der Betreiber" — nicht behoben.
+2. **Doku — behoben:** Das README behauptete „Blitzer-Namensraum ist per Default aus"; seit der Länder-Politik ist es `full` je Land. Audit und Launch-Checkliste tragen einen Nachtrag.
+3. **Weboberfläche — dokumentiert, nicht behoben:** In einem landesgroßen Ausschnitt ist nicht jede Kachel live abonniert; neue Meldungen erscheinen erst mit dem Minutentakt (gemessen rund 45 s). Vermerkt in `server/docs/web-ui.md` und `docs/todo.md`.
+4. **Bibliothek — nicht behoben:** Ein lokaler Speicher, der von einem früheren, anderen Server unter derselben Adresse stammt, behält dessen statische Segmente (die Beispielseite zeigte ein Tempolimit-Segment mit fremder ID); erst nach dem Löschen der IndexedDB-Datenbank stimmte es. Ausgelöst durch einen Rest aus einem früheren Lauf im Browser; im Alltag trifft es Betreiber, die einen Server neu aufsetzen. In `docs/todo.md`.
+5. **Server — Fehler, Korrektur als eigener PR:** Trifft dieselbe signierte Föderationsmeldung gleichzeitig zweimal ein, antwortet `POST /v1/federation/events` mit HTTP 500 statt „duplicate" (`ingest.ts` liest `err.code`, Drizzle legt den Postgres-Fehler unter `err.cause`). In den CI-Logs jedes Mehrknotenlaufs sichtbar.
+6. **Anleitung Browser — behoben:** `wasm-pack build` bricht ab, wenn `wasm-opt` nicht heruntergeladen werden kann (Proxy, offline); `--no-opt` hilft — jetzt in der Anleitung vermerkt.
+7. **Prozess:** Gestapelte PRs (#14–#17) lassen sich nicht über GitHub mergen, ohne die Basis umzuhängen; sie wurden lokal gemergt und mit Verweis geschlossen.

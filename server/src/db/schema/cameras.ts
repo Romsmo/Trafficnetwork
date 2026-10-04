@@ -8,7 +8,7 @@ import { geometryColumn } from "./geometry.js";
  * expiry, removed only via accumulated distinct-reporter "gone" reports — same
  * lifecycle shape as static_signs, not hazard_reports. Gated from all reads by
  * SPEED_CAMERA_NAMESPACE_ENABLED (see modules/cameras/filter.ts); writes/ingestion
- * are never blocked by the flag (docs/prompt-phase1-server.md section 6).
+ * are never blocked by the flag (work order "phase1-server" (kept outside the repo) section 6).
  *
  * Add-on D generalises the table to every permanently installed enforcement device:
  * `camera_type` says which (red-light and distance devices as well as speed cameras).

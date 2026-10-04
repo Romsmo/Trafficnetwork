@@ -20,7 +20,7 @@
 //!
 //! This is a real server-side inconsistency (`server/docs/api.md` documents
 //! RFC 3339 throughout) worth fixing at the source, but this client-lib
-//! milestone doesn't touch server code (see `docs/status.md`'s B2 note) — so
+//! milestone doesn't touch server code (see the retired status log (git history)'s B2 note) — so
 //! until it is, every place that reads a server-emitted timestamp goes
 //! through this instead of `parse_from_rfc3339` directly, accepting either
 //! form.

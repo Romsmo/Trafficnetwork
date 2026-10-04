@@ -240,7 +240,7 @@ occur, because `cameraType` never crosses the federation boundary.
 6. **`tn-europe`.** The Europe node needs 0007 + 0008 for E-B anyway (0007 ≈ 5 min under lock, decided: measure on a copy first, then run it). 0009 adds milliseconds, so there is no reason to wait for this
    branch; whichever code is deployed then, the node can take 0009 later without a window. Confirm?
 7. **Ingestion.** The `type=enforcement` import (source-catalogue, section 3.1) may start writing `redLightCamera` / `distanceControl` with `cameraType` only once D2 runs on the target
-   server — an older server would file them as speed cameras (unknown field ignored). I will state this in `docs/status.md`. Until then: do not import them.
+   server — an older server would file them as speed cameras (unknown field ignored). I will state this in the retired status log (git history). Until then: do not import them.
 8. **Deferred on purpose:** section control (needs client-lib to decode unknown types first — a request to the client chat) and a "permanent" flag on user reports. OK to leave both out of this task?
 
 **Built with:** 1 stacked; 2 node-local (documented in `federation-protocol.md` §7, multi-node test reduced accordingly); 3 all

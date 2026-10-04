@@ -41,7 +41,7 @@ const deviceTokenBodySchema = z.object({
 /**
  * Not a full OAuth2 client_credentials implementation (no token endpoint auth
  * methods negotiation, no refresh tokens) — deliberately minimal for a
- * single-operator MVP, per docs/prompt-phase1-server.md section 2's tech-stack
+ * single-operator MVP, per work order "phase1-server" (kept outside the repo) section 2's tech-stack
  * guidance ("kein Overengineering für ein MVP").
  */
 export async function registerAuthRoutes(app: FastifyInstance) {

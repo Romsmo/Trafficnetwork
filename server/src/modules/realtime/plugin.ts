@@ -18,7 +18,7 @@ const clientMessageSchema = z.discriminatedUnion("type", [
 /**
  * Auth happens via the first message after connect, not a query-string token —
  * query strings end up in access logs and proxies, which a bearer credential
- * shouldn't (see docs/prompt-phase1-server.md section 5.5 / the plan's auth
+ * shouldn't (see work order "phase1-server" (kept outside the repo) section 5.5 / the plan's auth
  * section). Anything else sent before a successful "auth" message is ignored.
  * A connection that never authenticates within AUTH_TIMEOUT_MS is closed.
  */

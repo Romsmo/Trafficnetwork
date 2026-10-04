@@ -98,7 +98,7 @@ export async function registerHazardReportRoutes(app: FastifyInstance) {
 
     // fixedSpeedCamera is a valid input classification but is never stored as a
     // hazard_reports row — it's routed into fixed_speed_cameras instead (see
-    // modules/cameras/service.ts and docs/prompt-phase1-server.md section 6).
+    // modules/cameras/service.ts and work order "phase1-server" (kept outside the repo) section 6).
     // Also out of scope for device-content-signing/federation this milestone
     // (see modules/federation/device-event.ts) — deviceAssertion is ignored here.
     if (input.type === "fixedSpeedCamera") {

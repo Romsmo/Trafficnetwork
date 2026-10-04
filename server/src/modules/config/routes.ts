@@ -6,7 +6,7 @@ import { describePolicy } from "../cameras/policy/policy.js";
 /**
  * Curated subset of server env tunables a client-lib instance must mirror
  * locally (local expiry calc, tiling, camera-namespace isolation) so it can
- * never drift from the server's own rules (docs/prompt-phase2-client-lib.md
+ * never drift from the server's own rules (work order "phase2-client-lib" (kept outside the repo)
  * section 3.3). Ordinary auth like any other read — no dedicated scope.
  */
 export async function registerConfigRoutes(app: FastifyInstance) {

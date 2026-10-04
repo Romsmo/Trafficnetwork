@@ -52,7 +52,7 @@ getrandom = { version = "0.4", features = ["wasm_js"] }
 # synchronous file access only works inside a dedicated Worker, which would
 # force this binding's whole JS/TS surface into a worker+message-bridge
 # architecture — IndexedDB is the user-approved "gleichwertig" alternative
-# (client-lib/docs/status.md's B3 note), with none of that.
+# (the retired status log's B3 note), with none of that.
 rexie = "0.6"
 # `platform::Sleep`'s wasm32 implementation — a small, focused crate over
 # `Window.setTimeout`/`clearTimeout`, not hand-rolled callback/Promise glue.

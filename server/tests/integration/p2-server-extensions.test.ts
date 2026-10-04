@@ -10,7 +10,7 @@ import { authHeader, testToken } from "./auth-helper.js";
 
 /**
  * Integration coverage for the client-lib P2.0 server extensions
- * (docs/prompt-phase2-client-lib.md section 4): anonymous device
+ * (work order "phase2-client-lib" (kept outside the repo) section 4): anonymous device
  * registration, the partitioned static-data manifest/packages, and the
  * config-mirroring endpoint.
  */

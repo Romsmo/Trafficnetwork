@@ -80,7 +80,7 @@ are described in [`europe-feasibility.md`](europe-feasibility.md) §6; regenerat
 Geofabrik's change files from that sequence on (`https://download.geofabrik.de/europe-updates/…/NNN.osc.gz`, one per day), apply the same tag filter and import the
 created/modified ways. That needs replace-by-identity on the server (the bulk import is insert-only without dedup): either a per-row `sourceRef` (`way/123@2026-09-24`)
 or matching by the corrections feature's geometry key. A changed value for a geometry with an effective community correction must be flagged for review by the server,
-never silently overwritten (`docs/prompt-addon-speed-limit-corrections.md`). This tool stays insert-only.
+never silently overwritten (`work order "addon-speed-limit-corrections" (kept outside the repo)`). This tool stays insert-only.
 
 ## Attribution (ODbL)
 

@@ -46,7 +46,7 @@ describe("community speed-limit corrections (K-A)", () => {
     JWT_SECRET: "a".repeat(32),
     LOG_LEVEL: "silent",
     // This suite's test builder calls the correction endpoints as web callers (`sub: web:…`), which now also
-    // count against the web-UI write limits (docs/status.md, "Kopplung mit K-A") — raise them here so the
+    // count against the web-UI write limits (the retired status log (git history), "Kopplung mit K-A") — raise them here so the
     // many calls in this file don't trip WEB_REPORT_LIMIT_PER_IP_PER_HOUR (default 10) and come back 429.
     WEB_REPORT_LIMIT_PER_SESSION: "100000",
     WEB_REPORT_LIMIT_PER_IP_PER_HOUR: "100000",

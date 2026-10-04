@@ -9,7 +9,7 @@
 //! inside a dedicated Worker — adopting it would force this binding's whole
 //! JS/TS surface into a worker-plus-message-bridge architecture just to get
 //! a storage backend. IndexedDB is the user-approved "gleichwertig"
-//! alternative (see `docs/status.md`'s B3 note): real persistence across
+//! alternative (see the retired status log (git history)'s B3 note): real persistence across
 //! reloads, no worker requirement, at the cost of `InMemoryStore`'s spatial
 //! lookups (a linear scan with a bounding-box pre-filter, same as it already
 //! is natively) rather than `SqliteStore`'s R*Tree.

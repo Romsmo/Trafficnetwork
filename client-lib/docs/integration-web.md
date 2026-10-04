@@ -17,6 +17,8 @@ is described at the end).
 # 1. Build the WebAssembly package (writes client-lib/bindings/wasm/pkg/).
 cd client-lib/bindings/wasm
 wasm-pack build --target web --out-dir pkg
+# (If it stops with "failed to download … binaryen" — a proxy or no network for the wasm-opt step —
+#  add --no-opt: the package works, it is only not size-optimised.)
 
 # 2. Serve client-lib/bindings/ — the example imports ../js/index.js, which
 #    imports ../pkg/ and ../../shared/, so all three must be reachable.

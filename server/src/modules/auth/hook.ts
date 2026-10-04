@@ -63,7 +63,7 @@ const PUBLIC_PATHS = new Set([
 ]);
 
 /**
- * Registered once, globally, in app.ts — per docs/prompt-phase1-server.md section 7
+ * Registered once, globally, in app.ts — per work order "phase1-server" (kept outside the repo) section 7
  * ("kein Sonderzugang am Auth-System vorbei") every /v1/* route requires a valid
  * client credential except the paths in PUBLIC_PATHS above. Scope checks are a
  * separate, per-route concern (see requireScope below) since which scope is

@@ -2,7 +2,7 @@ import { gridDisk, latLngToCell } from "h3-js";
 import type { Env } from "../config/env.js";
 
 /**
- * regionTile computation, docs/prompt-phase1-server.md section 2.1: H3 resolution 7
+ * regionTile computation, work order "phase1-server" (kept outside the repo) section 2.1: H3 resolution 7
  * (~5.16 km² avg cell area), chosen for near-uniform global cell size and clean
  * k-ring neighbor semantics. Computed in application code (h3-js), not a Postgres
  * extension — see the plan's "kein Postgres-H3-Extension" decision.

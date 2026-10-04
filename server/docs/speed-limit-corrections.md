@@ -1,6 +1,6 @@
 # Community speed-limit corrections (add-on K-A, server part)
 
-Scope: `docs/prompt-addon-speed-limit-corrections.md`, part A. Users can report
+Scope: `work order "addon-speed-limit-corrections" (kept outside the repo)`, part A. Users can report
 a wrong speed limit and propose the right value; once enough independent
 devices agree, the proposal overrides the imported value **as an overlay** —
 the imported row is never touched. This document is the design plan the prompt

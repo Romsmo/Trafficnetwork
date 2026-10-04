@@ -24,7 +24,7 @@ use crate::crypto::SignedEnvelope;
 /// bootstrap that fails before reaching `set_cursor` retries forever
 /// instead of ever advancing to an incremental delta). A real server-side
 /// inconsistency worth fixing at the source, but this milestone makes no
-/// server changes (`docs/status.md`'s B2 note) — so every sequence-shaped
+/// server changes (the retired status log (git history)'s B2 note) — so every sequence-shaped
 /// field here accepts either form instead.
 fn deserialize_sequence<'de, D>(deserializer: D) -> Result<u64, D::Error>
 where

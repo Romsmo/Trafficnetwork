@@ -2,7 +2,7 @@ import type { FastifyInstance } from "fastify";
 import { sql } from "drizzle-orm";
 
 /**
- * No auth required (see docs/prompt-phase1-server.md section 7 "Querschnitt" —
+ * No auth required (see work order "phase1-server" (kept outside the repo) section 7 "Querschnitt" —
  * this is infrastructure, not one of the versioned /v1 API resources). Checks the
  * database is reachable so a broken DB shows up as a failed liveness probe rather
  * than opaque 500s on every other route.

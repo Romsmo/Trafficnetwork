@@ -4,7 +4,7 @@ import { CLOSED_GATE, type CameraGate } from "../cameras/policy/events.js";
 /**
  * In-process only — Map<tile, Set<connection>> plus a set of every connection for
  * global (regionTile-less) events. Consistent with the Phase-1 single-instance
- * scope for WebSocket (docs/prompt-phase1-server.md section 2.2 decision):
+ * scope for WebSocket (work order "phase1-server" (kept outside the repo) section 2.2 decision):
  * horizontal scaling would need this registry backed by something shared across
  * instances (Postgres LISTEN/NOTIFY or a pub/sub layer), which is explicitly out
  * of scope here.

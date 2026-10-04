@@ -10,7 +10,7 @@ import { z } from "zod";
  *  - the value stored as `signType`: the country prefix plus the official code, verbatim (`NO:362.50`) — the same
  *    "country-prefixed catalog reference" the OSM import stores (server/docs/schema.md), so both sources speak one schema;
  *  - whether a sign of that series is imported at all (an information or wayfinding sign is not a hazard or regulation);
- *  - a code that matches no known series is NOT dropped: it is passed through unchanged (docs/prompt-addon-source-catalogue.md §3.3).
+ *  - a code that matches no known series is NOT dropped: it is passed through unchanged (work order "addon-source-catalogue" (kept outside the repo) §3.3).
  */
 const seriesSchema = z.object({
   name: z.string().min(1),

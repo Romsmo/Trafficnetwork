@@ -2,7 +2,7 @@ import { h } from "./dom.js";
 import { currentTranslator } from "./i18n.js";
 
 /**
- * The small "N online" display at the bottom right of every page (add-on O-B, docs/prompt-addon-online-counter.md).
+ * The small "N online" display at the bottom right of every page (add-on O-B, work order "addon-online-counter" (kept outside the repo)).
  * It reads the public, unauthenticated GET /v1/stats/online. Numbers only: nothing about a person is ever shown or sent.
  *
  * The contract is the server's (docs/api.md, "GET /v1/stats/online", add-on O-A). The page was first written against the shape

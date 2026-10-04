@@ -47,7 +47,7 @@ const envSchema = z
 
     LOG_LEVEL: z.enum(["fatal", "error", "warn", "info", "debug", "trace", "silent"]).default("info"),
 
-    // Only OSM is on by default (docs/prompt-phase3-ingestion.md section 1:
+    // Only OSM is on by default (work order "phase3-ingestion" (kept outside the repo) section 1:
     // "Standardmäßig sind diese Quellen aus; nur OSM ist standardmäßig an").
     OSM_ENABLED: z.enum(["true", "false"]).default("true").transform((v) => v === "true"),
     HERE_ENABLED: z.enum(["true", "false"]).default("false").transform((v) => v === "true"),

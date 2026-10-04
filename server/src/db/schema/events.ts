@@ -2,7 +2,7 @@ import { bigserial, index, jsonb, pgTable, text, timestamp, uuid, varchar } from
 import { entityTypeEnum, eventTypeEnum, moderationStatusEnum } from "./enums.js";
 
 /**
- * Append-only event log, docs/concept.md section 5.1 / docs/prompt-phase1-server.md
+ * Append-only event log, docs/concept.md section 5.1 / work order "phase1-server" (kept outside the repo)
  * section 5.1. Never updated or deleted except by the scheduled retention-cleanup
  * job (see modules/expiry). payload holds the full current representation of the
  * entity (not a diff), so a client replaying deltas never has to fetch the entity

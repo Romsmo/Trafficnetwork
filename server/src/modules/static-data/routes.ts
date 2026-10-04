@@ -127,7 +127,7 @@ export async function registerStaticDataRoutes(app: FastifyInstance) {
   });
 
   // Partitioned static-data delivery (client-lib P2.0) — see
-  // docs/prompt-phase2-client-lib.md section 4 / docs/api.md "Static data
+  // work order "phase2-client-lib" (kept outside the repo) section 4 / docs/api.md "Static data
   // packages". Complements, doesn't replace, /v1/snapshot.
   app.get("/v1/static-data/manifest", async (req, reply) => {
     const query = req.query as Record<string, unknown>;

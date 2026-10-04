@@ -1,6 +1,6 @@
 # Threat Model: Self-Hosting & Federation
 
-Scope: the server rework in `docs/prompt-rework-server-federation.md` — open
+Scope: the server rework in `work order "rework-server-federation" (kept outside the repo)` — open
 membership, signature-based trust, self-hosting. This is the full version of
 the summary presented for approval before F-S1 began; see that plan/report
 for the research citations behind the design choices referenced here. Not

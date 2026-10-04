@@ -33,7 +33,7 @@ function packageTilesOf(camera: DeviceRecord, env: Env): string[] {
 }
 
 /**
- * docs/prompt-phase1-server.md section 6: this write path runs regardless of the camera policy — the policy only ever
+ * work order "phase1-server" (kept outside the repo) section 6: this write path runs regardless of the camera policy — the policy only ever
  * gates reads (see modules/cameras/policy/ and modules/cameras/routes.ts). What differs with the policy is what the
  * *answer* tells the reporter (modules/cameras/policy/delivery.ts, answerForWrite). Only coordinate
  * plausibility is checked here (no speedKmh concept for a fixed camera); the

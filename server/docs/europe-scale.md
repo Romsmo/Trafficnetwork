@@ -1,6 +1,6 @@
 # Europe-scale storage and delivery (add-on E-B, server part)
 
-Scope: `docs/prompt-addon-europe-basemap.md`, part B. The operator decided that
+Scope: `work order "addon-europe-basemap" (kept outside the repo)`, part B. The operator decided that
 the base data covers **all of Europe**, imported once, and that "static data
 completely on every device" stays the concept until measurements say otherwise.
 Part B is: make storage and delivery on the server carry that, measure instead of
@@ -310,7 +310,7 @@ A node that predates this branch (the Europe node was set up from `main`) needs 
 0007 is the rewrite of the segment table (K-A): **373.6 s on the copy of the real 12.08 M-row database, with the table locked**.
 Operator's decision (2026-09-25): measure on a copy first (done: a physical copy of the data volume — `docker run --rm --entrypoint cp
 -v <node volume>:/from:ro -v <copy>:/to <postgres image> -a /from/. /to/` while the node is stopped — 96 s for 5.9 GB), then run the migration
-on the node itself — about 6 minutes are harmless while it has no users; **not yet done**, see `docs/status.md`. The `keycolumn` phase
+on the node itself — about 6 minutes are harmless while it has no users; **not yet done**, see the retired status log (git history). The `keycolumn` phase
 (`npm run measure-scale -- --phase keycolumn --probe-rows 1000000`) compares the rewrite with an online backfill on scratch tables built
 from a sample; it never writes to the real tables but generates WAL and I/O: a copy only.
 

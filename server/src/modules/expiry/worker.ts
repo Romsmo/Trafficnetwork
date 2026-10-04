@@ -21,7 +21,7 @@ interface ExpiredRow extends Record<string, unknown> {
 /**
  * One sweep: finds every hazard_reports row whose expiresAt has passed while still
  * `active`, flips it to `expired`, and appends a ReportExpired event for each — all
- * in one transaction, per docs/prompt-phase1-server.md section 7 ("Hintergrund-Job
+ * in one transaction, per work order "phase1-server" (kept outside the repo) section 7 ("Hintergrund-Job
  * für Verfall/Expiry"). FOR UPDATE SKIP LOCKED is cheap insurance against a second
  * worker instance double-processing the same row; Phase 1 only ever runs one, but
  * this makes the query safe to run concurrently without extra coordination if that

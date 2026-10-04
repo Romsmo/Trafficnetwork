@@ -18,7 +18,7 @@ export async function registerNetworkRoutes(app: FastifyInstance) {
 
   /**
    * F-S4: the reputation-scored, network-wide directory promised since F-S2
-   * (docs/status.md's coordination note). Always registered, unlike the
+   * (the retired status log (git history)'s coordination note). Always registered, unlike the
    * /v1/federation/* endpoints — a non-federating server (the default) just
    * has an empty `peers` array, since nothing can ever join it (those
    * endpoints don't exist at all when FEDERATION_ENABLED=false), which is

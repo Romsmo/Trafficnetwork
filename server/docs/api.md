@@ -1009,7 +1009,7 @@ before this milestone.
 The **camera emergency brake is AND-gated, never OR-gated**: a signed config's
 `blitzerEnabled: false` turns every country off even where the node's own flag is on, and
 `blitzerEnabled: true` can never turn on a server's own locally-disabled flag. The network can
-restrict, never grant — per `docs/prompt-rework-server-federation.md`'s binding decision "ein lokales
+restrict, never grant — per `work order "rework-server-federation" (kept outside the repo)`'s binding decision "ein lokales
 Env-Flag darf die Netzwerkvorgabe nicht aufheben." **Which country may deliver what** is the optional field
 `cameraPolicyByCountry: { "CH": "off", "FR": "zones" }` of the same signed document — the **exceptions** to "cameras are delivered in full"
 (ISO 3166-1 alpha-2, upper case; `off` | `zones` | `full`; a country that is not listed — and an absent field — is `full`). The signed file is re-read while the

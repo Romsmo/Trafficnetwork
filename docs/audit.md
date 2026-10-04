@@ -2,6 +2,8 @@
 
 Stand: 2026-09-27. Geprüft auf `main` @ `176a80d` (nach dem Merge von PR #1–#10 und drei eigenen Fix-Commits, siehe unten). Durchgeführt von der Abschluss-Instanz in einem frischen, eigenen Klon (`TrafficNetwork-audit`), unabhängig vom geteilten Checkout der Arbeits-Instanzen. Alles hier ist selbst ausgeführt und beobachtet, nicht aus den Lageberichten übernommen — wo ich mich auf CI statt auf einen lokalen Lauf stütze, steht das dabei.
 
+> **Nachtrag (R6):** Dateien, auf die dieser Bericht verweist und die es im Repo nicht mehr gibt, sind erhalten: die Arbeitsaufträge (`docs/prompt-*.md`) liegen in `../Trafficnetwork-prompts/docs/` neben dem Repo, `docs/status.md` (das Koordinationsprotokoll der Instanzen) in der Git-Historie (`git show 4fb66ba:docs/status.md` zeigt den Stand nach R1; die letzte Fassung liegt im Commit vor dem Entfernen). Ebenso gilt die Aussage „Blitzer-Namensraum standardmäßig aus" (Abschnitt 5) nur für den Stand von R1: seit dem Zusatzauftrag „Blitzer nach Land" ist der Standard `full` je Land, die Oberflächen blenden Blitzer beim ersten Besuch aus — siehe `docs/final-report.md`.
+
 **Kurzfassung:** Der Code ist in gutem Zustand — alle drei Pakete bauen, typchecken, linten und testen grün (lokal *und* in CI), ein echter Durchstich vom Client bis zur Weboberfläche funktioniert, keine echten Geheimnisse im Repo oder in der Historie, keine Lizenzkonflikte, alle geprüften Konzeptzusagen halten. Zwei reale Bugs sind beim Mergen aufgetaucht und behoben (unten dokumentiert). Die im Auftrag genannten Blocker (Recht, Domain-Betrieb, Wurzelschlüssel) sind weiterhin offen — das ist erwartet und wird in Abschnitt 7 nur bestätigt, nicht bearbeitet.
 
 ---

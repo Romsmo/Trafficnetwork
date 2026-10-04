@@ -67,7 +67,7 @@ async function getEarliestRetainedSequence(db: Queryable): Promise<number | null
 /**
  * Thrown when `since` predates what the retention window still has on record —
  * the caller (modules/sync/routes.ts) turns this into HTTP 409 SNAPSHOT_REQUIRED,
- * per docs/prompt-phase1-server.md section 5.1 ("Ein Gerät, das deutlich länger
+ * per work order "phase1-server" (kept outside the repo) section 5.1 ("Ein Gerät, das deutlich länger
  * offline war, fordert einen frischen Snapshot an").
  */
 export class SnapshotRequiredError extends Error {

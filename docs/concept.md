@@ -192,7 +192,7 @@ Gleiche Anforderungen wie zuvor besprochen, aber entschärft: Der Server muss ni
   confirmReport(reportId, stillThere: bool)
   getSyncStatus() -> { lastSyncedAt, pendingWrites, subscribedTiles[] }
   ```
-- **Portabilität** (**entschieden**): plattformunabhängiger Kern mit dünnen Bindings — Android, iOS/macOS, Flutter, React Native, Desktop/Server (C-ABI, Python, Node.js) und Web-Browser (WASM). Die Bibliothek ist ein Adapter, den beliebige Apps einbinden. Kernsprache/Toolchain und Speicher-Backend (SpatiaLite nur, wenn auf allen Zielen praktikabel) entscheidet Claude Code mit Begründung (siehe `docs/prompt-phase2-client-lib.md`).
+- **Portabilität** (**entschieden**): plattformunabhängiger Kern mit dünnen Bindings — Android, iOS/macOS, Flutter, React Native, Desktop/Server (C-ABI, Python, Node.js) und Web-Browser (WASM). Die Bibliothek ist ein Adapter, den beliebige Apps einbinden. Kernsprache/Toolchain und Speicher-Backend (SpatiaLite nur, wenn auf allen Zielen praktikabel) entscheidet Claude Code mit Begründung (siehe `work order "phase2-client-lib" (kept outside the repo)`).
 - **Geräte-Identität** (**entschieden**): anonyme Geräteregistrierung — eine App authentifiziert sich mit einem App-Schlüssel und erhält pro Gerät ein pseudonymes Credential, damit Rate-Limit, Duplikat-Erkennung und Reputation pro Gerät greifen.
 - **Statische Daten in Paketen** (**entschieden**): statt eines einzigen Voll-Snapshots werden statische Daten partitioniert und versioniert ausgeliefert (Manifest + Pakete), damit Geräte Änderungen — auch aus Bulk-Importen — erkennen und nur geänderte Teile laden.
 
@@ -282,8 +282,8 @@ Der übrige Aufbau bleibt gegenüber der Vorfassung unverändert:
 
 | # | Inhalt |
 |---|---|
-| F-S0–F-S5 | Server: Docker + klassische Installation, Identitäten & Signaturen, Föderation, Reputation, Verzeichnis, Mehrknoten-Tests (`docs/prompt-rework-server-federation.md`) |
-| F-C0–F-C5 | Client-Bibliothek: Signaturprüfung, gerätesignierte Identität, Discovery, Mehrserver-Transport, Failover (`docs/prompt-rework-client-lib-federation.md`) |
+| F-S0–F-S5 | Server: Docker + klassische Installation, Identitäten & Signaturen, Föderation, Reputation, Verzeichnis, Mehrknoten-Tests (`work order "rework-server-federation" (kept outside the repo)`) |
+| F-C0–F-C5 | Client-Bibliothek: Signaturprüfung, gerätesignierte Identität, Discovery, Mehrserver-Transport, Failover (`work order "rework-client-lib-federation" (kept outside the repo)`) |
 
 ### Phase 3 — Ingestion-Programm (Grundstock-Befüllung), startet erst nach Phase 2
 
@@ -327,4 +327,4 @@ Konsequenzen:
 - Replikationsmodell für dynamische Daten entscheidet Claude Code mit Begründung.
 - Jeder Betreiber ist datenschutzrechtlich selbst verantwortlich → Betreiberbedingungen + erweiterte `docs/privacy.md`.
 
-Vollständiges Konzept inkl. Vergleich der Domain-/Discovery-Optionen: `docs/federation.md`. Umsetzung: `docs/prompt-rework-server-federation.md` (zuerst), danach `docs/prompt-rework-client-lib-federation.md`.
+Vollständiges Konzept inkl. Vergleich der Domain-/Discovery-Optionen: `docs/federation.md`. Umsetzung: `work order "rework-server-federation" (kept outside the repo)` (zuerst), danach `work order "rework-client-lib-federation" (kept outside the repo)`.

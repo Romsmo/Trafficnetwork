@@ -6,7 +6,7 @@ import type { SectionReport } from "../pipeline/nvdb/worker.js";
 import { StateStore } from "../state/store.js";
 
 /**
- * The per-source quality report (docs/prompt-addon-source-catalogue.md §3.4): for every source that ran, what was taken over,
+ * The per-source quality report (work order "addon-source-catalogue" (kept outside the repo) §3.4): for every source that ran, what was taken over,
  * what was discarded and why, what was merged into another source's record. It is built only from what the importers recorded in
  * STATE_DIR while they ran — nothing is recomputed or guessed here — so it can be produced at any time, also long after a run.
  *

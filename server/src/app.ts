@@ -168,7 +168,7 @@ export async function buildApp(deps: AppDependencies): Promise<FastifyInstance> 
   // Only registered when federating (F-S3) — an isolated server (the
   // default) has no join/heartbeat/push/pull endpoints at all, exactly like
   // before this milestone, rather than exposing them but rejecting every
-  // call. See docs/status.md's migration-path note.
+  // call. See the retired status log (git history)'s migration-path note.
   if (deps.env.FEDERATION_ENABLED) {
     await registerFederationRoutes(app);
   }

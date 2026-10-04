@@ -1,6 +1,6 @@
 # Konzept: Self-Hosting & Föderation (offenes Server-Netzwerk)
 
-> **Status:** Entschieden (Grundsatz), Umsetzung über `docs/prompt-rework-server-federation.md` und `docs/prompt-rework-client-lib-federation.md`. Ergänzt `docs/concept.md` (Abschnitt 13). Bei Widerspruch gilt dieses Dokument für alle Fragen zu Betrieb, Verteilung und Erreichbarkeit.
+> **Status:** Entschieden (Grundsatz), Umsetzung über `work order "rework-server-federation" (kept outside the repo)` und `work order "rework-client-lib-federation" (kept outside the repo)`. Ergänzt `docs/concept.md` (Abschnitt 13). Bei Widerspruch gilt dieses Dokument für alle Fragen zu Betrieb, Verteilung und Erreichbarkeit.
 
 ---
 

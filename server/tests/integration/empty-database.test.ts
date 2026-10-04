@@ -6,7 +6,7 @@ import { startTestDatabase, type TestDatabase } from "./setup.js";
 import { authHeader, testToken } from "./auth-helper.js";
 
 /**
- * docs/prompt-phase1-server.md section "ROLLE & ARBEITSWEISE" point 6 and
+ * work order "phase1-server" (kept outside the repo) section "ROLLE & ARBEITSWEISE" point 6 and
  * docs/concept.md section 7: a freshly set-up server with an empty database is a
  * valid, functioning state — it must not 500, it just has no data yet. Every read
  * endpoint added in a milestone gets a line here (per the plan's P1.5 task list).

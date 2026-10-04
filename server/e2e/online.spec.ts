@@ -4,7 +4,7 @@ import { openMap, watchTraffic } from "./helpers.js";
 import { instanceUrl } from "./instances.js";
 
 /**
- * The "N online" display (add-on O-B, docs/prompt-addon-online-counter.md). Two groups: tests that answer GET /v1/stats/online
+ * The "N online" display (add-on O-B, work order "addon-online-counter" (kept outside the repo)). Two groups: tests that answer GET /v1/stats/online
  * with a MOCK of the documented contract (they run everywhere and pin down every state), and tests against the node's REAL
  * endpoint (they run only where the online-counter add-on O-A is merged and are skipped otherwise).
  */

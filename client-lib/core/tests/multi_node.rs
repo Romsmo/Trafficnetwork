@@ -42,7 +42,7 @@
 //! replicates (`sync::types`'s `deserialize_sequence`/`deserialize_sequence_opt`
 //! now tolerate both forms). Both are real server-side inconsistencies worth
 //! fixing at the source, but this milestone makes no server changes
-//! (`docs/status.md`'s B2 note).
+//! (the retired status log (git history)'s B2 note).
 
 // Native-only by nature (real HTTP against a harness on localhost, a tokio
 // runtime, `Platform::native`): `wasm-pack test` builds every integration

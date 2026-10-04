@@ -7,7 +7,7 @@ import { customType } from "drizzle-orm/pg-core";
  * package.json its getSQLType() ignores that config entirely and always emits the
  * bare, unqualified `geometry(point)` SQL type — silently dropping the SRID. Since
  * every spatial query here compares stored geometry against `ST_MakePoint(lng, lat)`
- * wrapped in SRID 4326 (see docs/prompt-phase1-server.md section 4 — SRID 4326 is
+ * wrapped in SRID 4326 (see work order "phase1-server" (kept outside the repo) section 4 — SRID 4326 is
  * implied by lat/lng input), an unqualified column would make Postgres reject those
  * comparisons as mixed-SRID operations. This custom type always emits an explicit,
  * correct `geometry(<subtype>,<srid>)` column type instead.

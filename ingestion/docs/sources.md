@@ -1,6 +1,6 @@
 # Source catalog
 
-Evidence gathered during Phase 3 planning (P3.0), 2026-09-19, unless noted otherwise. Every license/pricing claim below is linked; where a number couldn't be confirmed from a primary, current source, that's stated explicitly rather than guessed (`docs/prompt-phase3-ingestion.md` section 0.4: "nichts erfinden").
+Evidence gathered during Phase 3 planning (P3.0), 2026-09-19, unless noted otherwise. Every license/pricing claim below is linked; where a number couldn't be confirmed from a primary, current source, that's stated explicitly rather than guessed (`work order "phase3-ingestion" (kept outside the repo)` section 0.4: "nichts erfinden").
 
 ## OpenStreetMap — implemented (P3.2), on by default
 
@@ -21,7 +21,7 @@ Evidence gathered during Phase 3 planning (P3.0), 2026-09-19, unless noted other
 
 ## Add-on Q (source catalog: speed cameras, traffic signs, roadworks) — Q0, 2026-09-26
 
-Research for `docs/prompt-addon-source-catalogue.md`. Legal frame per that prompt (§0): a source is added only if its
+Research for `work order "addon-source-catalogue" (kept outside the repo)`. Legal frame per that prompt (§0): a source is added only if its
 terms *explicitly* permit redistribution (never assumed from "the data looks free"); §87a UrhG / EU database-directive
 sui-generis protection applies even to individually-unprotected data points once a substantial part of a maintained
 database is taken. Traffic-light column (Ampel): **frei** (redistribution explicitly permitted, cited) / **auflagen**
