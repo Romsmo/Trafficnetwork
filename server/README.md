@@ -40,7 +40,7 @@ Startet Server + PostgreSQL/PostGIS in einem Stack, Migrationen laufen automatis
 
 Siehe [`.env.example`](.env.example) — alle Werte sind dokumentiert und haben sinnvolle Defaults, insbesondere:
 
-- `SPEED_CAMERA_NAMESPACE_ENABLED` — globaler Kill-Switch für den Blitzer-Namensraum, **muss** `false` bleiben, bis der Betreiber nach rechtlicher Prüfung (§23 Abs. 1b StVO, siehe `docs/concept.md` Abschnitt 8) grünes Licht gibt.
+- `SPEED_CAMERA_NAMESPACE_ENABLED` — Notbremse für den Blitzer-Namensraum, Standard `true`: Blitzer werden in jedem Land vollständig (`full`) ausgeliefert. `false` = dieser Knoten liefert gar keine Blitzer-Daten (Schreiben bleibt möglich), unabhängig von der Länderpolitik. **Einzelne Länder einschränken** (`zones` = nur grobe Bereiche, `off` = nichts) trägt der Betreiber als Ausnahmen in die signierte Netzwerk-Konfiguration ein (`cameraPolicyByCountry`, siehe `docs/camera-country-policy.md` und `docs/operating.md`, "Camera policy") — **die rechtliche Bewertung ist Sache des Betreibers** (bekannte Sonderfälle: Schweiz, Frankreich; Deutschland: Nutzung während der Fahrt verboten, siehe `docs/concept.md` Abschnitt 8). `CAMERA_POLICY_LOCAL_CAPS` / `CAMERA_POLICY_BORDER_MARGIN_M` / `CAMERA_ZONE_H3_RESOLUTION` / `CAMERA_POLICY_RELOAD_SECONDS` stellen einen Knoten nur strenger, nie großzügiger.
 - `EVENT_LOG_RETENTION_DAYS_DYNAMIC` / `_STATIC` — Aufbewahrungsfenster für das Ereignisprotokoll, durchgesetzt vom stündlichen Cleanup-Job (`modules/expiry/retention.ts`).
 - Moderationsgate-Parameter (`REPORT_RATE_LIMIT_*`, `DUPLICATE_MERGE_RADIUS_METERS`, `SPEED_KMH_*`, `CAMERA_REMOVAL_THRESHOLD`).
 - `JWT_SECRET` / `JWT_TTL_SECONDS` — Signierschlüssel und Gültigkeitsdauer für Client-Tokens.
@@ -62,10 +62,10 @@ npm run network:generate-root-key -- --out ./network-root-key.json
 # Datei SOFORT an einen sicheren Offline-Ort verschieben, dann von diesem Rechner löschen.
 
 npm run network:sign-config -- --root-key ./network-root-key.json --out ./network-config.json \
-  --blitzer-enabled false --retention-dynamic-days 3 --retention-static-days 30
+  --blitzer-enabled true --retention-dynamic-days 3 --retention-static-days 30
 ```
 
-Die signierte `network-config.json` wird verteilt; jeder Server, der sie einbinden soll, bekommt `NETWORK_CONFIG_PATH` (Pfad zur Datei) und `NETWORK_ROOT_PUBLIC_KEY` (der öffentliche Wurzelschlüssel, von `network:generate-root-key` ausgegeben) gesetzt. Der Server verweigert den Start, wenn die Datei fehlt, unlesbar ist oder nicht gegen den konfigurierten Schlüssel verifiziert — nie ein unauthentifiziertes Konfigurationsdokument stillschweigend übernehmen. Das Blitzer-Flag ist **UND-verknüpft**: die Netzwerk-Konfiguration kann ein lokal aktiviertes Flag abschalten, aber nie ein lokal deaktiviertes einschalten (siehe `docs/api.md`).
+Die signierte `network-config.json` wird verteilt; jeder Server, der sie einbinden soll, bekommt `NETWORK_CONFIG_PATH` (Pfad zur Datei) und `NETWORK_ROOT_PUBLIC_KEY` (der öffentliche Wurzelschlüssel, von `network:generate-root-key` ausgegeben) gesetzt. Der Server verweigert den Start, wenn die Datei fehlt, unlesbar ist oder nicht gegen den konfigurierten Schlüssel verifiziert — nie ein unauthentifiziertes Konfigurationsdokument stillschweigend übernehmen. Das Blitzer-Flag ist **UND-verknüpft** (Notbremse): die Netzwerk-Konfiguration kann ein lokal aktiviertes Flag abschalten, aber nie ein lokal deaktiviertes einschalten (siehe `docs/api.md`). Einschränkungen pro Land stehen im selben signierten Dokument als `cameraPolicyByCountry` — die **Ausnahmen** vom Standard „alles `full`“ (`npm run network:sign-config -- ... --camera-policy "CH=off,FR=zones"`, **die rechtliche Bewertung ist Sache des Betreibers**; ohne Angabe ist jedes Land `full`). Die Datei wird im laufenden Betrieb neu gelesen — Änderungen und Rücknahmen brauchen keinen Neustart. Länder-Grenzdaten bringt der Betreiber selbst mit: `npm run cameras -- load-boundaries <countries.geojson>` (siehe `docs/operating.md`).
 
 ## Föderation: Beitritt, Peers, Replikation (F-S3)
 
@@ -111,7 +111,7 @@ Statische Daten werden nicht mehr pro Anfrage berechnet, sondern als **vorab erz
 
 ## Dauerhafte Überwachungsanlagen: Rotlicht und Abstand (Zusatz D)
 
-Die Tabelle `fixed_speed_cameras` (Name bleibt) hält jetzt **jede fest installierte Anlage**: die Spalte `camera_type` sagt, ob es ein Blitzer (`fixedSpeedCamera`), eine Rotlichtanlage (`redLightCamera`) oder eine Abstandskontrolle (`distanceControl`) ist. Solche Anlagen verfallen nie und verschwinden nur durch Entfernen-Meldungen; mobile Anlagen und — standardmäßig — Nutzermeldungen von Rotlicht/Abstand bleiben **verfallende** Meldungen. Alles ist hinter `SPEED_CAMERA_NAMESPACE_ENABLED` wie bisher (Flag aus: nichts wird ausgeliefert, Schreiben und Import gehen weiter).
+Die Tabelle `fixed_speed_cameras` (Name bleibt) hält jetzt **jede fest installierte Anlage**: die Spalte `camera_type` sagt, ob es ein Blitzer (`fixedSpeedCamera`), eine Rotlichtanlage (`redLightCamera`) oder eine Abstandskontrolle (`distanceControl`) ist. Solche Anlagen verfallen nie und verschwinden nur durch Entfernen-Meldungen; mobile Anlagen und — standardmäßig — Nutzermeldungen von Rotlicht/Abstand bleiben **verfallende** Meldungen. Alles ist hinter derselben Länder-Politik wie die Blitzer (Land nicht freigegeben: nichts wird ausgeliefert, Schreiben und Import gehen weiter).
 
 - Additiv für bestehende Clients: neues Feld `cameraType`, neues Snapshot-Feld `enforcementDevices` (alle Anlagen; `fixedSpeedCameras` bedeutet weiter nur Blitzer), optionaler Paket-Schlüssel `enforcementDevices` (nur in Kacheln mit Anlage), neuer Ereignis-Entitätstyp `enforcementDevice`, `persistentCameraTypes` in `/v1/config`, optionales `cameraType` im Bulk-Import — siehe [`docs/api.md`](docs/api.md) ("Persistent enforcement devices").
 - Migration 0009 ist nur ein Katalogeintrag (5 ms bei 1 Mio. Zeilen, kein Wartungsfenster), mit Rückroll-Skript und Test gegen einen Altbestand: [`docs/operating.md`](docs/operating.md). Entwurf und Begründungen: [`docs/persistent-enforcement-devices.md`](docs/persistent-enforcement-devices.md).

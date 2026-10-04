@@ -212,53 +212,6 @@ describe("migration 0009 on a database with legacy data", () => {
     expect((await applied()).n).toBe(before.migrations.n + 1);
   });
 
-  it("answers the old reads with what they answered before, plus the additive fields", async () => {
-    resetEnvCache();
-    const env = loadEnv({
-      DATABASE_URL: container.getConnectionUri(),
-      JWT_SECRET: "a".repeat(32),
-      LOG_LEVEL: "silent",
-      SPEED_CAMERA_NAMESPACE_ENABLED: "true",
-      STATIC_PACKAGES_DIR: mkdtempSync(path.join(tmpdir(), "migration-packages-")),
-    });
-    dirs.push(env.STATIC_PACKAGES_DIR);
-    const app = await buildApp({ env, db });
-    try {
-      const headers = authHeader(await testToken(env));
-      const active = before.cameras.filter((c) => c["status"] === "active");
-
-      const nearby = (await app.inject({ method: "GET", url: "/v1/speed-cameras/nearby?lat=52.52&lng=13.405&radiusM=2000", headers })).json().cameras as Json[];
-      // Berlin's speed camera is the only persistent device there; the expiring reports keep their own types.
-      expect(nearby.filter((c) => c["cameraType"] !== undefined).map((c) => c["id"])).toEqual(["00000000-0000-4000-8000-000000000001"]);
-      expect(nearby.filter((c) => c["cameraType"] === undefined).map((c) => c["type"]).sort()).toEqual(["distanceControl", "redLightCamera"]);
-
-      const snapshot = (await app.inject({ method: "GET", url: "/v1/snapshot", headers })).json() as Json;
-      expect(snapshot.fixedSpeedCameras.map((c: Json) => c.id).sort()).toEqual(active.map((c) => c["id"]).sort());
-      for (const camera of snapshot.fixedSpeedCameras as Json[]) {
-        const old = active.find((c) => c["id"] === camera["id"])!;
-        expect(camera.type).toBe("fixedSpeedCamera");
-        expect(camera.status).toBe(old["status"]);
-        expect(camera.source).toBe(old["source"]);
-        expect(camera.sourceLicense).toBe(old["source_license"]);
-        expect(camera.removalReportCount).toBe(0);
-        expect(camera.cameraType).toBe("fixedSpeedCamera");
-      }
-      expect(snapshot.enforcementDevices.map((c: Json) => c.id).sort()).toEqual(active.map((c) => c["id"]).sort());
-      expect(snapshot.staticSigns).toHaveLength(1);
-      expect(snapshot.speedLimitSegments).toHaveLength(1);
-
-      const delta = (await app.inject({ method: "GET", url: "/v1/delta?since=0&tiles=871f1d489ffffff", headers })).json().events as Json[];
-      expect(delta.map((e) => [e["type"], e["entityType"]])).toEqual([
-        ["StaticDataUpdated", "fixedSpeedCamera"],
-        ["ReportCreated", "hazardReport"],
-        ["StaticDataRemoved", "fixedSpeedCamera"],
-      ]);
-      expect(delta.map((e) => e["payload"]["type"])).toEqual(["fixedSpeedCamera", "redLightCamera", "fixedSpeedCamera"]);
-    } finally {
-      await app.close();
-    }
-  });
-
   it("runs a second time without effect on the data (the migration is guarded)", async () => {
     const statements = readFileSync(path.join(MIGRATIONS, `${TAG_0009}.sql`), "utf8")
       .split(STATEMENT_BREAKPOINT)
@@ -318,5 +271,55 @@ describe("migration 0009 on a database with legacy data", () => {
     await runFile(DOWN_SQL);
     expect(await columnExists()).toBe(false);
     expect(await counts()).toEqual(before.counts);
+  });
+
+  it("answers the old reads with what they answered before, plus the additive fields - rows from before the camera policy need no country", async () => {
+    // Runs last on purpose: it takes the database to the newest schema (every later migration on top of 0009), which the
+    // rollback tests above must not see. The legacy rows have no country (the camera policy did not exist); with no country
+    // restricted they are delivered like any other camera.
+    await withFreshConnection((d) => migrate(d, { migrationsFolder: MIGRATIONS }));
+    resetEnvCache();
+    const env = loadEnv({
+      DATABASE_URL: container.getConnectionUri(),
+      JWT_SECRET: "a".repeat(32),
+      LOG_LEVEL: "silent",
+      STATIC_PACKAGES_DIR: mkdtempSync(path.join(tmpdir(), "migration-packages-")),
+    });
+    dirs.push(env.STATIC_PACKAGES_DIR);
+    const app = await buildApp({ env, db });
+    try {
+      const headers = authHeader(await testToken(env));
+      const active = before.cameras.filter((c) => c["status"] === "active");
+
+      const nearby = (await app.inject({ method: "GET", url: "/v1/speed-cameras/nearby?lat=52.52&lng=13.405&radiusM=2000", headers })).json().cameras as Json[];
+      // Berlin's speed camera is the only persistent device there; the expiring reports keep their own types.
+      expect(nearby.filter((c) => c["cameraType"] !== undefined).map((c) => c["id"])).toEqual(["00000000-0000-4000-8000-000000000001"]);
+      expect(nearby.filter((c) => c["cameraType"] === undefined).map((c) => c["type"]).sort()).toEqual(["distanceControl", "redLightCamera"]);
+
+      const snapshot = (await app.inject({ method: "GET", url: "/v1/snapshot", headers })).json() as Json;
+      expect(snapshot.fixedSpeedCameras.map((c: Json) => c.id).sort()).toEqual(active.map((c) => c["id"]).sort());
+      for (const camera of snapshot.fixedSpeedCameras as Json[]) {
+        const old = active.find((c) => c["id"] === camera["id"])!;
+        expect(camera.type).toBe("fixedSpeedCamera");
+        expect(camera.status).toBe(old["status"]);
+        expect(camera.source).toBe(old["source"]);
+        expect(camera.sourceLicense).toBe(old["source_license"]);
+        expect(camera.removalReportCount).toBe(0);
+        expect(camera.cameraType).toBe("fixedSpeedCamera");
+      }
+      expect(snapshot.enforcementDevices.map((c: Json) => c.id).sort()).toEqual(active.map((c) => c["id"]).sort());
+      expect(snapshot.staticSigns).toHaveLength(1);
+      expect(snapshot.speedLimitSegments).toHaveLength(1);
+
+      const delta = (await app.inject({ method: "GET", url: "/v1/delta?since=0&tiles=871f1d489ffffff", headers })).json().events as Json[];
+      expect(delta.map((e) => [e["type"], e["entityType"]])).toEqual([
+        ["StaticDataUpdated", "fixedSpeedCamera"],
+        ["ReportCreated", "hazardReport"],
+        ["StaticDataRemoved", "fixedSpeedCamera"],
+      ]);
+      expect(delta.map((e) => e["payload"]["type"])).toEqual(["fixedSpeedCamera", "redLightCamera", "fixedSpeedCamera"]);
+    } finally {
+      await app.close();
+    }
   });
 });

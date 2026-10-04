@@ -106,7 +106,13 @@ describe("multi-node federation network (F-S5)", () => {
     // a few seconds (instead of 5 minutes) so the "stale heartbeat" case fits in
     // a test — see PEER_STALE_SECONDS in the online-counter describe below.
     const online = { ONLINE_CACHE_SECONDS: "0", ONLINE_PEER_STALE_SECONDS: "4" };
-    [a, b, c] = await Promise.all([startNode(PORT_A, online), startNode(PORT_B, online), startNode(PORT_C, online)]);
+    // Node B has pulled its own camera emergency brake (SPEED_CAMERA_NAMESPACE_ENABLED=false): cameras are delivered by default, so a node
+    // that does not want them says so. Camera data still replicates to it (writes are never blocked); it just never serves or passes it on.
+    [a, b, c] = await Promise.all([
+      startNode(PORT_A, online),
+      startNode(PORT_B, { ...online, SPEED_CAMERA_NAMESPACE_ENABLED: "false" }),
+      startNode(PORT_C, online),
+    ]);
 
     // Full mesh: B joins A; C joins both A and B. A never initiates a join
     // itself (it's the "first" node in this topology) — its peers arrive
@@ -250,12 +256,13 @@ describe("multi-node federation network (F-S5)", () => {
     expect(entryForA.tier).toBe("probation");
   });
 
-  it("federation carries camera-adjacent reports, but each node's own local flag still gates whether it's ever served back out", async () => {
+  it("federation carries camera-adjacent reports, but each node's own emergency brake still gates whether it's ever served back out", async () => {
     // Neither node here has a signed network config — each is purely
-    // governed by its own local SPEED_CAMERA_NAMESPACE_ENABLED, and
-    // federation has no mechanism to override that (only hazard-report
-    // *creation* replicates — there is no "camera flag" federation message
-    // type at all, see server/docs/federation-protocol.md).
+    // governed by its own local SPEED_CAMERA_NAMESPACE_ENABLED (A: default,
+    // cameras delivered in full; B: brake pulled), and federation has no
+    // mechanism to override that (only hazard-report *creation* replicates —
+    // there is no "camera flag" federation message type at all, see
+    // server/docs/federation-protocol.md).
     const device = generateEd25519KeyPair();
     const envelope = deviceCreateEnvelope(device, { lat: 40, lng: 40, type: "mobileSpeedCamera", speedKmh: 80 });
 
@@ -269,28 +276,32 @@ describe("multi-node federation network (F-S5)", () => {
 
     // Can't confirm replication via /v1/hazard-reports/nearby — that
     // endpoint structurally excludes every camera-adjacent type regardless
-    // of any flag (docs/api.md: "always excludes all five, regardless of
-    // the namespace flag"), and /v1/speed-cameras/nearby is exactly the
-    // flag-gated read this test is trying to distinguish from replication
-    // itself. GET /v1/federation/events is unfiltered by either, so it's
-    // the right place to confirm the event actually reached B.
+    // of any flag (docs/api.md), and /v1/speed-cameras/nearby on B is exactly
+    // the brake-gated read this test is trying to distinguish from
+    // replication itself. B's own table is the place to confirm the event
+    // actually reached it.
     await waitFor(async () => {
-      const pull = await b.app.inject({ method: "GET", url: "/v1/federation/events?after=0&limit=200" });
-      const events = pull.json().events as { envelope: { payload: { lat: number; lng: number } } }[];
-      const found = events.some((e) => e.envelope.payload.lat === 40 && e.envelope.payload.lng === 40);
-      return found ? true : undefined;
+      const rows = await b.testDb.db.execute<{ n: number } & Record<string, unknown>>(
+        sql`select count(*)::int as n from hazard_reports where type = 'mobileSpeedCamera' and ST_Y(position) = 40`,
+      );
+      return rows[0]!.n === 1 ? true : undefined;
     });
 
-    // The underlying data replicated (writes are never namespace-gated —
-    // see server/README.md's "Schreibzugriffe... funktionieren unabhängig
-    // vom Flag"), but B never had SPEED_CAMERA_NAMESPACE_ENABLED set, so its
-    // own /v1/speed-cameras/* reads still filter it out regardless.
+    // The underlying data replicated (writes are never blocked), but B has
+    // pulled its own brake, so its own /v1/speed-cameras/* reads filter it out
+    // — while A, with the default, serves it.
     const camerasOnB = await b.app.inject({
       method: "GET",
       url: "/v1/speed-cameras/nearby?lat=40&lng=40&radiusM=1000",
       headers: authHeader(await testToken(b.env)),
     });
-    expect(camerasOnB.json().cameras).toEqual([]);
+    expect(camerasOnB.json()).toEqual({ cameras: [], zones: [] });
+    const camerasOnA = await a.app.inject({
+      method: "GET",
+      url: "/v1/speed-cameras/nearby?lat=40&lng=40&radiusM=1000",
+      headers: authHeader(await testToken(a.env)),
+    });
+    expect(camerasOnA.json().cameras).toHaveLength(1);
   });
 
   it("persistent enforcement devices stay node-local (add-on D): a device-signed redLightCamera report federates as an expiring report, a persistent device does not", async () => {
@@ -316,13 +327,16 @@ describe("multi-node federation network (F-S5)", () => {
     });
     expect(reported.statusCode).toBe(201);
 
-    const events = await waitFor(async () => {
-      const pull = await b.app.inject({ method: "GET", url: "/v1/federation/events?after=0&limit=200" });
-      const all = pull.json().events as { envelope: { payload: { lat: number; lng: number; type: string } } }[];
-      return all.some((e) => e.envelope.payload.lat === 42) ? all : undefined;
+    await waitFor(async () => {
+      const rows = await b.testDb.db.execute<{ n: number } & Record<string, unknown>>(
+        sql`select count(*)::int as n from hazard_reports where type = 'redLightCamera' and ST_Y(position) = 42`,
+      );
+      return rows[0]!.n === 1 ? true : undefined;
     });
     // Only the report travelled; nothing about the imported device was ever offered to a peer.
-    expect(events.some((e) => e.envelope.payload.lat === 41)).toBe(false);
+    const offered = (await a.app.inject({ method: "GET", url: "/v1/federation/events?after=0&limit=200" })).json().events as { envelope: { payload: { lat: number } } }[];
+    expect(offered.some((e) => e.envelope.payload.lat === 41)).toBe(false);
+    expect(offered.some((e) => e.envelope.payload.lat === 42)).toBe(true);
 
     const onB = await b.testDb.db.execute<{ type: string; expires_at: string } & Record<string, unknown>>(
       sql`select type, expires_at from hazard_reports where type = 'redLightCamera'`,

@@ -1,8 +1,9 @@
 import type { FastifyBaseLogger } from "fastify";
 import type { Database } from "../../db/client.js";
 import type { Env } from "../../config/env.js";
-import { countDirtyTiles, getPackageState } from "../../db/queries/static-packages.js";
-import { packageFingerprint, runBuild } from "./package-builder.js";
+import { countDirtyTiles, countPolicyStale, getPackageState } from "../../db/queries/static-packages.js";
+import { isCurrentFingerprint, rebuildPolicyStale, runBuild } from "./package-builder.js";
+import type { EffectiveCameraPolicy } from "../cameras/policy/policy.js";
 import { getPackageService } from "./package-service.js";
 
 export interface PackageWorkerHandle {
@@ -42,18 +43,29 @@ export function decideBuild(input: {
  * The builder lease (static_package_state) keeps this from colliding with a
  * `npm run static-packages -- build` run or a second server process.
  */
-export function startStaticPackageWorker(db: Database["db"], env: Env, log: FastifyBaseLogger, intervalMs = 10_000): PackageWorkerHandle {
+export function startStaticPackageWorker(
+  db: Database["db"],
+  env: Env,
+  log: FastifyBaseLogger,
+  policy: () => EffectiveCameraPolicy,
+  intervalMs = 10_000,
+): PackageWorkerHandle {
   let running = false;
 
   const tick = async () => {
     if (running) return;
     running = true;
     try {
+      // Tiles a stricter camera policy made stale are not served until rebuilt: they do not wait for the debounce below.
+      if ((await countPolicyStale(db)) > 0) {
+        const outcome = await rebuildPolicyStale({ ...getPackageService(db, env, log, policy).builderDeps, log });
+        if (outcome.tilesBuilt + outcome.tilesFailed > 0) log.info(outcome, "static packages: policy-stale tiles rebuilt");
+      }
       const state = await getPackageState(db);
       const dirty = await countDirtyTiles(db);
       const now = Date.now();
       const decision = decideBuild({
-        needsInitialBuild: !state.ready || state.fingerprint !== packageFingerprint(env),
+        needsInitialBuild: !state.ready || !isCurrentFingerprint(state.fingerprint, env),
         dirty: dirty.dirty,
         ageOfNewestMarkSeconds: dirty.newestMarkedAt ? (now - new Date(dirty.newestMarkedAt).getTime()) / 1000 : null,
         ageOfOldestMarkSeconds: dirty.oldestMarkedAt ? (now - new Date(dirty.oldestMarkedAt).getTime()) / 1000 : null,
@@ -61,7 +73,7 @@ export function startStaticPackageWorker(db: Database["db"], env: Env, log: Fast
         maxWaitSeconds: env.STATIC_PACKAGES_MAX_WAIT_SECONDS,
       });
       if (decision !== "build") return;
-      const service = getPackageService(db, env, log);
+      const service = getPackageService(db, env, log, policy);
       const result = await runBuild({ ...service.builderDeps, log }, {});
       if (result.status === "built" && result.tilesBuilt + result.tilesFailed > 0) {
         log.info(

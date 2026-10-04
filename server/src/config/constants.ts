@@ -125,6 +125,8 @@ export const ENTITY_TYPES = [
   // Add-on D: events about persistent red-light / distance devices. Kept apart from
   // `fixedSpeedCamera` because clients treat that entity type as a classic speed camera.
   "enforcementDevice",
+  // Country camera policy: events about a *zone* (docs/camera-country-policy.md) — a coarse H3 cell instead of a camera.
+  "cameraZone",
 ] as const;
 export type EntityType = (typeof ENTITY_TYPES)[number];
 

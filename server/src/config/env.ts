@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { isAcceptableFederationAddress } from "../modules/federation/address.js";
 import { DEFAULT_MAP_TILE_URL, isAcceptableTileUrl } from "../modules/web/tile.js";
+import { CameraPolicyError, parseLocalCaps } from "../modules/cameras/policy/levels.js";
 
 const envSchema = z.object({
   DATABASE_URL: z.string().min(1, "DATABASE_URL is required"),
@@ -13,8 +14,23 @@ const envSchema = z.object({
 
   SPEED_CAMERA_NAMESPACE_ENABLED: z
     .enum(["true", "false"])
-    .default("false")
+    .default("true")
     .transform((v) => v === "true"),
+
+  // Country-based camera policy (docs/camera-country-policy.md). Cameras are delivered at level `full` in every country unless the
+  // root-signed `cameraPolicyByCountry` takes a country back (`zones`, `off`). SPEED_CAMERA_NAMESPACE_ENABLED above is the node's
+  // emergency brake: false = every country is off, whatever the signed policy says.
+  //
+  // A node-local upper bound per country, `DE=zones,CH=off,*=full` — can only withhold more than the network policy.
+  CAMERA_POLICY_LOCAL_CAPS: z.string().default(""),
+  // A camera within this many metres of a border belongs to both countries; the stricter level wins. Must exceed the
+  // positional error of the boundary dataset you load (Natural Earth 1:10m: a few hundred metres).
+  CAMERA_POLICY_BORDER_MARGIN_M: z.coerce.number().min(0).max(50_000).default(1000),
+  // H3 resolution of the zones delivered at level `zones` (6 ≈ 36 km², edge ≈ 3.7 km). Changing it changes every zone id.
+  // Must not be coarser than STATIC_DATA_PARTITION_H3_RESOLUTION: a zone is carried by the package of its parent tile.
+  CAMERA_ZONE_H3_RESOLUTION: z.coerce.number().int().min(3).max(8).default(6),
+  // How often the signed config file is re-read so a policy change takes effect without a restart. 0 = only at start.
+  CAMERA_POLICY_RELOAD_SECONDS: z.coerce.number().int().min(0).default(30),
 
   EVENT_LOG_RETENTION_DAYS_DYNAMIC: z.coerce.number().int().positive().default(3),
   EVENT_LOG_RETENTION_DAYS_STATIC: z.coerce.number().int().positive().default(30),
@@ -295,6 +311,16 @@ const envSchema = z.object({
 }).refine((env) => env.COMMUNITY_CORRECTIONS_MPH_MIN <= env.COMMUNITY_CORRECTIONS_MPH_MAX, {
   message: "COMMUNITY_CORRECTIONS_MPH_MIN must not exceed COMMUNITY_CORRECTIONS_MPH_MAX",
   path: ["COMMUNITY_CORRECTIONS_MPH_MIN"],
+}).superRefine((env, ctx) => {
+  try {
+    parseLocalCaps(env.CAMERA_POLICY_LOCAL_CAPS);
+  } catch (err) {
+    if (!(err instanceof CameraPolicyError)) throw err;
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message: err.message, path: ["CAMERA_POLICY_LOCAL_CAPS"] });
+  }
+}).refine((env) => env.CAMERA_ZONE_H3_RESOLUTION >= env.STATIC_DATA_PARTITION_H3_RESOLUTION, {
+  message: "CAMERA_ZONE_H3_RESOLUTION must not be smaller than STATIC_DATA_PARTITION_H3_RESOLUTION (a zone is carried by the package of its parent tile)",
+  path: ["CAMERA_ZONE_H3_RESOLUTION"],
 }).refine((env) => isAcceptableTileUrl(env.MAP_TILE_URL), {
   message: "MAP_TILE_URL must be empty (no map background) or an http(s) URL containing {z}, {x} and {y} (no {s} subdomain placeholder, no credentials)",
   path: ["MAP_TILE_URL"],

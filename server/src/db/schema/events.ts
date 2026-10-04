@@ -21,6 +21,11 @@ export const eventLog = pgTable(
     entityId: uuid("entity_id").notNull(),
     payload: jsonb("payload").notNull(),
     regionTile: varchar("region_tile", { length: 15 }),
+    /**
+     * Country set of the camera an event is about (null for every other event), copied from the entity at append time so
+     * delta, WebSocket push and federation egress decide without re-deriving a country (docs/camera-country-policy.md).
+     */
+    cameraCountries: text("camera_countries").array(),
     moderationStatus: moderationStatusEnum("moderation_status").notNull().default("accepted"),
     source: text("source").notNull(),
     // Federation (F-S3), all nullable — null means "not federation-eligible",

@@ -20,6 +20,8 @@ export const fixedSpeedCameras = pgTable(
     id: uuid("id").defaultRandom().primaryKey(),
     position: geometryColumn("position", "Point").notNull(),
     cameraType: cameraTypeEnum("camera_type").notNull().default("fixedSpeedCamera"),
+    /** Country set (docs/camera-country-policy.md section 3). null = unresolved = not delivered to anyone. */
+    countries: text("countries").array(),
     status: cameraStatusEnum("status").notNull().default("active"),
     removedAt: timestamp("removed_at", { withTimezone: true }),
     source: text("source").notNull(),

@@ -1,7 +1,8 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { generateSnapshot } from "./snapshot.service.js";
-import { getDeltaPage, SnapshotRequiredError } from "../../db/queries/event-log.js";
+import { SnapshotRequiredError } from "../../db/queries/event-log.js";
+import { getDelta } from "./delta.service.js";
 import { parseCsv, parseHazardTypes } from "../../lib/query-params.js";
 import { ApiError, badRequest, conflict } from "../../lib/errors.js";
 import { resolveSyncHazardTypes } from "../cameras/filter.js";
@@ -30,7 +31,7 @@ export async function registerSyncRoutes(app: FastifyInstance) {
     const result = await generateSnapshot(app.deps.db, {
       tiles,
       types,
-      cameraNamespaceEnabled: app.deps.env.SPEED_CAMERA_NAMESPACE_ENABLED,
+      policy: app.cameraPolicy.current(),
       communityCorrectionsEnabled: app.deps.env.COMMUNITY_CORRECTIONS_ENABLED,
       // ?staticData=false (client-lib P2.0): omit the static-entity payload for
       // a client that already has it via /v1/static-data/{manifest,partitions}.
@@ -46,14 +47,14 @@ export async function registerSyncRoutes(app: FastifyInstance) {
     if (!sinceResult.success) {
       throw badRequest("since query parameter is required and must be a non-negative integer");
     }
-    const tiles = parseCsv(query.tiles);
-    const types = resolveSyncHazardTypes(parseHazardTypes(query.types), app.deps.env.SPEED_CAMERA_NAMESPACE_ENABLED);
+    const tiles = parseCsv(query.tiles) ?? [];
+    const policy = app.cameraPolicy.current();
+    const types = resolveSyncHazardTypes(parseHazardTypes(query.types), policy.deliversAnything);
     const limitResult = z.coerce.number().int().positive().max(DELTA_LIMIT_MAX).safeParse(query.limit);
     const limit = limitResult.success ? limitResult.data : DELTA_LIMIT_DEFAULT;
 
     try {
-      const page = await getDeltaPage(app.deps.db, sinceResult.data, { tiles, types, limit });
-      return page;
+      return await getDelta(app.deps.db, policy, sinceResult.data, { tiles, types, limit });
     } catch (err) {
       if (err instanceof SnapshotRequiredError) {
         throw conflict("SNAPSHOT_REQUIRED", err.message);

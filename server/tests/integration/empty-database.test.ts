@@ -66,14 +66,14 @@ describe("empty database", () => {
     expect(res.json()).toEqual({ reports: [] });
   });
 
-  it("speed-cameras endpoints return an empty list regardless of data (namespace flag defaults to off)", async () => {
+  it("speed-cameras endpoints return an empty list (and no zones) when there is no data", async () => {
     const nearby = await app.inject({ method: "GET", url: "/v1/speed-cameras/nearby?lat=52.5&lng=13.4&radiusM=1000", headers: auth });
     expect(nearby.statusCode).toBe(200);
-    expect(nearby.json()).toEqual({ cameras: [] });
+    expect(nearby.json()).toEqual({ cameras: [], zones: [] });
 
     const byTile = await app.inject({ method: "GET", url: "/v1/speed-cameras/by-tile?tile=871f200d3ffffff&k=1", headers: auth });
     expect(byTile.statusCode).toBe(200);
-    expect(byTile.json()).toEqual({ cameras: [] });
+    expect(byTile.json()).toEqual({ cameras: [], zones: [] });
   });
 
   it("removal-report on a non-existent camera returns 404, not 500", async () => {
@@ -95,6 +95,7 @@ describe("empty database", () => {
       hazardReports: [],
       fixedSpeedCameras: [],
       enforcementDevices: [],
+      cameraZones: [],
     });
   });
 

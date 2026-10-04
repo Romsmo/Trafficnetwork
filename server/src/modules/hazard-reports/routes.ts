@@ -7,6 +7,9 @@ import { parseHazardTypes, parseLatLng, parseRadiusM } from "../../lib/query-par
 import { badRequest, conflict } from "../../lib/errors.js";
 import { confirmReport, createOrMergeReport } from "./service.js";
 import { createOrMergeFixedCamera } from "../cameras/service.js";
+import { isCameraType } from "../cameras/filter.js";
+import { mayShowCamera, respondToCameraCreate } from "../cameras/write-response.js";
+import { eventMayLeaveNode } from "../cameras/policy/events.js";
 import { publishEvent } from "../realtime/publisher.js";
 import { isFreshTimestamp, type SignedEnvelope } from "../crypto/envelope.js";
 import { computeFederationEventId, verifyDeviceCreateEnvelope, type DeviceCreateEventPayload } from "../federation/device-event.js";
@@ -105,8 +108,7 @@ export async function registerHazardReportRoutes(app: FastifyInstance) {
         reporterId,
       });
       publishEvent(app.realtime, cameraResult.event);
-      reply.status(cameraResult.merged ? 200 : 201);
-      return { camera: cameraResult.camera, merged: cameraResult.merged };
+      return respondToCameraCreate(app, reply, cameraResult.camera, cameraResult.merged, "camera");
     }
 
     let federation: { federationEventId: string; federationEnvelope: unknown; originNodeId: null } | undefined;
@@ -142,9 +144,13 @@ export async function registerHazardReportRoutes(app: FastifyInstance) {
       federation ? { federation } : undefined,
     );
     publishEvent(app.realtime, result.event);
-    if (broadcastEnvelope) broadcastFederationEvents(app, [broadcastEnvelope], null);
+    // Peers get the signed report with its exact coordinates: a camera report goes out only where the camera may be delivered individually.
+    if (broadcastEnvelope && eventMayLeaveNode(app.cameraPolicy.current(), result.event)) {
+      broadcastFederationEvents(app, [broadcastEnvelope], null);
+    }
+    if (isCameraType(input.type)) return respondToCameraCreate(app, reply, result.report, result.merged, "report");
     reply.status(result.merged ? 200 : 201);
-    return { report: result.report, merged: result.merged };
+    return { report: result.report.item, merged: result.merged };
   });
 
   const confirmBodySchema = z.object({
@@ -163,6 +169,8 @@ export async function registerHazardReportRoutes(app: FastifyInstance) {
       kind: parsed.data.kind,
     });
     if (result.event) publishEvent(app.realtime, result.event);
-    return { report: result.report, recorded: result.recorded };
+    // A camera report is shown back only where cameras are delivered individually (modules/cameras/write-response.ts).
+    if (isCameraType(result.report.item.type) && !mayShowCamera(app, result.report)) return { recorded: result.recorded };
+    return { report: result.report.item, recorded: result.recorded };
   });
 }

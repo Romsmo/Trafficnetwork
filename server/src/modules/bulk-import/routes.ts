@@ -103,7 +103,11 @@ export async function registerBulkImportRoutes(app: FastifyInstance) {
   app.post("/v1/bulk-import/speed-cameras", route, async (req) => {
     const parsed = rowsSchema(fixedSpeedCameraRowSchema, maxRows).safeParse(req.body);
     if (!parsed.success) throw badRequest("Invalid request body", parsed.error.issues);
-    const inserted = await bulkInsertFixedSpeedCameras(app.deps.db, parsed.data.rows, importOptions);
+    const inserted = await bulkInsertFixedSpeedCameras(app.deps.db, parsed.data.rows, {
+      ...importOptions,
+      countryMarginM: app.deps.env.CAMERA_POLICY_BORDER_MARGIN_M,
+      zoneResolution: app.deps.env.CAMERA_ZONE_H3_RESOLUTION,
+    });
     return { inserted };
   });
 

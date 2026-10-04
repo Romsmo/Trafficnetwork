@@ -504,9 +504,9 @@ describe("europe-scale static packages", () => {
 
   // ------------------------------------------------------------------ what else marks tiles
 
-  it("packages a camera once the namespace is on and the write marks its tile", async () => {
+  it("packages a camera (delivered in full by default) and the write marks its tile", async () => {
     await truncateStatic();
-    const { app, env } = await startApp({ SPEED_CAMERA_NAMESPACE_ENABLED: "true" });
+    const { app, env } = await startApp();
     const created = await app.inject({
       method: "POST",
       url: "/v1/hazard-reports",
@@ -515,7 +515,9 @@ describe("europe-scale static packages", () => {
     });
     expect(created.statusCode).toBe(201);
     const dirty = (await testDb.db.execute(sql`select tile from static_packages where dirty`)) as unknown as { tile: string }[];
-    expect(dirty.map((r) => r.tile)).toEqual([tileOf(MUNICH)]);
+    // The tile the camera is in, and (when it is another one) the tile that carries its zone.
+    expect(dirty.map((r) => r.tile)).toContain(tileOf(MUNICH));
+    expect(dirty.length).toBeLessThanOrEqual(2);
     const body = (await partition(app, env, tileOf(MUNICH))).json() as Json;
     expect(body.fixedSpeedCameras).toHaveLength(1);
     expect(body.speedLimitSegments).toEqual([]);

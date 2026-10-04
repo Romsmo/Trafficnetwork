@@ -21,7 +21,7 @@ export type GuardDecision =
 export interface WebPolicy {
   maxSegmentRadiusM: number;
   maxHazardRadiusM: number;
-  /** Effective camera-namespace flag (env already AND-gated with the signed network config). */
+  /** Whether this node delivers camera data for at least one country (the camera policy, modules/cameras/policy/). */
   cameraNamespaceEnabled: boolean;
 }
 
@@ -160,7 +160,7 @@ export async function registerWebGuard(app: FastifyInstance): Promise<void> {
     const path = req.url.split("?")[0] ?? "";
     const decision = classifyWebRequest(
       { method: req.method, path, query: (req.query ?? {}) as Record<string, unknown>, body: req.body },
-      { maxSegmentRadiusM: env.WEB_MAX_SEGMENT_RADIUS_M, maxHazardRadiusM: env.WEB_MAX_HAZARD_RADIUS_M, cameraNamespaceEnabled: env.SPEED_CAMERA_NAMESPACE_ENABLED },
+      { maxSegmentRadiusM: env.WEB_MAX_SEGMENT_RADIUS_M, maxHazardRadiusM: env.WEB_MAX_HAZARD_RADIUS_M, cameraNamespaceEnabled: app.cameraPolicy.current().deliversAnything },
     );
     if (decision.kind === "deny") throw new ApiError(decision.status, decision.code, decision.message);
 

@@ -6,6 +6,7 @@ import { pgArray } from "../pg-array.js";
 import { bumpStaticDataVersion } from "./sync-state.js";
 import { fillMissingBaseValues } from "./speed-limit-corrections.js";
 import { markTilesDirty } from "./static-packages.js";
+import { cameraPackageTiles } from "../../modules/cameras/policy/cells.js";
 
 /**
  * Bulk-import writes go straight to the materialized tables without appending
@@ -113,14 +114,24 @@ export interface FixedSpeedCameraImportRow {
   importedAt?: string;
 }
 
-export async function bulkInsertFixedSpeedCameras(db: Queryable, rows: FixedSpeedCameraImportRow[], opts: BulkImportOptions): Promise<number> {
+/** Where a camera import needs the camera policy's facts: how wide the border strip is, and which zone resolution decides the second tile a camera dirties. */
+export interface CameraImportOptions extends BulkImportOptions {
+  /** CAMERA_POLICY_BORDER_MARGIN_M - each row's country set is computed on insert (docs/camera-country-policy.md, section 3). */
+  countryMarginM: number;
+  /** CAMERA_ZONE_H3_RESOLUTION - a camera dirties the tile it is in and the tile that carries its zone. */
+  zoneResolution: number;
+}
+
+export async function bulkInsertFixedSpeedCameras(db: Queryable, rows: FixedSpeedCameraImportRow[], opts: CameraImportOptions): Promise<number> {
   const nowIso = new Date().toISOString();
-  const tiles = new Set(rows.map((r) => latLngToCell(r.lat, r.lng, opts.partitionResolution)));
+  const tiles = new Set(rows.flatMap((r) => cameraPackageTiles(r.lat, r.lng, opts.partitionResolution, opts.zoneResolution)));
 
   return db.transaction(async (tx) => {
     await tx.execute(sql`
-      insert into fixed_speed_cameras (position, camera_type, source, source_license, imported_at)
-      select ST_SetSRID(ST_MakePoint(t.lng, t.lat), 4326), t.camera_type::camera_type, t.source, nullif(t.license, ''), t.imported_at
+      insert into fixed_speed_cameras (position, countries, camera_type, source, source_license, imported_at)
+      select ST_SetSRID(ST_MakePoint(t.lng, t.lat), 4326),
+             camera_countries(ST_SetSRID(ST_MakePoint(t.lng, t.lat), 4326), ${opts.countryMarginM}::float8),
+             t.camera_type::camera_type, t.source, nullif(t.license, ''), t.imported_at
       from unnest(
         ${pgArray(rows.map((r) => String(r.lng)))}::float8[],
         ${pgArray(rows.map((r) => String(r.lat)))}::float8[],

@@ -5,12 +5,17 @@ import { appendEvent } from "../../db/append-event.js";
 import type { SubscriptionRegistry } from "../realtime/registry.js";
 import { publishEvent } from "../realtime/publisher.js";
 import type { FastifyBaseLogger } from "fastify";
+import { isCameraType } from "../cameras/filter.js";
+import type { HazardType } from "../../config/constants.js";
 
 interface ExpiredRow extends Record<string, unknown> {
   id: string;
   type: string;
   region_tile: string;
   source: string;
+  /** Country set of a camera report (null for every other type) - travels with the event, see db/queries/camera-record.ts. */
+  countries: string[] | null;
+  position_geojson: unknown;
 }
 
 /**
@@ -28,7 +33,7 @@ interface ExpiredRow extends Record<string, unknown> {
 export async function runExpirySweep(db: Database["db"]) {
   return db.transaction(async (tx) => {
     const candidates = await tx.execute<ExpiredRow>(sql`
-      select id, type, region_tile, source
+      select id, type, region_tile, source, countries, ST_AsGeoJSON(position)::json as position_geojson
       from hazard_reports
       where status = 'active' and expires_at < now()
       for update skip locked
@@ -46,8 +51,13 @@ export async function runExpirySweep(db: Database["db"]) {
           type: "ReportExpired",
           entityType: "hazardReport",
           entityId: row.id,
-          payload: { id: row.id, type: row.type, status: "expired" },
+          // A camera report's expiry also names its position: the delivery layer needs it to find the zone that changed
+          // (it is only ever sent on where the camera was delivered individually in the first place).
+          payload: isCameraType(row.type as HazardType)
+            ? { id: row.id, type: row.type, status: "expired", position: row.position_geojson }
+            : { id: row.id, type: row.type, status: "expired" },
           regionTile: row.region_tile,
+          cameraCountries: row.countries,
           source: row.source,
         }),
       );

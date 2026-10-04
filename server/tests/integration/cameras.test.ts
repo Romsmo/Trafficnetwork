@@ -44,22 +44,24 @@ describe("speed-camera namespace", () => {
     return buildApp({ env, db: testDb.db });
   }
 
-  describe("flag off (default)", () => {
+  describe("emergency brake on (SPEED_CAMERA_NAMESPACE_ENABLED=false)", () => {
     let app: FastifyInstance;
     beforeAll(async () => {
-      app = await buildTestApp();
+      app = await buildTestApp({ SPEED_CAMERA_NAMESPACE_ENABLED: "false" });
     });
     afterAll(async () => app.close());
 
-    it("still accepts a fixedSpeedCamera report (writes are never gated)", async () => {
+    it("still accepts a fixedSpeedCamera report (writes are never gated) - and answers without the camera", async () => {
       const res = await app.inject({
         method: "POST",
         url: "/v1/hazard-reports",
         headers: await tokenFor("alice"),
         payload: { type: "fixedSpeedCamera", lat: 52.52, lng: 13.405 },
       });
-      expect(res.statusCode).toBe(201);
-      expect(res.json().camera.type).toBe("fixedSpeedCamera");
+      expect(res.statusCode).toBe(202);
+      expect(res.json()).toEqual({ accepted: true });
+      const stored = await testDb.db.execute<{ n: number } & Record<string, unknown>>(sql`select count(*)::int as n from fixed_speed_cameras`);
+      expect(stored[0]!.n).toBe(1);
     });
 
     it("hides the camera from every read surface (nearby, by-tile, snapshot, delta)", async () => {
@@ -78,13 +80,14 @@ describe("speed-camera namespace", () => {
 
       const auth = await tokenFor("alice");
       const nearby = await app.inject({ method: "GET", url: "/v1/speed-cameras/nearby?lat=52.52&lng=13.405&radiusM=1000", headers: auth });
-      expect(nearby.json()).toEqual({ cameras: [] });
+      expect(nearby.json()).toEqual({ cameras: [], zones: [] });
 
       const hazardNearby = await app.inject({ method: "GET", url: "/v1/hazard-reports/nearby?lat=52.52&lng=13.405&radiusM=1000", headers: auth });
       expect(hazardNearby.json().reports).toEqual([]);
 
       const snapshot = await app.inject({ method: "GET", url: "/v1/snapshot", headers: auth });
       expect(snapshot.json().fixedSpeedCameras).toEqual([]);
+      expect(snapshot.json().cameraZones).toEqual([]);
 
       const delta = await app.inject({ method: "GET", url: "/v1/delta?since=0", headers: auth });
       const payloadTypes = delta.json().events.map((e: { payload: { type?: string } }) => e.payload.type);
@@ -93,10 +96,10 @@ describe("speed-camera namespace", () => {
     });
   });
 
-  describe("flag on", () => {
+  describe("default (cameras are delivered in full in every country)", () => {
     let app: FastifyInstance;
     beforeAll(async () => {
-      app = await buildTestApp({ SPEED_CAMERA_NAMESPACE_ENABLED: "true" });
+      app = await buildTestApp();
     });
     afterAll(async () => app.close());
 

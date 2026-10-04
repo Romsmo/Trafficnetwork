@@ -142,7 +142,7 @@ eleven may appear in any field an existing client decodes into `HazardType` (thi
 | `GET /v1/snapshot` | `fixedSpeedCameras`: **unchanged meaning** — only `cameraType = fixedSpeedCamera`; new `enforcementDevices`: **all** persistent devices, each with `cameraType` (duplicates the fixed cameras by design, as the prompt asks — a few MB at Europe scale) | old clients read `fixedSpeedCameras` only |
 | `GET /v1/config` | new `persistentCameraTypes: [...]` next to `cameraNamespaceHazardTypes` | this is the "version hint": a client discovers whether the server knows persistent devices by looking for the key; no API version bump |
 | Static packages | see section 6 | additive key, omitted when empty |
-| Namespace flag | every read path above is gated exactly like today's cameras (`SPEED_CAMERA_NAMESPACE_ENABLED`, including the network-config override): flag off → `[]`, no `enforcementDevices`, no packages entry | unchanged rule, one more consumer |
+| Camera policy | every read path above is gated exactly like the cameras: by the country-based camera policy (`camera-country-policy.md`; supersedes the single `SPEED_CAMERA_NAMESPACE_ENABLED` switch, which is now the emergency brake): country restricted to `off` (or the brake on) → `[]`, no `enforcementDevices`, no packages entry; at level `zones` a zone instead of the device | unchanged rule, one more consumer |
 
 ### 4.3 Events
 

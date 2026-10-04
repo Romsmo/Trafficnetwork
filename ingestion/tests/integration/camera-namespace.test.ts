@@ -6,12 +6,15 @@ import { loadEnv, resetEnvCache } from "../../src/config/env.js";
 import { startTestServer, type RunningServer, type TestServer } from "./setup.js";
 
 /**
- * Speed cameras are imported but not delivered while the server's SPEED_CAMERA_NAMESPACE_ENABLED flag is off
- * (docs/prompt-addon-source-catalogue.md §3.1: "Import ja, Auslieferung nein" — the importer never touches the flag).
+ * Speed cameras are imported but not delivered while the server's emergency brake (SPEED_CAMERA_NAMESPACE_ENABLED=false) is on
+ * (docs/prompt-addon-source-catalogue.md §3.1: "Import ja, Auslieferung nein" — the importer never touches the flag; the server's
+ * default is now "delivered", see server/docs/camera-country-policy.md).
  *
  * The camera rows are posted through the same ApiClient call the OSM worker uses. The test then proves both halves on ONE database:
- * a server with the flag off delivers nothing on any read path, and a second server started on the same data with the flag on
- * delivers exactly what was imported — so the rows were stored, and the flag alone kept them back.
+ * a server with the brake on delivers nothing on any read path, and a second server started on the same data with the brake released
+ * delivers exactly what was imported — so the rows were stored, and the flag alone kept them back. The second server is started only
+ * after the first has been read, as an operator would restart the node with the flag flipped: two servers with different policies
+ * must not take turns building the shared static-data packages.
  */
 
 const CAMERAS = [
@@ -35,7 +38,6 @@ describe("speed camera namespace stays closed although cameras were imported", (
     resetEnvCache();
 
     token = await accessToken(testServer.serverUrl, testServer.clientId, testServer.clientSecret);
-    flagOn = await testServer.spawnServer({ SPEED_CAMERA_NAMESPACE_ENABLED: "true" });
   });
 
   afterAll(async () => {
@@ -67,6 +69,7 @@ describe("speed camera namespace stays closed although cameras were imported", (
   });
 
   it("the same data behind a server with the flag on: exactly the imported cameras appear — they were stored all along", async () => {
+    flagOn = await testServer.spawnServer({ SPEED_CAMERA_NAMESPACE_ENABLED: "true" });
     const on = flagOn.serverUrl;
     const cameras = (await get<{ cameras: { position: { coordinates: [number, number] } }[] }>(on, nearby)).cameras;
     expect(cameras).toHaveLength(2);
