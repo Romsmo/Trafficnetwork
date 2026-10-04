@@ -1,0 +1,42 @@
+// The Android half of the plugin is nothing but the native library: one
+// libtrafficnetwork_dart.so per ABI in src/main/jniLibs/ (built by
+// ../build-native.sh, not checked in), which Gradle packages into every app
+// that depends on this plugin.
+
+group = "info.trafficnetwork.flutter"
+version = "1.0"
+
+buildscript {
+    repositories {
+        google()
+        mavenCentral()
+    }
+
+    dependencies {
+        classpath("com.android.tools.build:gradle:8.7.3")
+    }
+}
+
+rootProject.allprojects {
+    repositories {
+        google()
+        mavenCentral()
+    }
+}
+
+apply plugin: "com.android.library"
+
+android {
+    namespace = "info.trafficnetwork.flutter"
+
+    compileSdk = 34
+
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
+    }
+
+    defaultConfig {
+        minSdk = 24
+    }
+}

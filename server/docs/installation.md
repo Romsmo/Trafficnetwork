@@ -23,6 +23,44 @@ needed, on first start or on every subsequent update.
 
 Verify it's up: `curl http://localhost:3000/v1/health` → `{"status":"ok","database":"ok"}`.
 
+Compose reuses an image it has already built under this name: after pulling new
+code, run `docker compose up -d --build` (a fresh clone has no image, so the
+first `up` builds one).
+
+### Create the first client
+
+Every endpoint but health and the network self-description needs a token, and
+tokens come from credentials the operator mints — there is no signup. The
+`npm run create-client` script in `server/` does that for a development setup;
+inside the Docker stack, the same thing is a few lines run in the server
+container (the image carries the compiled server, not the scripts):
+
+```bash
+docker compose exec -T server node --input-type=module - <<'EOF'
+import { loadEnv } from "./dist/config/env.js";
+import { createDb } from "./dist/db/client.js";
+import { generateClientId, generateClientSecret, hashSecret } from "./dist/modules/auth/credentials.js";
+import { insertClient } from "./dist/db/queries/clients.js";
+
+const { db, client } = createDb(loadEnv());
+const clientId = generateClientId();
+const clientSecret = generateClientSecret();
+await insertClient(db, {
+  clientId,
+  clientSecretHash: await hashSecret(clientSecret),
+  scopes: ["client"], // "bulk-import" for an importer, "device-registration" for an app key
+  name: "my-first-client",
+});
+await client.end();
+console.log(JSON.stringify({ clientId, clientSecret }));
+EOF
+```
+
+It prints the id and the secret once — the secret is stored only as a hash. Then
+`POST /v1/auth/token` with them gives a token (`api.md`, "Auth"), and the same
+pair is what the client library's examples take (`TN_CLIENT_ID`,
+`TN_CLIENT_SECRET`).
+
 **With a reverse proxy for real TLS** (needed once you have a domain
 pointed at this host): copy `Caddyfile.example` to `Caddyfile`, put your real
 domain in it, then:

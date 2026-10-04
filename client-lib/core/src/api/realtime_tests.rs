@@ -222,11 +222,11 @@ async fn failures_do_not_stop_the_loop_until_a_server_finally_connects() {
         move || Ok(auth_ok_then_close(stop.clone()))
     }));
     ws.script(
-        "https://a.example/v1/ws",
+        "wss://a.example/v1/ws",
         Err(WsError::Connect("refused".to_string())),
     );
     ws.script(
-        "https://b.example/v1/ws",
+        "wss://b.example/v1/ws",
         Err(WsError::Connect("refused".to_string())),
     );
     let sleep = Arc::new(RecordingSleep::new(now.clone()));
@@ -257,11 +257,11 @@ async fn a_successful_connection_clears_an_earlier_backoff() {
         Err(WsError::Connect("unused".to_string()))
     }));
     ws.script(
-        "https://a.example/v1/ws",
+        "wss://a.example/v1/ws",
         Err(WsError::Connect("refused".to_string())),
     );
     ws.script(
-        "https://a.example/v1/ws",
+        "wss://a.example/v1/ws",
         Ok(auth_ok_then_close(stop.clone())),
     );
     let sleep = Arc::new(RecordingSleep::new(now.clone()));
@@ -290,7 +290,7 @@ async fn the_only_server_is_retried_after_its_backoff_instead_of_being_abandoned
         Err(WsError::Connect("unused".to_string()))
     }));
     ws.script(
-        "https://a.example/v1/ws",
+        "wss://a.example/v1/ws",
         Err(WsError::Connect("refused".to_string())),
     );
     let sleep = Arc::new(RecordingSleep::stopping_after_calls(

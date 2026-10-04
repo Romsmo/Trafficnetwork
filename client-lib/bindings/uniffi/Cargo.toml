@@ -15,7 +15,10 @@ crate-type = ["cdylib", "staticlib"]
 
 [dependencies]
 trafficnetwork-core = { path = "../../core" }
-uniffi = "0.32"
+# 0.31, not the newer 0.32: React Native's generator (uniffi-bindgen-react-native)
+# is built against exactly 0.31, and every binding is generated from this one
+# crate — so all of them stay on one UniFFI version.
+uniffi = "0.31"
 serde_json = { workspace = true }
 # The client API is async and reqwest needs a tokio runtime, so this crate
 # owns one, like the C ABI does — the core itself stays runtime-agnostic.

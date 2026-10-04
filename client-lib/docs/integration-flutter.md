@@ -10,7 +10,7 @@ what `api.md` says, as in every other binding.
 
 **What you need:** the [Dart SDK](https://dart.dev) 3.4 or newer (or Flutter),
 and a Rust toolchain to build the native library. Nothing is published to pub.dev
-yet; you use the package from this repository, `client-lib/bindings/dart`.
+yet; you use the packages from this repository: `client-lib/bindings/dart` (pure Dart) and `client-lib/bindings/flutter` (the Flutter plugin).
 
 ## Build and run the example
 
@@ -29,7 +29,8 @@ cd ..
 dart pub get
 
 # 3. Run the example against a server, with a credential of scope `client`
-#    (in server/: npm run create-client -- --name dart-example --scope client).
+#    (in server/: npm run create-client -- --name dart-example --scope client;
+#    in the Docker stack: server/docs/installation.md, "Create the first client").
 TN_DART_LIB=rust/target/release/libtrafficnetwork_dart.so \
 TN_NODE=http://localhost:3000 TN_CLIENT_ID=… TN_CLIENT_SECRET=… \
   dart run example/trafficnetwork_example.dart
@@ -69,6 +70,8 @@ the raw `{"ok"|"error"}` text.
 
 Things an app usually wants on top of that:
 
+- **Initialize once:** `initialize()` may be called again (a second screen, a
+  test) — it returns the first call's result instead of loading the library twice.
 - **Keep it fresh:** call `client.tick()` from a timer; it is cheap and syncs
   only when due. Nothing runs by itself.
 - **Live updates:** `client.startRealtime()` keeps a WebSocket open on the
@@ -96,17 +99,71 @@ Things an app usually wants on top of that:
 - **Storage** is SQLite on the device (with a spatial index), written
   synchronously — the same store as every desktop build.
 
-## Where the native library has to be
+## In a Flutter app (Android and iOS)
 
-`initialize()` loads it. In a plain Dart program, pass `libraryPath:`. In a
-Flutter app, the library has to be bundled for each platform the app targets
-(the file names are the ones above; Android also needs one build per ABI,
-made with `cargo ndk` as in `integration-android.md`, step 1, with
-`-p trafficnetwork-dart` run from `bindings/dart/rust`). This guide covers the
-Dart side; bundling it into a Flutter app is described, with its own build in
-CI, in the packaging section once it exists — see `docs/status.md`.
+`bindings/flutter` is a Flutter plugin, `trafficnetwork_flutter`, that bundles
+the native library — Android (one `.so` per ABI) and iOS (a static
+XCFramework) — so that adding the package is all an app does. It re-exports
+everything in `package:trafficnetwork` and adds an `initialize()` that loads the
+bundled library.
+
+All paths are relative to `client-lib/`; a Rust toolchain is needed once, to
+build the library into the plugin (the results are not checked in):
+
+```bash
+# Android (needs cargo-ndk, an NDK via ANDROID_NDK_HOME, the four Rust Android
+# targets — see integration-android.md, step 1):
+bash bindings/flutter/build-native.sh android
+# iOS (on a Mac, with the three Rust iOS targets: aarch64-apple-ios,
+# aarch64-apple-ios-sim, x86_64-apple-ios):
+bash bindings/flutter/build-native.sh ios
+```
+
+Then, in a Flutter app (`flutter create my_app && cd my_app`):
+
+```bash
+flutter pub add path_provider
+flutter pub add trafficnetwork_flutter --path <this repository>/client-lib/bindings/flutter
+```
+
+and replace `lib/main.dart` with `bindings/flutter/example/lib/main.dart` (set
+the three constants at its top first). Its core is:
+
+```dart
+import 'package:path_provider/path_provider.dart';
+import 'package:trafficnetwork_flutter/trafficnetwork_flutter.dart';
+
+await initialize(); // loads the library the plugin bundled
+
+final support = await getApplicationSupportDirectory();
+final client = await TrafficNetworkClient.create({
+  'storagePath': '${support.path}/trafficnetwork', // the app's private directory
+  'discovery': false,
+  'nodes': ['https://node.example.org'],
+  'credentials': {'type': 'client', 'clientId': '…', 'clientSecret': '…'},
+});
+await client.updatePosition(52.52, 13.405);
+await client.sync();
+print(await client.getSpeedLimitAt(52.52, 13.405));
+```
+
+Then `flutter run` as for any app. The Android plugin packages the library into
+the APK (`lib/<abi>/libtrafficnetwork_dart.so`); on iOS the static library is
+linked into the app's executable (`-force_load`, with the app's symbols left
+unstripped — Dart finds the library's functions by name at run time, so nothing
+refers to them and a linker would otherwise drop them; the podspec sets both).
+
+On desktop the plugin bundles nothing: build the library for the platform and
+pass `initialize(libraryPath: '…')`.
 
 ## Verified in CI
+
+`flutter-android` and `flutter-ios` (Android on Linux, iOS on a macOS runner):
+the library is built into the plugin, a **brand-new Flutter app** is created the
+way this guide says (`flutter create`, add the package, paste the example),
+analyzed, and built — an APK that is checked to contain
+`libtrafficnetwork_dart.so`, an unsigned release build for an iOS device, and a
+debug build for the iOS simulator. The plugin and the APK are kept as artifacts.
 
 `dart-package` (Dart VM on Linux):
 
@@ -122,7 +179,10 @@ CI, in the packaging section once it exists — see `docs/status.md`.
   back into Dart);
 - the example above runs against the scripted server and its output is checked.
 
-**Not verified in CI, said plainly:** nothing runs in a Flutter app on a phone
-or an emulator. The Dart code and the Rust code that run in the conformance test
-are the shipped ones; what differs on a device is the CPU, the operating
-system's libc and network stack, and Flutter's own engine.
+**Not verified in CI, said plainly:** the Flutter apps are *built*, not *run* —
+nothing executes on a phone, an emulator or an iOS simulator. The Dart code and
+the Rust code that run in the conformance test are the shipped ones; what
+differs on a device is the CPU, the operating system's libc and network stack,
+Flutter's own engine, and — on iOS — whether the linker really keeps the
+library's functions (the build links; whether `dlsym` finds them at run time is
+only known by running it).

@@ -164,6 +164,44 @@ impl Platform {
     }
 }
 
+/// The push endpoint of a node, from its base address. Nodes are listed by their
+/// `http(s)://` address (the one every HTTP call uses), but a WebSocket
+/// connection needs the `ws(s)://` scheme — neither `tokio-tungstenite` nor a
+/// browser's `WebSocket` accepts `http(s)://` — so it is swapped here, once, for
+/// every platform.
+fn push_url(address: &str) -> String {
+    let base = address.trim_end_matches('/');
+    let base = if let Some(rest) = base.strip_prefix("https://") {
+        format!("wss://{rest}")
+    } else if let Some(rest) = base.strip_prefix("http://") {
+        format!("ws://{rest}")
+    } else {
+        base.to_string()
+    };
+    format!("{base}/v1/ws")
+}
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod push_url_tests {
+    use super::push_url;
+
+    #[test]
+    fn the_http_scheme_becomes_the_websocket_scheme() {
+        let plain = push_url("http://localhost:3000");
+        assert_eq!(plain, "ws://localhost:3000/v1/ws");
+        let secure = push_url("https://node.example.org");
+        assert_eq!(secure, "wss://node.example.org/v1/ws");
+    }
+
+    #[test]
+    fn a_trailing_slash_and_an_address_that_already_is_a_websocket_url_are_fine() {
+        let slash = push_url("https://node.example.org/");
+        assert_eq!(slash, "wss://node.example.org/v1/ws");
+        let already = push_url("ws://127.0.0.1:9");
+        assert_eq!(already, "ws://127.0.0.1:9/v1/ws");
+    }
+}
+
 struct CachedToken {
     access_token: String,
     expires_at_ms: i64,
@@ -957,7 +995,7 @@ impl TrafficNetworkClient {
                 }
             };
 
-            let url = format!("{}/v1/ws", server.address.trim_end_matches('/'));
+            let url = push_url(&server.address);
             let connect_started = self.now();
             let mut connection = match self.ws.connect(&url).await {
                 Ok(connection) => {

@@ -12,6 +12,15 @@ on:
       - "client-lib/**"
       - "server/tests/support/**"
       - ".github/workflows/client-lib-ci.yml"
+  # The release workflow (release.yml, tag client-lib-v*) runs these very jobs
+  # and attaches the artifacts they produce: what is released is what was tested.
+  workflow_call:
+
+# A newer push to the same branch makes the older run pointless (and the macOS
+# jobs are slow): cancel it.
+concurrency:
+  group: client-lib-ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 defaults:
   run:
@@ -197,12 +206,142 @@ jobs:
           path: client-lib/bindings/c-abi/trafficnetwork.h
           retention-days: 14
 
+  # The C ABI on every desktop platform it is meant for: it builds, its own
+  # tests pass, and the release library is kept as an artifact. The Linux
+  # build is also what most other jobs here use; Windows and macOS are only
+  # ever built here.
+  c-abi:
+    name: build + test (C ABI, ${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # The oldest Ubuntu runner on purpose: a library built against an
+          # older glibc loads on more systems.
+          - os: ubuntu-22.04
+            library: libtrafficnetwork.so
+          - os: macos-latest
+            library: libtrafficnetwork.dylib
+          - os: windows-latest
+            library: trafficnetwork.dll
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+        working-directory: client-lib
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ runner.os == 'macOS' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+
+      # The key names the runner: objects built on one Ubuntu release do not
+      # link on another (glibc symbols differ).
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: client-lib
+          key: c-abi-${{ matrix.os }}
+
+      - name: Test
+        run: cargo test -p trafficnetwork-c-abi
+
+      - name: Build the release library
+        run: |
+          mkdir -p dist
+          if [ "$RUNNER_OS" = "macOS" ]; then
+            # One library for Apple silicon and Intel Macs.
+            cargo build -p trafficnetwork-c-abi --release --target aarch64-apple-darwin
+            cargo build -p trafficnetwork-c-abi --release --target x86_64-apple-darwin
+            lipo -create -output dist/${{ matrix.library }}               target/aarch64-apple-darwin/release/${{ matrix.library }}               target/x86_64-apple-darwin/release/${{ matrix.library }}
+            mkdir -p target/release && cp dist/${{ matrix.library }} target/release/
+          else
+            cargo build -p trafficnetwork-c-abi --release
+            cp target/release/${{ matrix.library }} dist/
+          fi
+          ls -l dist
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: trafficnetwork-c-abi-${{ matrix.os }}
+          path: client-lib/dist/${{ matrix.library }}
+          retention-days: 14
+
+      # What docs/integration-c.md tells a reader to build must work, not merely
+      # compile: the header from cbindgen, the example compiled and linked with
+      # the platform's own C compiler, and run against the scripted server.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Cache cbindgen
+        id: cbindgen-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin/cbindgen*
+          key: cbindgen-${{ runner.os }}-v1
+
+      - name: Install cbindgen
+        if: steps.cbindgen-cache.outputs.cache-hit != 'true'
+        run: cargo install --locked cbindgen
+
+      - name: Generate the header
+        working-directory: client-lib/bindings/c-abi
+        run: cbindgen --config cbindgen.toml --output trafficnetwork.h
+
+      - name: Compile the integration guide's example
+        working-directory: client-lib/bindings/c-abi/example
+        run: |
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            gcc example.c -I.. ../../../target/release/trafficnetwork.dll -o example.exe
+            cp ../../../target/release/trafficnetwork.dll .
+          else
+            cc example.c -I.. -L../../../target/release -ltrafficnetwork -o example
+          fi
+
+      - name: Run it against the scripted server
+        working-directory: client-lib/bindings/c-abi/example
+        env:
+          LD_LIBRARY_PATH: ${{ github.workspace }}/client-lib/target/release
+          DYLD_LIBRARY_PATH: ${{ github.workspace }}/client-lib/target/release
+        run: |
+          node ../../../conformance/mock-server.mjs --port 18998 > mock.log 2>&1 &
+          for i in $(seq 1 50); do
+            curl -sf -X POST http://127.0.0.1:18998/__instances -d '{}' > /dev/null && break
+            sleep 0.2
+          done
+          URL=$(curl -sf -X POST http://127.0.0.1:18998/__instances -d '{}' | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>console.log(JSON.parse(s).url))")
+          if [ "$RUNNER_OS" = "Windows" ]; then program=./example.exe; else program=./example; fi
+          TN_NODE="$URL" TN_CLIENT_ID=example TN_CLIENT_SECRET=example "$program" | tee example.out
+          grep -q "sync ok: true" example.out
+          grep -q "queued report; sync ok: true" example.out
+
+      - name: Scripted server log
+        if: failure()
+        run: cat client-lib/bindings/c-abi/example/mock.log
+
   # The conformance scenarios (conformance/scenarios.json) through each binding,
   # against the scripted server (conformance/mock-server.mjs). Every binding
-  # runs the same scenarios and has to give the same answers.
+  # runs the same scenarios and has to give the same answers. The Python
+  # binding runs on all three desktop platforms — the C ABI is the same code
+  # there, the operating system's file, process and network behavior is not.
   conformance-python:
-    name: conformance (Python over the C ABI)
-    runs-on: ubuntu-latest
+    name: conformance (Python over the C ABI, ${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            library: libtrafficnetwork.so
+          - os: macos-latest
+            library: libtrafficnetwork.dylib
+          - os: windows-latest
+            library: trafficnetwork.dll
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+        working-directory: client-lib
     steps:
       - uses: actions/checkout@v4
 
@@ -211,6 +350,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: client-lib
+          key: python
 
       - uses: actions/setup-node@v4
         with:
@@ -234,8 +374,22 @@ jobs:
       - name: Run the scenarios
         env:
           MOCK_URL: http://127.0.0.1:18990
-          TRAFFICNETWORK_LIB: ${{ github.workspace }}/client-lib/target/debug/libtrafficnetwork.so
+          TRAFFICNETWORK_LIB: ${{ github.workspace }}/client-lib/target/debug/${{ matrix.library }}
         run: python conformance/run_python.py
+
+      # What docs/integration-python.md tells a reader to run must work, not merely
+      # compile: its example, against the mock, with a check that it really synced
+      # and queued a report.
+      - name: Run the integration guide's example
+        working-directory: client-lib/bindings/python
+        env:
+          TRAFFICNETWORK_LIB: ${{ github.workspace }}/client-lib/target/debug/${{ matrix.library }}
+          PYTHONPATH: .
+        run: |
+          URL=$(curl -sf -X POST http://127.0.0.1:18990/__instances -d '{}' | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>console.log(JSON.parse(s).url))")
+          TN_NODE="$URL" TN_CLIENT_ID=example TN_CLIENT_SECRET=example python example.py | tee example.out
+          grep -q "sync ok: true" example.out
+          grep -q "queued report" example.out
 
       - name: Scripted server log
         if: failure()
@@ -649,8 +803,8 @@ jobs:
       - name: Install the code generator
         if: steps.codegen-cache.outputs.cache-hit != 'true'
         run: |
-          cargo install flutter_rust_bridge_codegen --version 2.13.0 --locked
-          cargo install cargo-expand --locked
+          cargo install flutter_rust_bridge_codegen --version 2.13.0 --locked --force
+          cargo install cargo-expand --locked --force
 
       - name: Install the package's dependencies
         working-directory: client-lib/bindings/dart
@@ -727,6 +881,476 @@ jobs:
         if: failure()
         run: cat mock.log
 
+  # Add-on B5: the npm packages as tarballs that stand on their own
+  # (bindings/pack-npm.mjs), and proof that what is in them works: they are
+  # installed into an empty project, and the guides' examples run from the
+  # *installed* packages — the Node one against the mock server, the browser
+  # one in headless Chrome. The tarballs are kept as artifacts; nothing is
+  # published.
+  npm-packages:
+    name: npm packages (pack, install, run)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: client-lib
+          key: npm
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      # Pinned: see the comment at the first use of this action.
+      - uses: jetli/wasm-pack-action@v0.4.0
+        with:
+          version: "v0.13.1"
+
+      - name: Build the WebAssembly package and the native library
+        run: |
+          (cd bindings/wasm && wasm-pack build --target web --out-dir pkg)
+          cargo build -p trafficnetwork-c-abi
+
+      - name: Pack
+        run: node bindings/pack-npm.mjs "$PWD/dist/npm"
+
+      - name: Start the scripted server
+        run: |
+          node conformance/mock-server.mjs --port 18996 > mock.log 2>&1 &
+          for i in $(seq 1 50); do
+            curl -sf -X POST http://127.0.0.1:18996/__instances -d '{}' > /dev/null && break
+            sleep 0.2
+          done
+
+      - name: Install the Node package into an empty project and run its example
+        env:
+          TRAFFICNETWORK_LIB: ${{ github.workspace }}/client-lib/target/debug/libtrafficnetwork.so
+        run: |
+          mkdir -p "$RUNNER_TEMP/consumer-node" && cd "$RUNNER_TEMP/consumer-node"
+          npm init -y > /dev/null
+          npm install "$GITHUB_WORKSPACE"/client-lib/dist/npm/trafficnetwork-client-node-*.tgz
+          node --input-type=module -e "import { libraryVersion } from '@trafficnetwork/client-node'; console.log('library', libraryVersion())"
+          URL=$(curl -sf -X POST http://127.0.0.1:18996/__instances -d '{}' | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>console.log(JSON.parse(s).url))")
+          TN_NODE="$URL" TN_CLIENT_ID=example TN_CLIENT_SECRET=example             node node_modules/@trafficnetwork/client-node/example.mjs | tee example.out
+          grep -q "sync ok: true" example.out
+          grep -q "queued report" example.out
+
+      - name: Install the browser package into an empty project and run its example in Chrome
+        env:
+          MOCK_URL: http://127.0.0.1:18996
+          CHROME_PATH: /usr/bin/google-chrome
+        run: |
+          mkdir -p "$RUNNER_TEMP/consumer-web" && cd "$RUNNER_TEMP/consumer-web"
+          npm init -y > /dev/null
+          npm install "$GITHUB_WORKSPACE"/client-lib/dist/npm/trafficnetwork-client-web-*.tgz
+          cd "$GITHUB_WORKSPACE/client-lib/conformance" && npm ci
+          TN_WEB_PACKAGE="$RUNNER_TEMP/consumer-web/node_modules/@trafficnetwork/client-web"             node run_web_example.mjs
+
+      - name: Scripted server log
+        if: failure()
+        run: cat mock.log
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: trafficnetwork-npm-packages
+          path: client-lib/dist/npm/*.tgz
+          retention-days: 14
+
+  # Add-on B5: the Flutter plugin (bindings/flutter) with the native library
+  # bundled, on Android: the library for four ABIs built into the plugin, a
+  # brand-new Flutter app created the way docs/integration-flutter.md says
+  # (`flutter create`, add the package, paste the example), and that app
+  # built. What this proves is that it builds and that the APK contains the
+  # library; it does not run the app (see the emulator step, if present, for
+  # what does).
+  flutter-android:
+    name: build (Flutter plugin + example app, Android)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android,armv7-linux-androideabi,x86_64-linux-android,i686-linux-android
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: client-lib/bindings/dart/rust
+          key: flutter-android
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Cache cargo-ndk
+        id: ndk-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin/cargo-ndk
+          key: cargo-ndk-${{ runner.os }}-v4
+
+      - name: Install cargo-ndk
+        if: steps.ndk-cache.outputs.cache-hit != 'true'
+        run: cargo install --locked cargo-ndk
+
+      - name: Build the native library into the plugin
+        run: bash bindings/flutter/build-native.sh android
+
+      - name: Create a Flutter app that uses the plugin, and build it
+        run: |
+          cd "$RUNNER_TEMP"
+          flutter create --platforms=android --project-name trafficnetwork_example_app app
+          cd app
+          flutter pub add path_provider
+          flutter pub add trafficnetwork_flutter --path "$GITHUB_WORKSPACE/client-lib/bindings/flutter"
+          cp "$GITHUB_WORKSPACE/client-lib/bindings/flutter/example/lib/main.dart" lib/main.dart
+          rm -f test/widget_test.dart   # the template's test is for the template's main.dart
+          flutter analyze
+          flutter build apk --debug
+          unzip -l build/app/outputs/flutter-apk/app-debug.apk | grep libtrafficnetwork_dart.so
+          cp build/app/outputs/flutter-apk/app-debug.apk "$GITHUB_WORKSPACE/client-lib/flutter-example-debug.apk"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: trafficnetwork-flutter-plugin-android
+          path: |
+            client-lib/bindings/flutter/pubspec.yaml
+            client-lib/bindings/flutter/lib
+            client-lib/bindings/flutter/android
+            client-lib/bindings/flutter/LICENSE
+            client-lib/flutter-example-debug.apk
+          retention-days: 14
+
+  # The same on iOS, on a macOS runner: the static library as an XCFramework in
+  # the plugin, a fresh Flutter app, built for a device (release, unsigned) and
+  # for the simulator. It builds and links; it is not run here.
+  flutter-ios:
+    name: build (Flutter plugin + example app, iOS)
+    runs-on: macos-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-ios,aarch64-apple-ios-sim,x86_64-apple-ios
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: client-lib/bindings/dart/rust
+          key: flutter-ios
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Build the native library into the plugin
+        run: bash bindings/flutter/build-native.sh ios
+
+      - name: Create a Flutter app that uses the plugin, and build it
+        run: |
+          cd "$RUNNER_TEMP"
+          flutter create --platforms=ios --project-name trafficnetwork_example_app app
+          cd app
+          flutter pub add path_provider
+          flutter pub add trafficnetwork_flutter --path "$GITHUB_WORKSPACE/client-lib/bindings/flutter"
+          cp "$GITHUB_WORKSPACE/client-lib/bindings/flutter/example/lib/main.dart" lib/main.dart
+          rm -f test/widget_test.dart   # the template's test is for the template's main.dart
+          flutter analyze
+          flutter build ios --release --no-codesign
+          flutter build ios --simulator --debug
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: trafficnetwork-flutter-plugin-ios
+          path: |
+            client-lib/bindings/flutter/pubspec.yaml
+            client-lib/bindings/flutter/lib
+            client-lib/bindings/flutter/ios
+            client-lib/bindings/flutter/LICENSE
+          retention-days: 14
+
+  # Add-on B5: React Native. The library (a turbo module) is generated around
+  # the very UniFFI crate Kotlin and Swift come from, by
+  # uniffi-bindgen-react-native: scaffold (bindings/react-native/scaffold.mjs),
+  # build the Rust for Android and generate the TypeScript/C++ bindings, type-check
+  # the library, and build an example app that uses it. Builds only: the app is
+  # not run.
+  react-native-android:
+    name: build (React Native library + example app, Android)
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android,armv7-linux-androideabi,x86_64-linux-android,i686-linux-android
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: client-lib
+          key: rn-android
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Cache cargo-ndk
+        id: ndk-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin/cargo-ndk
+          key: cargo-ndk-${{ runner.os }}-v4
+
+      - name: Install cargo-ndk
+        if: steps.ndk-cache.outputs.cache-hit != 'true'
+        run: cargo install --locked cargo-ndk
+
+      - name: Scaffold the React Native library
+        run: node bindings/react-native/scaffold.mjs
+
+      # The library is generated, so there is no lockfile yet; yarn refuses to
+      # create one on CI unless told otherwise.
+      - name: Install its dependencies
+        working-directory: client-lib/bindings/react-native/library
+        env:
+          YARN_ENABLE_IMMUTABLE_INSTALLS: "false"
+        run: |
+          corepack enable
+          yarn install
+
+      - name: Build the Rust for Android and generate the bindings
+        working-directory: client-lib/bindings/react-native/library
+        run: yarn ubrn:android
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: trafficnetwork-react-native-generated
+          path: |
+            client-lib/bindings/react-native/library/src
+            client-lib/bindings/react-native/library/cpp
+            client-lib/bindings/react-native/library/android/CMakeLists.txt
+            client-lib/bindings/react-native/library/android/src/main/java
+          retention-days: 14
+
+      # `yarn prepare` is react-native-builder-bob: React Native's own codegen
+      # (the native module spec the generated Kotlin extends), the JavaScript
+      # build of the library, and its type declarations — what a library ships.
+      - name: Build the library
+        working-directory: client-lib/bindings/react-native/library
+        run: yarn prepare
+
+      - name: Type-check the library
+        working-directory: client-lib/bindings/react-native/library
+        run: yarn typecheck
+
+      - name: Build the example app
+        working-directory: client-lib/bindings/react-native/library/example/android
+        run: ./gradlew assembleDebug --no-daemon --console=plain -PreactNativeArchitectures=arm64-v8a
+
+      # The library as the package a React Native app installs: the Android
+      # half here (the Rust for four ABIs, the generated bindings, the JavaScript
+      # build); the iOS half is packed by react-native-ios. The release job
+      # merges the two.
+      - name: Pack the library (Android half)
+        working-directory: client-lib/bindings/react-native/library
+        run: |
+          mkdir -p "$GITHUB_WORKSPACE/client-lib/dist/rn"
+          yarn pack --out "$GITHUB_WORKSPACE/client-lib/dist/rn/trafficnetwork-react-native-android.tgz"
+          tar tzf "$GITHUB_WORKSPACE/client-lib/dist/rn/trafficnetwork-react-native-android.tgz" | grep -E "jniLibs|lib/module|src/generated" | head -20
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: trafficnetwork-react-native-android
+          path: client-lib/dist/rn/trafficnetwork-react-native-android.tgz
+          retention-days: 14
+
+  # What flutter-android cannot show: the app *running*. The same freshly
+  # created Flutter app, with an integration test added, on an Android
+  # emulator (x86_64, hardware-accelerated) — the library loads from the APK,
+  # a client syncs against the scripted server running on the host
+  # (10.0.2.2 is the emulator's name for it), and a secret store implemented in
+  # Dart is called by the library. The first place anything of this library
+  # executes on Android.
+  flutter-android-emulator:
+    name: run (Flutter app on an Android emulator)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-linux-android
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: client-lib/bindings/dart/rust
+          key: flutter-android-emulator
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Cache cargo-ndk
+        id: ndk-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin/cargo-ndk
+          key: cargo-ndk-${{ runner.os }}-v4
+
+      - name: Install cargo-ndk
+        if: steps.ndk-cache.outputs.cache-hit != 'true'
+        run: cargo install --locked cargo-ndk
+
+      # Only the emulator's own ABI: this job is about running, not packaging.
+      - name: Build the native library into the plugin (x86_64 only)
+        working-directory: client-lib/bindings/dart/rust
+        run: |
+          rm -rf ../../flutter/android/src/main/jniLibs
+          cargo ndk -t x86_64 -o ../../flutter/android/src/main/jniLibs build --release
+
+      - name: Start the scripted server
+        run: |
+          node conformance/mock-server.mjs --port 18997 > mock.log 2>&1 &
+          for i in $(seq 1 50); do
+            curl -sf -X POST http://127.0.0.1:18997/__instances -d '{}' > /dev/null && break
+            sleep 0.2
+          done
+
+      - name: Create the app and add the test
+        run: |
+          URL=$(curl -sf -X POST http://127.0.0.1:18997/__instances -d '{}' | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>console.log(JSON.parse(s).url))")
+          echo "TN_NODE=${URL/127.0.0.1/10.0.2.2}" >> "$GITHUB_ENV"
+          cd "$RUNNER_TEMP"
+          flutter create --platforms=android --project-name trafficnetwork_example_app app
+          cd app
+          flutter pub add path_provider
+          flutter pub add trafficnetwork_flutter --path "$GITHUB_WORKSPACE/client-lib/bindings/flutter"
+          flutter pub add dev:integration_test --sdk flutter
+          mkdir integration_test
+          cp "$GITHUB_WORKSPACE/client-lib/bindings/flutter/example/integration_test/app_test.dart" integration_test/
+          rm -f test/widget_test.dart
+          # The scripted server speaks plain http; Android refuses that by default.
+          sed -i 's|<application|<application android:usesCleartextTraffic="true"|' android/app/src/main/AndroidManifest.xml
+
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Run the test on the emulator
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          arch: x86_64
+          target: google_apis
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          disable-animations: true
+          working-directory: ${{ runner.temp }}/app
+          script: flutter test integration_test --dart-define=TN_NODE=${{ env.TN_NODE }}
+
+      - name: Scripted server log
+        if: failure()
+        run: cat mock.log
+
+  # The same on iOS, on a macOS runner: the Rust for the iOS targets as an
+  # XCFramework, the bindings, `pod install`, and the example app built for the
+  # simulator. Builds only: the app is not run.
+  react-native-ios:
+    name: build (React Native library + example app, iOS)
+    runs-on: macos-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-ios,aarch64-apple-ios-sim,x86_64-apple-ios
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: client-lib
+          key: rn-ios
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Scaffold the React Native library
+        run: node bindings/react-native/scaffold.mjs
+
+      - name: Install its dependencies
+        working-directory: client-lib/bindings/react-native/library
+        env:
+          YARN_ENABLE_IMMUTABLE_INSTALLS: "false"
+        run: |
+          corepack enable
+          yarn install
+
+      - name: Build the Rust for iOS and generate the bindings
+        working-directory: client-lib/bindings/react-native/library
+        run: yarn ubrn:ios
+
+      - name: Build the library
+        working-directory: client-lib/bindings/react-native/library
+        run: yarn prepare
+
+      # After the codegen: the pods list the files it wrote.
+      - name: Install the pods
+        working-directory: client-lib/bindings/react-native/library
+        run: yarn ubrn:pods
+
+      - name: Build the example app for the simulator
+        working-directory: client-lib/bindings/react-native/library/example/ios
+        run: |
+          workspace=$(ls -d *.xcworkspace | head -1)
+          scheme="${workspace%.xcworkspace}"
+          xcodebuild build -workspace "$workspace" -scheme "$scheme" -configuration Debug             -sdk iphonesimulator -destination 'generic/platform=iOS Simulator'             -derivedDataPath build CODE_SIGNING_ALLOWED=NO
+
+      - name: Pack the library (iOS half)
+        working-directory: client-lib/bindings/react-native/library
+        run: |
+          mkdir -p "$GITHUB_WORKSPACE/client-lib/dist/rn"
+          yarn pack --out "$GITHUB_WORKSPACE/client-lib/dist/rn/trafficnetwork-react-native-ios.tgz"
+          tar tzf "$GITHUB_WORKSPACE/client-lib/dist/rn/trafficnetwork-react-native-ios.tgz" | grep -E "xcframework|lib/module|ios/generated" | head -20
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: trafficnetwork-react-native-ios
+          path: client-lib/dist/rn/trafficnetwork-react-native-ios.tgz
+          retention-days: 14
+
   # Add-on B3: the hand-written .d.ts files of both JS bindings, compiled
   # against a typed usage file (never run) — a declaration that drifts from
   # what the integration guides tell a host app to write stops compiling.
@@ -794,3 +1418,113 @@ jobs:
         if: always()
         working-directory: server
         run: cat multi-node-harness.log
+
+  # One line that says whether every binding passed the same scenario set:
+  # the C ABI (through Python on three operating systems, and through Node.js),
+  # WebAssembly, and the three mobile bindings. Each of those jobs runs
+  # conformance/scenarios.json with the same expectations; this job only
+  # collects their verdicts, so "same behavior everywhere" has one status to
+  # point at.
+  conformance:
+    name: conformance (every binding, same scenarios)
+    needs:
+      - conformance-python
+      - conformance-node
+      - conformance-web
+      - conformance-kotlin
+      - swift-package
+      - dart-package
+    if: always()
+    runs-on: ubuntu-latest
+    # No checkout here, so no client-lib/ directory to run in.
+    defaults:
+      run:
+        working-directory: .
+    steps:
+      - name: Collect the verdicts
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+        run: |
+          echo "$NEEDS" | node -e "
+            const needs = JSON.parse(require('fs').readFileSync(0, 'utf8'));
+            const names = {
+              'conformance-python': 'C ABI via Python (Linux, macOS, Windows)',
+              'conformance-node': 'C ABI via Node.js',
+              'conformance-web': 'WebAssembly in headless Chrome',
+              'conformance-kotlin': 'Kotlin (UniFFI) on the JVM',
+              'swift-package': 'Swift (UniFFI) on macOS',
+              'dart-package': 'Dart (flutter_rust_bridge) on the Dart VM',
+            };
+            let failed = 0;
+            let table = '| Binding | Result |\n|---|---|\n';
+            for (const [job, label] of Object.entries(names)) {
+              const result = needs[job].result;
+              if (result !== 'success') failed += 1;
+              table += '| ' + label + ' | ' + result + ' |\n';
+            }
+            console.log(table);
+            require('fs').appendFileSync(process.env.GITHUB_STEP_SUMMARY, table);
+            process.exit(failed ? 1 : 0);
+          "
+
+  # Every package carries the version of the Rust workspace.
+  versions:
+    name: package versions agree
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - run: node release/check-versions.mjs
+
+  # The release files, assembled from what the jobs above built — on every
+  # build, not only at release time, so the assembly (the C ABI per platform,
+  # the AAR, the Swift package, the npm packages, the Python wheel, the Dart
+  # package, the Flutter plugin with both platforms' libraries, the React Native
+  # package with both halves) is known to work long before it is needed. The
+  # release workflow (release.yml, tag client-lib-v*) attaches exactly these
+  # files to a GitHub Release. Nothing is published anywhere.
+  release-files:
+    name: release files (assembled, with checksums)
+    needs:
+      - c-abi
+      - c-abi-header
+      - android-aar
+      - swift-package
+      - npm-packages
+      - flutter-android
+      - flutter-ios
+      - react-native-android
+      - react-native-ios
+      - versions
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: .
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Assemble
+        run: bash client-lib/release/assemble.sh
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: trafficnetwork-release-files
+          path: release/*
+          retention-days: 14
+

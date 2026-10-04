@@ -14,7 +14,7 @@ trafficnetwork-core = { path = "../../core" }
 serde_json = { workspace = true }
 # The client API is async and reqwest needs a tokio runtime, so this crate
 # owns one (client.rs) — the core itself stays runtime-agnostic.
-tokio = { version = "1", features = ["rt-multi-thread"] }
+tokio = { version = "1", features = ["rt-multi-thread", "sync"] }
 
 [dev-dependencies]
 sha2 = "0.10"
