@@ -23,6 +23,8 @@ Erster stabiler Release der Client-Bibliothek: **ein Rust-Kern, dünne Anbindung
 
 **Konformität:** derselbe Szenariensatz (`client-lib/conformance/scenarios.json`, 9 Szenarien, geskripteter Server mit echtem Ed25519/RFC 8785, unabhängig vom echten Server-Code) läuft mit gleichem Ergebnis über Python (drei Betriebssysteme), Node.js, WebAssembly, Kotlin, Swift und Dart; Kotlin, Swift und Dart über je eine kleine Brücke, die der **eine** Szenarien-Runner antreibt — die Szenarien werden nicht pro Sprache neu geschrieben. Jede Brücke läuft auch mit einem vom Host implementierten `SecureStore`. Keine Abweichung zwischen den Anbindungen gefunden; plattformbedingte Unterschiede (Speicher im Browser, Geheimnisse, Hintergrund) stehen in den Anleitungen.
 
+**Abnahme vom frischen Klon:** Server in Docker (`docker compose up -d`), echte API-Aufrufe, Weboberfläche und die Bibliothek über zwei Anbindungen (Python/C-ABI und Browser, aus den Release-Dateien) mit Registrieren, Bootstrap, Tempolimit, Meldung, Push und Offline-Puffer sowie dem Zusammenspiel mit der Weboberfläche — Befehle, Ausgaben und Bilder in [`docs/final-report.md`](docs/final-report.md), Abschnitt 4.
+
 **Unterwegs gefunden und behoben:**
 - **TLS auf Android:** reqwest 0.13 prüft Zertifikate standardmäßig mit dem Plattform-Verifier, der auf Android nur mit Handarbeit in jeder App funktioniert — ein AAR ohne Zusatz-Setup wäre auf Android nicht benutzbar gewesen. Der HTTP-Transport vertraut jetzt den eingebauten Mozilla-Wurzeln (der WebSocket-Transport tat es schon). Preis: ein Server mit privater CA wird nicht vertraut.
 - Aufrufe laufen auf Threads der Bibliothek mit 8-MiB-Stack, nicht auf denen des Hosts (Android-/JVM-/macOS-Threads haben 0,5–1 MiB) — vorher ein SIGSEGV im Node-Lauf.

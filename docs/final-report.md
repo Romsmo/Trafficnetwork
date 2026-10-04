@@ -40,6 +40,51 @@ Keiner dieser Punkte ist ein Code-Mangel — das sind durchweg Entscheidungen un
 
 ---
 
+## 4. Ende-zu-Ende-Lauf vom frischen Klon (client-lib 1.0.0, 2026-10-03/04)
+
+Vorgeführt, nicht behauptet: Server in Docker, API, Weboberfläche und die Client-Bibliothek über zwei Anbindungen — von einem frischen Klon und den **veröffentlichten Artefakten** aus, wie ein Fremder es täte. Befehle, Ausgaben und Bilder liegen unter [`docs/durchstich/evidence/`](durchstich/evidence/), die Skripte in [`docs/durchstich/`](durchstich/README.md) (jede Datei dort ist die Handarbeit dieses Laufs, keine Testsuite).
+
+**Aufbau.** Windows-11-PC, Docker Desktop 29.8, Python 3.12, Node. Klon: `git clone --branch rework/client-lib-release https://github.com/Romsmo/Trafficnetwork` (anonym, ohne Anmeldung; Stand `6171c1e`). Bibliothek: die Datei-Sammlung `trafficnetwork-release-files` des grünen CI-Laufs [37155564992](https://github.com/Romsmo/Trafficnetwork/actions/runs/37155564992) (Commit `cf84324`, 13 Dateien, `sha256sum -c checksums.txt` → alle OK, [`step0-checksum-verify.log`](durchstich/evidence/step0-checksum-verify.log)). Benutzt wurden daraus `trafficnetwork-1.0.0-py3-none-any.whl`, `trafficnetwork-c-abi-1.0.0-windows-x86_64.zip` und `trafficnetwork-client-web-1.0.0.tgz`. Nichts davon ist in einer Registry veröffentlicht; das GitHub-Release `client-lib-v1.0.0` gibt es noch nicht (Tag erst nach deiner Freigabe).
+
+**Umgebungsabweichung, offen genannt:** ein TLS-prüfender Virenscanner dieses PCs bricht `npm ci` im Docker-Build ab. Nur im Wegwerf-Klon steht deshalb `npm config set strict-ssl false &&` vor `npm ci` im `server/Dockerfile` — nicht committet, nicht Teil des Repos, auf einem PC ohne solchen Proxy nicht nötig. Das GHCR-Image `ghcr.io/romsmo/trafficnetwork-server` ist anonym **nicht** abrufbar (`unauthorized`); der Schnellstart baut deshalb lokal, wie die README es ohnehin beschreibt.
+
+### Punkt 1 — Server in Docker: bestanden
+`cp .env.example .env` (zwei Werte gesetzt), `docker compose up -d` → Postgres, Migrationen, Server; `GET /v1/health` → `{"status":"ok","database":"ok"}`, 19 Tabellen ([`step1-health.log`](durchstich/evidence/step1-health.log), [`step1-compose-up.log`](durchstich/evidence/step1-compose-up.log)). Kein verstecktes Zwischenstück — außer einem, das **bei der ersten Durchführung auffiel und repariert ist:** nach `docker compose down -v` hat `up -d` ein *vorhandenes altes Image* weiterverwendet (die Weboberfläche zeigte noch den alten Text). Das ist Compose-Standardverhalten; `server/docs/installation.md` sagt jetzt, dass nach neuem Code `up -d --build` nötig ist. Der gezeigte Lauf wurde danach mit `down -v --rmi local` ohne vorhandenes Image wiederholt (gebaut aus dem Klon; lokaler Layer-Cache, 17 s).
+
+### Punkt 2 — echte API-Aufrufe nach `server/docs/api.md`: bestanden
+Zugänge mit dem Snippet aus `server/docs/installation.md` („Create the first client“), dann [`api.sh`](durchstich/api.sh): Tempolimit-Segment importieren (Scope `bulk-import`), `GET /v1/speed-limit?lat=52.52&lng=13.405` → 30 km/h, `GET …/nearby` leer → `POST /v1/hazard-reports` (`201`, `merged:false`) → `POST …/confirmations` (anderer Zugang) → `GET …/nearby` zeigt die Meldung mit `confirmCount: 1` ([`step2-api.log`](durchstich/evidence/step2-api.log)). **Gefunden:** diesen ersten Zugang konnte man im Docker-Stack nach der damaligen Anleitung nicht anlegen (`server/scripts/` liegt nicht im Image) — repariert (Doku, keine Serveränderung).
+
+### Punkt 3 — Weboberfläche: bestanden, mit einem Fund, der behoben ist
+Karte lädt, auf Berlin zentriert; die per API gemeldete Meldung ist zu sehen ([`web-1`](durchstich/evidence/web-1-report-posted-via-api.jpg)); „Gefahr melden“ → Glätte → Kartenmitte → Melden: „Danke! Deine Meldung ist jetzt auf der Karte.“, der Marker erscheint **ohne Neuladen** ([`web-2`](durchstich/evidence/web-2-report-posted-via-ui.jpg)). Die Seite „Verbinden“ ([`web-3`](durchstich/evidence/web-3-connect-page.jpg)): die Docker-Schritte und die `curl`-Beispiele der Seite wurden wortgleich ausgeführt und stimmen ([`step3-connect-page-commands.log`](durchstich/evidence/step3-connect-page-commands.log)). **Gefunden:** die Seite versprach noch Codebeispiele „sobald die Plattform-Bindings der Bibliothek fertig sind“ — überholt. Text korrigiert (de/en, nur Text in `server/web/public/assets/i18n/`, eigener Commit im B5-PR; das ist eine kleine, bewusste Ausnahme von „keine Server-Änderungen“, siehe dort). Nicht auf der Seite, aber nötig: wie man den ersten Zugang anlegt — das steht in der verlinkten Installationsanleitung.
+
+### Punkt 4 — Bibliothek über zwei Anbindungen, nach den Anleitungen: bestanden
+**Native (Python-Wheel + C-ABI-DLL aus dem Release-Archiv, Windows)** — [`native.py`](durchstich/native.py), [`step4-native.log`](durchstich/evidence/step4-native.log): `native library 1.0.0`; Registrieren per App-Schlüssel (Scope `device-registration`; eigene Geräte-`clientId`, Schlüssel im `secure-store.json`) und Bootstrap beim ersten `sync()` → `ok=True`; `getSpeedLimitAt(52.52, 13.405)` → 30 km/h aus dem Bootstrap; Meldung abgesetzt (lokal sofort sichtbar, `sync` → `submitted=1`, beim Server unter der Geräte-ID); **Push** — eine Meldung eines anderen Geräts kommt als `dataChanged` an und ist danach lokal sichtbar; **Server gestoppt**, Meldung gepuffert (`sync` → `ok=False`, `dynamicDataError=network`, `pendingWrites=1`, lokal weiter sichtbar), Server gestartet, `sync` → `submitted=1`, beim Server angekommen.
+
+**Browser (`trafficnetwork-client-web-1.0.0.tgz` in ein leeres Projekt installiert, mit `python -m http.server` bedient)** — [`step4-web-example.log`](durchstich/evidence/step4-web-example.log), [`step4-browser.log`](durchstich/evidence/step4-browser.log): die **Beispielseite des Pakets** (`example/index.html`, so wie die Anleitung sie vorgibt) → `sync ok: true`, Tempolimit 30 km/h, „Report an accident“ → beim Server. Danach die Schritte aus [`browser.html`](durchstich/browser.html) (README-Muster des Pakets): Registrieren/Bootstrap, Tempolimit, Meldung (lokal sofort sichtbar, dann gesendet), **Push** (`startRealtime()`; eine Meldung eines anderen Zugangs kommt als `dataChanged` an, ohne ein weiteres `sync()`), **Offline-Puffer** (Server gestoppt → `ok:false, network, pendingWrites:1`; Server gestartet → `submitted:1`).
+
+### Punkt 5 — Zusammenspiel: bestanden
+Eine Meldung der Bibliothek (Browser) erscheint in der bereits offenen, nie neu geladenen Weboberfläche innerhalb von 4 s als „Hindernis“ ([`web-4`](durchstich/evidence/web-4-report-from-browser-library.jpg)); die Meldung, die dort über das Formular gemacht wird („Glätte“, [`web-5`](durchstich/evidence/web-5-report-posted-via-ui-seen-by-library.jpg)), liefert `getNearby` der Bibliothek nach dem nächsten `sync()` (`ice`, 0 m). Die Meldungen der nativen Anbindung und der Beispielseite stehen in der Weboberfläche (Stau, Unfall) und umgekehrt in der Bibliothek.
+
+### Was dieser Lauf gefunden hat (alles behoben, außer wo es steht)
+| Fund | Wirkung | Stand |
+|---|---|---|
+| **Push erreichte einen echten Server nie** — die Bibliothek öffnete `http://…/v1/ws` statt `ws://` | in keinem Mock-Test sichtbar; jede Anbindung ohne Push gegen einen echten Server | behoben im Kern (`push_url`), URL-Tests + Mehrknoten-Test gegen einen echten Server (CI) |
+| Erster Zugang im Docker-Stack nicht anlegbar | Fremder kommt nach dem Start nicht weiter | Doku: `server/docs/installation.md`; Anleitungen verweisen darauf |
+| `docker compose up` nutzt ein vorhandenes altes Image | „frischer“ Start zeigt alten Stand | Doku-Hinweis (`--build`) |
+| „Verbinden“-Seite versprach schon Fertiges als künftig | irreführend | Text korrigiert (B5-PR, eigener Commit) |
+| Windows-Archiv enthält die DLL, aber nicht deren Importbibliothek | MSVC-Nutzer können damit nicht linken | **offen, dokumentiert** in `client-lib/docs/releases.md` (MinGW/Laufzeitladen oder aus dem Quelltext bauen); verletzt keine Zusage, die Anleitung beschreibt den MinGW-Weg |
+| GHCR-Image anonym nicht abrufbar | `docker pull` scheitert | **offen**, Sache des Betreibers (Sichtbarkeit des Pakets); der Schnellstart baut lokal und ist davon unberührt |
+| TLS-prüfender Virenscanner dieses PCs | `npm ci` im Docker-Build scheitert | nur lokale Umgebung, nicht im Repo (siehe oben) |
+| Docker Desktop startete nach einem Neustart nicht | Wartezeit | bekannter Fehler, `tools/start-docker-desktop.ps1` |
+
+### Grenzen dieses Nachweises (so, wie sie sind)
+- **Ausgeführt** wurde die Bibliothek in diesem Lauf nur über Python/C-ABI (Windows) und den Browser (Chromium im eingebetteten Browser der Claude-Desktop-App). Kotlin/Android, Swift/iOS und React Native sind in CI gebaut, aber nicht ausgeführt (Konformität: JVM, macOS); die Flutter-App läuft in CI auf einem Android-Emulator. Das steht auch in den Anleitungen und in `client-lib/README.md`.
+- Alle Verbindungen dieses Laufs gingen über `http://localhost` — ein echter TLS-Handshake gegen einen Server ist hier wie in CI **nicht** geprüft.
+- Das Release-Workflow (`client-lib-v*`) ist nicht ausgeführt, weil es erst ein Tag auslöst; die Montage der Dateien (`release-files`) läuft dagegen in jedem CI-Lauf.
+- Der gezeigte Klon steht auf `6171c1e`; seitdem sind nur ein Test (`tn_library_version`-Prüfung), Doku und Dateien dieses Berichts dazugekommen, kein Bibliothekscode.
+
+---
+
 ## `docs/status.md` — mein Vorschlag
 
 **Bleibt vorerst.** Die Client-Bibliothek-Instanz arbeitet aktiv weiter (B3–B5), und `docs/status.md` ist genau dafür da: laufende Arbeit zwischen Instanzen zu koordinieren, ohne dass jede ihren eigenen Kontext neu aufbauen muss. Sie jetzt zu entfernen, würde diese Koordination beenden, während sie noch gebraucht wird.
