@@ -9,7 +9,6 @@ import { positionToRegionTile } from "../../src/lib/h3.js";
 import { startTestDatabase, type TestDatabase } from "./setup.js";
 import { authHeader, testToken } from "./auth-helper.js";
 import { insertHazardReport, insertSpeedLimitSegment } from "./helpers.js";
-import { createPolicyFixture, loadBoundaries, WORLD_AS_DE, type PolicyFixture } from "./camera-policy-helper.js";
 
 const MUNICH = { lat: 48.1374, lng: 11.5755 };
 
@@ -20,10 +19,9 @@ describe("web UI (server/web)", () => {
   let env: Env;
   let limited: FastifyInstance;
   let limitedEnv: Env;
-  let cameras: FastifyInstance;
+  let braked: FastifyInstance; // its camera emergency brake is on
   let corrections: FastifyInstance; // its own node: the session-minting limit is per app, and these tests mint a few sessions
   let off: FastifyInstance;
-  let cameraPolicy: PolicyFixture;
   const closers: (() => Promise<void>)[] = [];
 
   async function build(extra: Record<string, string> = {}): Promise<{ app: FastifyInstance; env: Env }> {
@@ -53,12 +51,9 @@ describe("web UI (server/web)", () => {
       WEB_REPORT_LIMIT_PER_SESSION: "100",
       WEB_REPORT_LIMIT_PER_IP_PER_HOUR: "4",
       WEB_WS_MAX_TILES_PER_CONNECTION: "10",
+      SPEED_CAMERA_NAMESPACE_ENABLED: "false", // the live-updates test below checks that a pulled brake silences the socket too
     }));
-    // Cameras are released for the one synthetic country that covers the test coordinates.
-    cameraPolicy = createPolicyFixture();
-    await loadBoundaries(testDb.db, WORLD_AS_DE);
-    cameraPolicy.write({ DE: "full" });
-    ({ app: cameras } = await build(cameraPolicy.env()));
+    ({ app: braked } = await build({ SPEED_CAMERA_NAMESPACE_ENABLED: "false" }));
     ({ app: off } = await build({ WEB_UI_ENABLED: "false" }));
     ({ app: corrections } = await build());
 
@@ -76,7 +71,6 @@ describe("web UI (server/web)", () => {
 
   afterAll(async () => {
     for (const close of closers) await close();
-    cameraPolicy.cleanup();
     await testDb.teardown();
   });
 
@@ -298,15 +292,15 @@ describe("web UI (server/web)", () => {
       expect(res.json().error.code).toBe("WEB_NO_DEVICE_SIGNATURE");
     });
 
-    it("refuses every camera category while the namespace flag is off, and allows them when the operator enabled it", async () => {
-      const token = await webToken(app);
+    it("allows the camera categories like any other (cameras are delivered by default), and refuses every one while the node's emergency brake is on", async () => {
+      const allowed = await report(app, await webToken(app), { type: "mobileSpeedCamera", lat: 48.4, lng: 11.8 });
+      expect(allowed.statusCode).toBe(201);
+      const token = await webToken(braked);
       for (const type of ["fixedSpeedCamera", "mobileSpeedCamera", "trailerCamera", "redLightCamera", "distanceControl"]) {
-        const res = await report(app, token, { type, lat: 48.4, lng: 11.8 });
+        const res = await report(braked, token, { type, lat: 48.4, lng: 11.8 });
         expect(res.statusCode, type).toBe(403);
         expect(res.json().error.code).toBe("WEB_TYPE_NOT_ALLOWED");
       }
-      const allowed = await report(cameras, await webToken(cameras), { type: "mobileSpeedCamera", lat: 48.4, lng: 11.8 });
-      expect(allowed.statusCode).toBe(201);
     });
 
     it("lets a web session confirm a report, counted once per session", async () => {
@@ -413,7 +407,7 @@ describe("web UI (server/web)", () => {
       expect(JSON.stringify(webEvent)).not.toContain("reporterId");
       expect(JSON.stringify(webEvent)).not.toContain("client_reporter");
 
-      // camera-namespace events are not pushed to anyone while the flag is off (REST hides them, the socket must too)
+      // camera-namespace events are not pushed to anyone while the emergency brake is on (REST hides them, the socket must too)
       const before = clientMessages.length;
       await limited.inject({ method: "POST", url: "/v1/hazard-reports", headers: authHeader(await testToken(limitedEnv, { sub: "client_reporter" })), payload: { type: "mobileSpeedCamera", lat: MUNICH.lat + 0.001, lng: MUNICH.lng + 0.001 } });
       await limited.inject({ method: "POST", url: "/v1/hazard-reports", headers: authHeader(await testToken(limitedEnv, { sub: "client_reporter" })), payload: { type: "ice", lat: MUNICH.lat - 0.003, lng: MUNICH.lng } });

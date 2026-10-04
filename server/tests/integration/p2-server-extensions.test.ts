@@ -168,7 +168,10 @@ describe("client-lib P2.0 server extensions", () => {
       expect(res.statusCode).toBe(200);
       const body = res.json();
       expect(body.regionTileH3Resolution).toBe(app.deps.env.REGION_TILE_H3_RESOLUTION);
-      expect(body.speedCameraNamespaceEnabled).toBe(false);
+      // Cameras are delivered by default; cameraPolicy says per country what (default full, no exceptions)
+      expect(body.speedCameraNamespaceEnabled).toBe(true);
+      expect(body.cameraPolicy).toMatchObject({ namespaceEnabled: true, defaultLevel: "full", byCountry: {}, zoneResolution: app.deps.env.CAMERA_ZONE_H3_RESOLUTION });
+      expect(body.cameraPolicy.notice.text.de.length).toBeGreaterThan(0);
       expect(body.hazardExpiryMsByType.traffic).toBeGreaterThan(0);
       expect(body.staticDataVersion).toBeTypeOf("number");
     });

@@ -11,7 +11,9 @@ describe("loadEnv", () => {
     resetEnvCache();
     const env = loadEnv(validEnv);
     expect(env.PORT).toBe(3000);
-    expect(env.SPEED_CAMERA_NAMESPACE_ENABLED).toBe(false);
+    // The emergency brake is released by default: cameras are delivered unless a signed policy takes a country back.
+    expect(env.SPEED_CAMERA_NAMESPACE_ENABLED).toBe(true);
+    expect(env.CAMERA_POLICY_LOCAL_CAPS).toBe("");
     expect(env.EVENT_LOG_RETENTION_DAYS_DYNAMIC).toBe(3);
     expect(env.EVENT_LOG_RETENTION_DAYS_STATIC).toBe(30);
     expect(env.REGION_TILE_H3_RESOLUTION).toBe(7);
@@ -29,10 +31,18 @@ describe("loadEnv", () => {
     ).toThrow(/JWT_SECRET/);
   });
 
-  it("coerces the camera-namespace flag from the literal string \"true\"", () => {
+  it("coerces the camera-namespace flag (the emergency brake) from the literal strings \"true\" and \"false\"", () => {
     resetEnvCache();
-    const env = loadEnv({ ...validEnv, SPEED_CAMERA_NAMESPACE_ENABLED: "true" });
-    expect(env.SPEED_CAMERA_NAMESPACE_ENABLED).toBe(true);
+    expect(loadEnv({ ...validEnv, SPEED_CAMERA_NAMESPACE_ENABLED: "true" }).SPEED_CAMERA_NAMESPACE_ENABLED).toBe(true);
+    resetEnvCache();
+    expect(loadEnv({ ...validEnv, SPEED_CAMERA_NAMESPACE_ENABLED: "false" }).SPEED_CAMERA_NAMESPACE_ENABLED).toBe(false);
+  });
+
+  it("rejects a camera zone resolution coarser than the package partition (a zone is carried by the package of its parent tile)", () => {
+    resetEnvCache();
+    expect(() => loadEnv({ ...validEnv, STATIC_DATA_PARTITION_H3_RESOLUTION: "6", CAMERA_ZONE_H3_RESOLUTION: "5" })).toThrow(/CAMERA_ZONE_H3_RESOLUTION/);
+    resetEnvCache();
+    expect(() => loadEnv({ ...validEnv, CAMERA_POLICY_LOCAL_CAPS: "DE=maybe" })).toThrow(/CAMERA_POLICY_LOCAL_CAPS/);
   });
 
   it("caches the first parsed result across calls until resetEnvCache()", () => {

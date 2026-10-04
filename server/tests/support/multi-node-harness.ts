@@ -137,11 +137,11 @@ interface StartNodeRequest {
   federationEnabled?: boolean;
   /** Harness node ids of already-running nodes to join at startup. */
   federationSeedIds?: string[];
-  /** The node's own emergency brake (SPEED_CAMERA_NAMESPACE_ENABLED). Alone it releases nothing: see `cameraPolicy`. */
+  /** The node's own emergency brake (SPEED_CAMERA_NAMESPACE_ENABLED). Cameras are delivered in full by default; `false` pulls the brake. */
   cameraNamespace?: boolean;
   /**
-   * Country-based camera policy (docs/camera-country-policy.md): the levels the node's signed network config lists, e.g.
-   * `{ "DE": "full", "FR": "zones" }`. Giving it signs a config (blitzerEnabled: true), releases the node's brake and loads
+   * Country-based camera policy (docs/camera-country-policy.md): the EXCEPTIONS the node's signed network config lists, e.g.
+   * `{ "CH": "off", "FR": "zones" }` (a country it does not list is `full`). Giving it signs a config (blitzerEnabled: true) and loads
    * synthetic country boundaries (`boundaries`). Change it later with `POST /nodes/:id/camera-policy`.
    */
   cameraPolicy?: Record<string, CameraLevel>;
@@ -186,7 +186,8 @@ async function startNode(request: StartNodeRequest): Promise<Node> {
     FEDERATION_SEEDS: seeds.join(","),
     FEDERATION_HEARTBEAT_INTERVAL_SECONDS: "1",
     FEDERATION_ANTI_ENTROPY_INTERVAL_SECONDS: "1",
-    SPEED_CAMERA_NAMESPACE_ENABLED: request.cameraNamespace ? "true" : "false",
+    // Absent = the default (true, cameras delivered); an explicit false pulls the node's brake.
+    ...(request.cameraNamespace === undefined ? {} : { SPEED_CAMERA_NAMESPACE_ENABLED: request.cameraNamespace ? "true" : "false" }),
     ...(policy ? policy.env() : {}),
     ...(request.cameraLocalCaps ? { CAMERA_POLICY_LOCAL_CAPS: request.cameraLocalCaps } : {}),
   });

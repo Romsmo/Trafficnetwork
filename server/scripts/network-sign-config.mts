@@ -16,17 +16,18 @@ import { CameraPolicyError, parseCountryLevels, type CameraLevel } from "../src/
  *
  * Options (all optional, sensible defaults shown):
  *   --out <path>                    default: ./network-config.json
- *   --blitzer-enabled <true|false>  default: false
+ *   --blitzer-enabled <true|false>  default: true  (the network-wide emergency brake: false = no camera data anywhere)
  *   --retention-dynamic-days <n>    default: 3
  *   --retention-static-days <n>     default: 30
  *   --min-version <semver>          default: 0.1.0
  *   --excluded-node-ids <a,b,c>     default: (none)
- *   --camera-policy <CC=level,...>  default: (none) = every country off. e.g. "DE=full,FR=zones,CH=off"
+ *   --camera-policy <CC=level,...>  default: (none) = every country full. The EXCEPTIONS, e.g. "CH=off,FR=zones"
  *   --version <n>                   default: existing --out file's version + 1, or 1
  *
- * The camera policy is part of what you sign: a re-signed file lists exactly the countries given here, so signing again
- * without --camera-policy withdraws every country (it never carries an old, more generous policy over by accident).
- * Which country may be "zones" or "full" is a LEGAL decision of the operator, not a technical one -
+ * Cameras are delivered at level "full" in every country that is not listed. The camera policy is part of what you sign: a
+ * re-signed file lists exactly the exceptions given here, so signing again without --camera-policy lifts all of them (it never
+ * carries an old policy over by accident - check the printed summary). Whether a country should be restricted ("zones" = coarse
+ * areas only, "off" = nothing) is a LEGAL decision of the operator, not a technical one -
  * docs/camera-country-policy.md and docs/operating.md ("Camera policy").
  */
 
@@ -71,7 +72,7 @@ function parseArgs(argv: string[]): Args {
   return {
     rootKeyPath,
     out: get("--out") ?? "./network-config.json",
-    blitzerEnabled: (get("--blitzer-enabled") ?? "false") === "true",
+    blitzerEnabled: (get("--blitzer-enabled") ?? "true") === "true",
     retentionDynamicDays: Number(get("--retention-dynamic-days") ?? "3"),
     retentionStaticDays: Number(get("--retention-static-days") ?? "30"),
     minVersion: get("--min-version") ?? "0.1.0",
@@ -118,25 +119,18 @@ function main() {
 
   console.log(`Signed network config (version ${payload.version}) written to ${args.out}.`);
   console.log("Distribute this file and point every server's NETWORK_CONFIG_PATH at it.");
-  const released = Object.entries(args.cameraPolicyByCountry).filter(([, level]) => level !== "off");
+  const exceptions = Object.entries(args.cameraPolicyByCountry).filter(([, level]) => level !== "full");
   console.log("");
   console.log(
-    released.length === 0
-      ? "Camera policy: none — every country is off, no camera data is delivered."
-      : `Camera policy: ${released.map(([country, level]) => `${country}=${level}`).join(", ")} (every other country: off).`,
+    exceptions.length === 0
+      ? "Camera policy: no exceptions - cameras are delivered in full in every country."
+      : `Camera policy: full everywhere except ${exceptions.map(([country, level]) => `${country}=${level}`).join(", ")}.`,
   );
-  if (payload.blitzerEnabled && released.length === 0) {
-    console.log("Note: blitzerEnabled is true, but no country is released (--camera-policy), so nothing is delivered.");
+  if (!payload.blitzerEnabled) {
+    console.log("Note: blitzerEnabled is false - the emergency brake is on, so no camera data is delivered anywhere, whatever the policy says.");
   }
-  if (!payload.blitzerEnabled && released.length > 0) {
-    console.log("Note: blitzerEnabled is false — the emergency brake is on, so nothing is delivered despite the policy above.");
-  }
-  if (released.length > 0) {
-    console.log("");
-    console.log("WARNING: this releases camera data for the countries above. Which country may be \"zones\" or \"full\" is a");
-    console.log("legal decision of the operator (and depends on the operator's role, not only the driver's): sign it only after");
-    console.log("that review — docs/camera-country-policy.md, docs/operating.md (\"Camera policy\"), docs/concept.md section 8.");
-  }
+  console.log("Whether a country should be restricted is the operator's legal decision (known special cases: Switzerland - a broad ban, even");
+  console.log("hints; France - only general danger zones, no concrete spots). See docs/camera-country-policy.md and docs/operating.md.");
 }
 
 main();

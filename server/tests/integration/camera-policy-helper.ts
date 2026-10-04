@@ -10,7 +10,8 @@ import type { CameraLevel } from "../../src/modules/cameras/policy/levels.js";
 
 /**
  * Test support for the country-based camera policy (docs/camera-country-policy.md): synthetic country boundaries
- * (rectangles - the server ships no geodata, and a test must not depend on any) and a signed network config per policy.
+ * (rectangles - the server ships no geodata, and a test must not depend on any) and a signed network config per policy
+ * (the levels passed to `write` are the EXCEPTIONS to "cameras are delivered in full").
  */
 
 export interface Box {
@@ -65,7 +66,7 @@ export interface PolicyFixture {
   readonly file: string;
   /** Signs a new version of the network config with these levels and writes it to `file`. */
   write(levels: Record<string, CameraLevel>, opts?: { blitzerEnabled?: boolean; version?: number; omitPolicy?: boolean }): string;
-  /** Env overrides that make a node use this file, with the emergency brake released locally. */
+  /** Env overrides that make a node use this file (the emergency brake stays at its default, released). */
   env(overrides?: Record<string, string>): Record<string, string>;
   cleanup(): void;
 }
@@ -104,7 +105,6 @@ export function createPolicyFixture(sharedRoot?: Ed25519KeyPair): PolicyFixture 
     env: (overrides = {}) => ({
       NETWORK_CONFIG_PATH: file,
       NETWORK_ROOT_PUBLIC_KEY: root.publicKeyRaw,
-      SPEED_CAMERA_NAMESPACE_ENABLED: "true",
       ...overrides,
     }),
     cleanup: () => rmSync(dir, { recursive: true, force: true }),

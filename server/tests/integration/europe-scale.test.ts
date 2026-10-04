@@ -10,7 +10,6 @@ import { latLngToCell } from "h3-js";
 import { buildApp } from "../../src/app.js";
 import { loadEnv, resetEnvCache, type Env } from "../../src/config/env.js";
 import { startTestDatabase, type TestDatabase } from "./setup.js";
-import { createPolicyFixture, loadBoundaries, WORLD_AS_DE } from "./camera-policy-helper.js";
 import { authHeader, testToken } from "./auth-helper.js";
 import { findAllSpeedLimitSegments } from "../../src/db/queries/speed-limit-segments.js";
 import { findAllStaticSigns } from "../../src/db/queries/static-signs.js";
@@ -62,17 +61,12 @@ describe("europe-scale static packages", () => {
     return { app, env, dir };
   }
 
-  const policy = createPolicyFixture();
-
   beforeAll(async () => {
     testDb = await startTestDatabase();
-    await loadBoundaries(testDb.db, WORLD_AS_DE);
-    policy.write({ DE: "full" });
   }, 90_000);
 
   afterAll(async () => {
     for (const app of apps) await app.close();
-    policy.cleanup();
     await testDb.teardown();
     for (const dir of dirs) rmSync(dir, { recursive: true, force: true });
   });
@@ -510,10 +504,9 @@ describe("europe-scale static packages", () => {
 
   // ------------------------------------------------------------------ what else marks tiles
 
-  it("packages a camera once its country is released and the write marks its tile", async () => {
+  it("packages a camera (delivered in full by default) and the write marks its tile", async () => {
     await truncateStatic();
-    // The camera is packaged where its country is released at level full (docs/camera-country-policy.md).
-    const { app, env } = await startApp(policy.env());
+    const { app, env } = await startApp();
     const created = await app.inject({
       method: "POST",
       url: "/v1/hazard-reports",
@@ -521,8 +514,8 @@ describe("europe-scale static packages", () => {
       payload: { type: "fixedSpeedCamera", lat: MUNICH.lat, lng: MUNICH.lng },
     });
     expect(created.statusCode).toBe(201);
-    // The tile the camera is in, and (when it is another one) the tile that carries its zone.
     const dirty = (await testDb.db.execute(sql`select tile from static_packages where dirty`)) as unknown as { tile: string }[];
+    // The tile the camera is in, and (when it is another one) the tile that carries its zone.
     expect(dirty.map((r) => r.tile)).toContain(tileOf(MUNICH));
     expect(dirty.length).toBeLessThanOrEqual(2);
     const body = (await partition(app, env, tileOf(MUNICH))).json() as Json;

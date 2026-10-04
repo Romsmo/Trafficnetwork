@@ -146,9 +146,9 @@ describe("camera policy across a network of nodes with different local limits", 
     for (const node of [a, b, c]) expect(await nearby(node, ZURICH), node.name).toEqual({ cameras: [], zones: [] });
 
     // Each node says what it delivers
-    expect((await get(a, "/v1/config")).cameraPolicy.byCountry).toEqual({ DE: "full", FR: "zones" });
-    expect((await get(b, "/v1/config")).cameraPolicy.byCountry).toEqual({ DE: "zones", FR: "zones" });
-    expect((await get(c, "/v1/config")).cameraPolicy.byCountry).toEqual({});
+    expect((await get(a, "/v1/config")).cameraPolicy).toMatchObject({ defaultLevel: "full", byCountry: { FR: "zones", CH: "off" } });
+    expect((await get(b, "/v1/config")).cameraPolicy).toMatchObject({ defaultLevel: "full", byCountry: { DE: "zones", FR: "zones", CH: "off" } });
+    expect((await get(c, "/v1/config")).cameraPolicy).toMatchObject({ defaultLevel: "off", byCountry: {} });
     expect((await get(c, "/v1/config")).speedCameraNamespaceEnabled).toBe(false);
     // the signed network policy is the same raw document everywhere
     expect((await get(c, "/v1/config")).networkConfig.payload.cameraPolicyByCountry).toEqual({ DE: "full", FR: "zones", CH: "off" });
@@ -164,16 +164,16 @@ describe("camera policy across a network of nodes with different local limits", 
     expect(await pulledLats(c)).toEqual([]); // off on C
   });
 
-  it("withdrawing Germany on A stops serving and passing it on there, and leaves the nodes with their own files alone", async () => {
-    a.policy.write({ FR: "zones", CH: "off" }); // version 2 without DE
+  it("restricting Germany on A stops serving and passing it on there, and leaves the nodes with their own files alone", async () => {
+    a.policy.write({ DE: "off", FR: "zones", CH: "off" }); // version 2 takes Germany back
     expect((await a.app.cameraPolicy.reload()).status).toBe("applied");
     expect(await nearby(a, BERLIN)).toEqual({ cameras: [], zones: [] });
     const pulled = ((await a.app.inject({ method: "GET", url: "/v1/federation/events?after=0&limit=200" })).json() as Json).events as Json[];
     expect(pulled.some((e) => e.envelope.payload.type === "mobileSpeedCamera")).toBe(false);
     // B still reads its own (unchanged) file
     expect((await nearby(b, BERLIN)).zones).toHaveLength(1);
-    // The data is still there: re-releasing it brings it back without anything being re-sent
-    a.policy.write({ DE: "full", FR: "zones", CH: "off" });
+    // The data is still there: lifting the restriction brings it back without anything being re-sent
+    a.policy.write({ FR: "zones", CH: "off" });
     await a.app.cameraPolicy.reload();
     expect((await nearby(a, BERLIN)).cameras).toHaveLength(1);
   });

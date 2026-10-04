@@ -11,8 +11,6 @@ import { loadEnv, resetEnvCache } from "../../src/config/env.js";
 import { createDb, type Database } from "../../src/db/client.js";
 import { STATEMENT_BREAKPOINT } from "../../src/db/migration-locks.js";
 import { authHeader, testToken } from "./auth-helper.js";
-import { createPolicyFixture, loadBoundaries, WORLD_AS_DE } from "./camera-policy-helper.js";
-import { resolveCountries } from "../../src/modules/cameras/policy/boundaries.js";
 
 /**
  * Migration 0009 (add-on D) against a database that already holds data in today's format: nothing may be lost,
@@ -275,22 +273,16 @@ describe("migration 0009 on a database with legacy data", () => {
     expect(await counts()).toEqual(before.counts);
   });
 
-  it("answers the old reads with what they answered before, plus the additive fields - once the operator has resolved the countries", async () => {
+  it("answers the old reads with what they answered before, plus the additive fields - rows from before the camera policy need no country", async () => {
     // Runs last on purpose: it takes the database to the newest schema (every later migration on top of 0009), which the
-    // rollback tests above must not see.
+    // rollback tests above must not see. The legacy rows have no country (the camera policy did not exist); with no country
+    // restricted they are delivered like any other camera.
     await withFreshConnection((d) => migrate(d, { migrationsFolder: MIGRATIONS }));
-
-    // The camera policy (docs/camera-country-policy.md) delivers a camera only for a country the signed policy releases, and
-    // rows written before it existed have no country yet: they stay undelivered until the operator loads boundaries and resolves.
-    const policy = createPolicyFixture();
-    dirs.push(policy.dir);
-    policy.write({ DE: "full" });
     resetEnvCache();
     const env = loadEnv({
       DATABASE_URL: container.getConnectionUri(),
       JWT_SECRET: "a".repeat(32),
       LOG_LEVEL: "silent",
-      ...policy.env(),
       STATIC_PACKAGES_DIR: mkdtempSync(path.join(tmpdir(), "migration-packages-")),
     });
     dirs.push(env.STATIC_PACKAGES_DIR);
@@ -298,18 +290,6 @@ describe("migration 0009 on a database with legacy data", () => {
     try {
       const headers = authHeader(await testToken(env));
       const active = before.cameras.filter((c) => c["status"] === "active");
-
-      const unresolved = (await app.inject({ method: "GET", url: "/v1/speed-cameras/nearby?lat=52.52&lng=13.405&radiusM=2000", headers })).json();
-      expect(unresolved).toEqual({ cameras: [], zones: [] });
-      expect((await app.inject({ method: "GET", url: "/v1/snapshot", headers })).json().fixedSpeedCameras).toEqual([]);
-
-      await loadBoundaries(db, WORLD_AS_DE);
-      const resolved = await resolveCountries(db, env.CAMERA_POLICY_BORDER_MARGIN_M, {
-        all: false,
-        partitionRes: env.STATIC_DATA_PARTITION_H3_RESOLUTION,
-        zoneRes: env.CAMERA_ZONE_H3_RESOLUTION,
-      });
-      expect(resolved.devices).toBe(before.cameras.length);
 
       const nearby = (await app.inject({ method: "GET", url: "/v1/speed-cameras/nearby?lat=52.52&lng=13.405&radiusM=2000", headers })).json().cameras as Json[];
       // Berlin's speed camera is the only persistent device there; the expiring reports keep their own types.

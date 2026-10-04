@@ -11,7 +11,9 @@ import { capFor, parseCountryLevels, parseLocalCaps, stricter, strictest, type C
  * The country-based camera policy as it applies right now (docs/camera-country-policy.md, section 1).
  *
  *   effective level of a country = the strictest of
- *     the signed network policy (absent = off), this node's local cap, and the emergency brake.
+ *     the signed network policy (a country it does not list is `full`), this node's local cap, and the emergency brake.
+ *
+ * Cameras are released by default; the policy is how an operator takes single countries back (`zones`, `off`) without touching code.
  *
  * Immutable: a request takes `service.current()` once and uses that one object throughout, so it never sees half of a
  * policy change. Everything that delivers camera data asks *this* object and nothing else.
@@ -19,23 +21,27 @@ import { capFor, parseCountryLevels, parseLocalCaps, stricter, strictest, type C
 export interface EffectiveCameraPolicy {
   /** Fingerprint of everything that decides what is delivered (levels, brake, zone resolution). Changes exactly when delivery would. */
   readonly fingerprint: string;
-  /** The brake: the node's SPEED_CAMERA_NAMESPACE_ENABLED, the signed `blitzerEnabled`, and a readable signed config. false = every country is off. */
+  /** The brake: the node's SPEED_CAMERA_NAMESPACE_ENABLED, the signed `blitzerEnabled` and a readable signed config. false = every country is off. */
   readonly namespaceEnabled: boolean;
-  /** Effective levels of the countries the signed policy lists; every other country is `off`. */
+  /** Level of every country the policy and the local caps do not name: `full`, unless the brake is on or a local `*=` cap lowers it. */
+  readonly defaultLevel: CameraLevel;
+  /** Level of a camera whose country is not known (no boundary data, outside every boundary): the strictest level any country could have, so a restriction cannot be escaped by a camera that could not be placed. */
+  readonly unknownLevel: CameraLevel;
+  /** Effective levels of the countries that differ from `defaultLevel` (the operator's exceptions); every other country has `defaultLevel`. */
   readonly byCountry: Readonly<Record<string, CameraLevel>>;
   readonly zoneResolution: number;
   /** True while the signed config could not be read or verified after start-up: delivery is off until it can. */
   readonly failedClosed: string | null;
   /** The verified signed config this policy was derived from (null when the node has none). */
   readonly envelope: SignedEnvelope<NetworkConfigPayload> | null;
-  /** Some country is above `off` — i.e. this node may deliver camera data at all. */
+  /** Some camera may be delivered at all: some level (default, unknown or a listed country) is above `off`. */
   readonly deliversAnything: boolean;
-  /** Some country is at `zones` (zone queries are skipped entirely otherwise). */
+  /** Some level is `zones` (zone queries are skipped entirely otherwise). */
   readonly anyZones: boolean;
-  /** Some country is at `full`. */
+  /** Some level is `full`. */
   readonly anyFull: boolean;
   levelOfCountry(country: string): CameraLevel;
-  /** Level of a camera with this country set: the strictest of its countries; unknown (null/empty) is `off`. */
+  /** Level of a camera with this country set: the strictest of its countries; an unknown (null/empty) set has `unknownLevel`. */
   levelOf(countries: readonly string[] | null | undefined): CameraLevel;
 }
 
@@ -49,56 +55,74 @@ export function buildEffectivePolicy(
   const payload = envelope?.payload ?? null;
   const networkLevels = parseCountryLevels(payload?.cameraPolicyByCountry);
   const caps = parseLocalCaps(env.CAMERA_POLICY_LOCAL_CAPS);
-  const namespaceEnabled = env.SPEED_CAMERA_NAMESPACE_ENABLED && payload?.blitzerEnabled === true && failedClosed === null;
+  // The brake is released when this node's flag is on and the network (if there is a signed config) has not pulled it.
+  const namespaceEnabled = env.SPEED_CAMERA_NAMESPACE_ENABLED && (payload === null || payload.blitzerEnabled === true) && failedClosed === null;
 
+  let defaultLevel: CameraLevel = "off";
   const byCountry: Record<string, CameraLevel> = {};
   if (namespaceEnabled) {
-    for (const [country, level] of Object.entries(networkLevels)) byCountry[country] = stricter(level, capFor(caps, country));
+    // A country the network does not list is full; a local cap (`*=` for all, `CC=` for one) can only lower it.
+    defaultLevel = caps.fallback ?? "full";
+    const named = new Set([...Object.keys(networkLevels), ...Object.keys(caps.byCountry)]);
+    for (const country of named) {
+      const level = stricter(networkLevels[country] ?? "full", capFor(caps, country));
+      if (level !== defaultLevel) byCountry[country] = level;
+    }
   }
+  // A camera that could not be placed in a country might be in any of them: it gets the strictest level there is.
+  const unknownLevel = strictest([defaultLevel, ...Object.values(byCountry)]);
 
-  const decisive = Object.entries(byCountry)
-    .filter(([, level]) => level !== "off")
-    .sort(([a], [b]) => a.localeCompare(b));
+  const levels = new Set<CameraLevel>([defaultLevel, unknownLevel, ...Object.values(byCountry)]);
   const fingerprint = createHash("sha256")
-    .update(JSON.stringify({ levels: decisive, zoneResolution: env.CAMERA_ZONE_H3_RESOLUTION }))
+    .update(
+      JSON.stringify({
+        defaultLevel,
+        unknownLevel,
+        byCountry: Object.entries(byCountry).sort(([a], [b]) => a.localeCompare(b)),
+        zoneResolution: env.CAMERA_ZONE_H3_RESOLUTION,
+      }),
+    )
     .digest("hex")
     .slice(0, 16);
 
-  const levelOfCountry = (country: string): CameraLevel => byCountry[country] ?? "off";
+  const levelOfCountry = (country: string): CameraLevel => byCountry[country] ?? defaultLevel;
   return {
     fingerprint,
     namespaceEnabled,
+    defaultLevel,
+    unknownLevel,
     byCountry,
     zoneResolution: env.CAMERA_ZONE_H3_RESOLUTION,
     failedClosed,
     envelope,
-    deliversAnything: decisive.length > 0,
-    anyZones: decisive.some(([, level]) => level === "zones"),
-    anyFull: decisive.some(([, level]) => level === "full"),
+    deliversAnything: levels.has("zones") || levels.has("full"),
+    anyZones: levels.has("zones"),
+    anyFull: levels.has("full"),
     levelOfCountry,
     levelOf(countries) {
-      if (!countries || countries.length === 0) return "off";
+      if (!countries || countries.length === 0) return unknownLevel;
       return strictest(countries.map(levelOfCountry));
     },
   };
 }
 
-/** `cameraPolicy` of `GET /v1/config` (docs/camera-country-policy.md, 5.1): the effective levels, never more than the signed network policy. */
+/**
+ * `cameraPolicy` of `GET /v1/config` (docs/camera-country-policy.md, 5.1): the effective levels, never more than the signed network policy.
+ * A client reads the level of a country as `byCountry[country] ?? defaultLevel`.
+ */
 export function describePolicy(policy: EffectiveCameraPolicy): {
   version: string;
   namespaceEnabled: boolean;
-  defaultLevel: "off";
+  defaultLevel: CameraLevel;
   byCountry: Record<string, CameraLevel>;
   zoneResolution: number;
   notice: typeof CAMERA_NOTICE;
 } {
-  const byCountry: Record<string, CameraLevel> = {};
-  for (const [country, level] of Object.entries(policy.byCountry)) if (level !== "off") byCountry[country] = level;
   return {
     version: policy.fingerprint,
     namespaceEnabled: policy.namespaceEnabled,
-    defaultLevel: "off",
-    byCountry,
+    defaultLevel: policy.defaultLevel,
+    byCountry: { ...policy.byCountry },
     zoneResolution: policy.zoneResolution,
     notice: CAMERA_NOTICE,
   };

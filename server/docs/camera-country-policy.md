@@ -1,14 +1,18 @@
 # Country-based camera policy (add-on A, server part)
 
 Scope: `Zusatz-Prompts — Blitzer-Funktion aktivierbar machen (länderabhängig)`, part A. The camera categories
-(`fixedSpeedCamera`, `mobileSpeedCamera`, `trailerCamera`, `redLightCamera`, `distanceControl`) become deliverable —
-**per country**, never by a single global switch, and **nothing is released by code**: until the operator has signed a
-policy, every country is `off` and the server delivers no camera data of any kind.
+(`fixedSpeedCamera`, `mobileSpeedCamera`, `trailerCamera`, `redLightCamera`, `distanceControl`) are **released**: they are
+reported, delivered and filtered like any other category. **By default every country is `full`.** What the policy adds is the
+ability for an operator to take single countries back — to coarse zones (`zones`) or to nothing (`off`) — without changing
+code, and an emergency brake that switches everything off.
 
-> **This is a legal decision of the operator, not a technical one.** The levels below are a mechanism. Which country
-> may be `zones` or `full`, and whether a camera function may be offered at all, depends on the law of each country and
-> on the role of the *operator* (which is not the role of the driver) — to be reviewed by the operator before a level
-> above `off` is signed. Nothing in this document, the code or its defaults is legal advice.
+> **Whether a country should be restricted is a legal decision of the operator, not a technical one.** The levels below are a
+> mechanism. The legal position differs by country and — which is not the driver's position — by the role of the *operator* of
+> a service. Known special cases the operator should look at first: **Switzerland** (a broad ban, hints included) and
+> **France** (only general danger zones, no concrete spots); in **Germany** use while driving is forbidden, also for passengers,
+> while possession and use outside driving are not; in Austria, Italy, Belgium and the Netherlands POI warnings are
+> permitted and active radar detectors are not. Nothing in this document, the code or its defaults is legal advice, and the
+> default (`full` everywhere) is the operator's decision, not a statement that it is lawful everywhere.
 
 Status: implemented on `feature/camera-country-policy`. This file is both the design record and the wire contract that
 the web UI (part B) and the client library (part C) build against. Where a number or a name below is a *default*, the
@@ -24,20 +28,23 @@ level ∈ { "off", "zones", "full" }        off < zones < full   ("stricter" = s
 |---|---|
 | `off` | nothing. Not the item, not a zone, not an event, not an id, not a hint that something exists |
 | `zones` | a **zone** — an H3 cell of a fixed, coarse resolution with the camera types present in it. Never a coordinate finer than the cell, never an id, timestamp or count of a single camera |
-| `full` | the individual camera, exactly as for any other category |
+| `full` | the individual camera, exactly as for any other category — **the default for every country** |
 
 **Effective level of one country** = the strictest of
 
-1. the **signed network policy** (`cameraPolicyByCountry[CC]`, absent = `off`),
+1. the **signed network policy**: `cameraPolicyByCountry[CC]`; **a country it does not list is `full`**,
 2. the **node's local cap** (`CAMERA_POLICY_LOCAL_CAPS`, absent = no cap),
 3. the **emergency brake** — `SPEED_CAMERA_NAMESPACE_ENABLED=false` on the node *or* `blitzerEnabled: false` in the signed
    config turns **every** country `off`, whatever else is configured.
 
-A node can therefore be stricter than the network, never more generous. The environment default of the brake stays
-`false` (unchanged): to deliver anything an operator must both release the brake **and** sign a country policy.
+A node can therefore be stricter than the network, never more generous. The brake is released by default
+(`SPEED_CAMERA_NAMESPACE_ENABLED=true`); it exists so that an operator can switch every camera off at once, for example while a
+legal question is open, without editing or re-signing anything.
 
-**Effective level of one camera** = the strictest level over the camera's **country set** (section 3). An empty or
-unknown country set is `off`.
+**Effective level of one camera** = the strictest level over the camera's **country set** (section 3). A camera whose country
+is **unknown** (no boundary data, outside every boundary) gets the **strictest level any country has** (`unknownLevel`): that is
+`full` while nothing is restricted — so a node needs no boundary data at all in the default state — and as soon as some country is
+restricted it is that restriction, because a camera that could not be placed might be in the restricted country.
 
 ## 2. Network configuration
 
@@ -46,23 +53,23 @@ unknown country set is `off`.
 ```jsonc
 {
   "version": 7,
-  "blitzerEnabled": true,                       // unchanged: network-wide brake
-  "cameraPolicyByCountry": { "DE": "full", "FR": "zones", "CH": "off" },   // NEW — ISO 3166-1 alpha-2, upper case
+  "blitzerEnabled": true,                       // unchanged: the network-wide emergency brake (false = everything off)
+  "cameraPolicyByCountry": { "CH": "off", "FR": "zones" },   // NEW — the EXCEPTIONS; ISO 3166-1 alpha-2, upper case
   ...
 }
 ```
 
-* Absent field, empty object or a country that is not listed: `off`.
+* Absent field, empty object or a country that is not listed: `full`. Listing a country as `full` is allowed and changes nothing.
 * Keys must match `^[A-Z]{2}$`, values must be one of the three levels, at most 300 entries — anything else makes the
   file invalid. At start-up an invalid file stops the server (as for every signed-config error). While running, an
   invalid file **fails closed**: the camera policy becomes all-`off` until a valid file is read; everything else on the
-  node keeps working.
-* Signed like the rest (`npm run network:sign-config -- … --camera-policy DE=full,FR=zones`).
+  node keeps working. (A broken file may be exactly the file that held the restriction, so the safe reading is "nothing".)
+* Signed like the rest (`npm run network:sign-config -- … --camera-policy "CH=off,FR=zones"`; `--blitzer-enabled` now
+  defaults to `true`). Signing again without `--camera-policy` lifts every exception; the CLI prints what it signed.
 * **Takes effect without a restart** (section 7). `version` must grow: a reload whose `version` is lower than the one
   in use is refused (rollback protection for the running process); the same version with different content is refused
   too — bump the version.
-* A node with no signed config has no policy: all `off`. A standalone node generates its own root key and signs its own
-  policy, like a federated one.
+* A node with no signed config has no exceptions: every country is `full` (subject to its own brake and caps).
 
 ## 3. Which country a camera is in
 
@@ -75,9 +82,10 @@ at write time, plus an explicit border strip. No importer-supplied code, no gues
 * The set is computed by the SQL function `camera_countries(geometry, margin_m)`: all countries whose boundary is **within
   `CAMERA_POLICY_BORDER_MARGIN_M` (default 1000 m)** of the point. One element almost always; **two or more inside the
   border strip**, and then the **strictest level wins**. The error is made deliberately in one direction: a camera next
-  to a border is withheld if either side forbids it.
-* A point that is within the margin of **no** boundary (sea, outside the dataset) has the empty set → `off`.
-  No boundary data loaded → every camera has the empty set → `off`. Missing data fails closed.
+  to a border is withheld if either side restricts it.
+* A point that is within the margin of **no** boundary (sea, outside the dataset) has the empty set; no boundary data loaded →
+  every camera has the empty set. An empty or unresolved set means "country unknown" and gets `unknownLevel` (section 1): full
+  while nothing is restricted, the strictest restriction otherwise. Missing data never makes a restriction leak.
 * Why not the other options: an importer cannot know better than the border (OSM nodes carry no country, and trusting
   a supplied code is a way to mislabel a camera into a permissive country); deriving at every query repeats work and
   makes the answer depend on the query path. One stored value is read the same way by every endpoint.
@@ -85,9 +93,9 @@ at write time, plus an explicit border strip. No importer-supplied code, no gues
   `npm run cameras -- load-boundaries <file.geojson>` loads any GeoJSON country dataset (Natural Earth admin-0 at 1:10m
   is public domain and accurate to a few hundred metres; the 1:50m set needs a margin of several km). The loader
   subdivides the polygons (`ST_Subdivide`) so a lookup stays a sub-millisecond index probe, and then re-resolves every
-  stored camera (`resolve-countries`).
-* Rows that were written before boundaries existed, or while none were loaded, have `countries IS NULL` = unresolved =
-  `off`, until `resolve-countries` runs. `npm run cameras -- status` counts them.
+  stored camera (`resolve-countries`). **Boundary data is only needed once a country is restricted.**
+* Rows that were written before boundaries existed, or while none were loaded, have `countries IS NULL` = unresolved, until
+  `resolve-countries` runs. `npm run cameras -- status` counts them.
 
 ## 4. Where the rule is applied: one place
 
@@ -111,33 +119,34 @@ policy object (`policy.ts`) is immutable: a request takes `app.cameraPolicy.curr
 `GET /v1/hazard-reports/nearby|by-tile` never contained camera types and still do not.
 
 Camera events are recognised **by content** (entity type, or a camera `type` in the payload), not by the column the country set is
-stored in: a camera event whose set was never filled in counts as "country unknown" and is withheld, so a forgotten column fails closed.
+stored in: a camera event whose set was never filled in counts as "country unknown" and gets `unknownLevel`, so a forgotten column
+cannot let a restricted country through.
 
-The federation point is a **pre-existing back door** this add-on closes: `GET /v1/federation/events` is unauthenticated and
-used to return every device-signed report — camera reports with their exact coordinates included — whatever the camera
-flag said.
+The federation point is a **pre-existing back door** this add-on closes for the restricted levels: `GET /v1/federation/events` is
+unauthenticated and used to return every device-signed report — camera reports with their exact coordinates included — whatever the
+camera flag said. Camera reports now leave a node only at level `full`.
 
 ## 5. Wire contract (all additive)
 
 ### 5.1 `GET /v1/config`
 
-New object `cameraPolicy`; the existing `speedCameraNamespaceEnabled` stays and is now *"the node may deliver camera data for at least one
-country"* (brake released **and** some effective level above `off`), which is what old clients always meant by it.
+New object `cameraPolicy`; the existing `speedCameraNamespaceEnabled` stays and is now *"the node delivers camera data"* (brake released
+**and** some level above `off`), which is what old clients always meant by it. With the defaults it is `true`.
 
 ```jsonc
 "cameraPolicy": {
   "version": "9c1f0a52d7b3e6a1",          // fingerprint of everything below — changes whenever the effective policy changes
   "namespaceEnabled": true,               // the brake: false = every country is off
-  "defaultLevel": "off",                  // level of every country not listed
-  "byCountry": { "DE": "full", "FR": "zones", "CH": "off" },   // EFFECTIVE levels (network ∧ local caps ∧ brake); absent = off
+  "defaultLevel": "full",                 // level of every country not listed in byCountry
+  "byCountry": { "CH": "off", "FR": "zones" },   // the EXCEPTIONS, as EFFECTIVE levels (network ∧ local caps ∧ brake)
   "zoneResolution": 6,                    // H3 resolution of zones on this node
   "notice": { "version": 1, "text": { "de": "…", "en": "…" } }   // see 5.5
 }
 ```
 
-`networkConfig` (the full signed envelope) keeps carrying the raw network policy. A client that knows the network root
-key should take the **minimum** of `networkConfig.payload.cameraPolicyByCountry` (verified) and `cameraPolicy.byCountry`
-(the node's own claim, which can only be stricter).
+A client reads the level of a country as `byCountry[country] ?? defaultLevel`. `networkConfig` (the full signed envelope) keeps carrying
+the raw network policy. A client that knows the network root key should take the **stricter** of `networkConfig.payload.cameraPolicyByCountry`
+(verified; a country it does not list is `full`) and `cameraPolicy` (the node's own claim, which can only be stricter).
 
 ### 5.2 Zone item
 
@@ -156,7 +165,7 @@ There is deliberately **nothing else**: no `position`, no source, no timestamps,
 
 ### 5.3 Reads
 
-* `GET /v1/speed-cameras/nearby` and `/by-tile` → `{ "cameras": [ … ], "zones": [ … ] }`. `zones` is always present.
+* `GET /v1/speed-cameras/nearby` and `/by-tile` → `{ "cameras": [ … ], "zones": [ … ] }`. `zones` is always present (empty while no country is at `zones`).
 * `GET /v1/snapshot` → new `cameraZones: []` next to `fixedSpeedCameras` / `enforcementDevices`: the zones of the persistent devices
   (omitted with `?staticData=false`, as the devices are) plus the zones of the cells the requested `tiles` speak for - which is where
   the live camera reports of `zones` countries show up, as zones.
@@ -180,8 +189,8 @@ There is deliberately **nothing else**: no `position`, no source, no timestamps,
 Writing is never blocked. What changes is what the **answer** discloses, because an answer that says "merged with an existing
 camera" or returns the merged camera is a read in disguise (a probe at 800 m spacing would map a country that is `off`).
 
-* Camera at level `full`: as today (`201` new / `200` merged, with `camera` / `report` and `merged`).
-* Camera at level `zones` or `off` (or an unresolved country): **`202 { "accepted": true }`**, plus `"zone": { … }` when the level is
+* Camera at level `full` (the default): as always (`201` new / `200` merged, with `camera` / `report` and `merged`).
+* Camera at level `zones` or `off` (or while the brake is on): **`202 { "accepted": true }`**, plus `"zone": { … }` when the level is
   `zones`. No `merged`, no object, the same status for new and merged.
 * `POST /v1/speed-cameras/:id/removal-reports` and `POST /v1/hazard-reports/:id/confirmations` on a camera: `recorded` / `removed`
   as before; the `camera` / `report` object only at level `full`.
@@ -190,8 +199,8 @@ camera" or returns the merged camera is a read in disguise (a probe at 800 m spa
 
 `cameraPolicy.notice` carries a short default text (German and English) saying that using camera data while driving is
 forbidden in several countries — in Germany also for passengers — and that in Switzerland even hints are unlawful. It exists
-so that web and library show one wording; hosts may ship their own translation. The text is **not** a legal assessment and is
-the operator's to review before any level above `off` is signed.
+so that web and library show one wording (the web UI and the library show it when a user switches the camera category on); hosts
+may ship their own translation. The text is **not** a legal assessment and is the operator's to review.
 
 ## 6. Zones: why repeated queries cannot re-condense them into a point
 
@@ -222,37 +231,41 @@ node must know it to build zones). Operators can only protect it with ordinary m
   `NETWORK_ROOT_PUBLIC_KEY`. A restart also reads it. There is no signal handler (Windows has none) and no admin endpoint.
 * The package builder takes the policy once per tile, inside the tile's snapshot and after the version, and a policy change swaps the policy
   first and bumps the version second: a tile built under the old policy can never be recorded as current for the new one.
-* The first start after the upgrade has no stored policy; it is taken as the empty policy, so whatever the signed file lists is "new" and the tiles
-  of those countries are marked. `npm run cameras -- load-boundaries` / `resolve-countries` mark the tiles of the cameras whose country
-  they set, like a bulk import.
-* **A stricter policy never leaves old packages reachable.** The tiles that hold cameras of a country whose level went *down* are marked
-  `policy_stale` (next to `dirty`). Their package - the current one *and* the superseded ones that are normally kept for two hours so running
-  downloads can finish - is not served (`503 PACKAGES_BUILDING`, also through the content-addressed URL) until a rebuild has replaced it, and
-  the rebuild deletes the old files at once instead of keeping them. A small dataset is rebuilt by the request that finds a stale tile, a
-  large one in the background straight away (not after the worker's debounce); the manifest answers `503` meanwhile rather than listing a
-  tile as gone (a client would drop its other data). A looser policy only marks tiles dirty: until rebuilt they just lack the new data.
+* The first start after the upgrade has no stored policy; it is measured against "nothing was delivered" (the version before this add-on
+  delivered no cameras unless its switch was on), so the cameras of a node that upgrades are marked for its first package build. A package set
+  that was built with the old switch **off** is otherwise current and is not rebuilt for the upgrade; one built with it **on** is rebuilt once.
+  `npm run cameras -- load-boundaries` / `resolve-countries` mark the tiles of the cameras whose country they set, like a bulk import.
+* **A stricter policy never leaves old packages reachable.** The tiles that hold cameras of a country whose level went *down* (or all
+  tiles, when the default level goes down, e.g. the brake) are marked `policy_stale` (next to `dirty`). Their package - the current one *and*
+  the superseded ones that are normally kept for two hours so running downloads can finish - is not served (`503 PACKAGES_BUILDING`, also
+  through the content-addressed URL) until a rebuild has replaced it, and the rebuild deletes the old files at once instead of keeping them.
+  A small dataset is rebuilt by the request that finds a stale tile, a large one in the background straight away (not after the worker's
+  debounce); the manifest answers `503` meanwhile rather than listing a tile as gone (a client would drop its other data). A looser policy
+  only marks tiles dirty: until rebuilt they just lack the new data.
 * On a change of the **effective** policy the node (a) swaps the policy atomically — requests in flight see one consistent policy —
-  (b) compares it with the last one it stored (`static_data_state.camera_policy`), (c) marks only the package tiles that contain
-  cameras of the countries whose level changed (and the parent tiles of their zones) as dirty and (d) bumps the static-data
-  version once. Clients see `cameraPolicy.version` change in `GET /v1/config` and a new static-data version; no event is sent
-  per camera.
+  (b) compares it with the last one it stored (`static_data_state.camera_policy`: default level, unknown level, exceptions, zone size),
+  (c) marks only the package tiles that contain cameras of the countries whose level changed (and the parent tiles of their zones) as dirty
+  and (d) bumps the static-data version once. Clients see `cameraPolicy.version` change in `GET /v1/config` and a new static-data version;
+  no event is sent per camera.
 * A client library that finds a stricter policy than the one under which it stored data **removes the data locally** (part C).
 
 ## 8. Operating
 
-See `operating.md`, "Camera policy". In short: load boundaries, generate/keep the root key, sign
-`--blitzer-enabled true --camera-policy DE=full,FR=zones`, distribute the file to every node, release the brake on the nodes
-that may deliver. To withdraw: sign a higher version without the country (or with `--blitzer-enabled false`) and distribute it; the
-nodes drop the data within the reload interval. For an immediate local cut-off set `SPEED_CAMERA_NAMESPACE_ENABLED=false` and restart.
+See `operating.md`, "Camera policy". In short: out of the box nothing has to be done — cameras are delivered. To restrict a country:
+load boundaries (`npm run cameras -- load-boundaries`), generate/keep the root key, sign
+`--blitzer-enabled true --camera-policy "CH=off,FR=zones"`, distribute the file to every node. To lift a restriction: sign a higher version
+without the country and distribute it; the nodes pick it up within the reload interval. For an immediate cut-off of everything set
+`SPEED_CAMERA_NAMESPACE_ENABLED=false` (restart) or sign `--blitzer-enabled false`.
 
 ## 9. Not built / open for the operator
 
-* **No country is `full` or `zones` by default**, anywhere, ever; the example above is illustration.
+* **The default is `full` everywhere**, by the operator's decision. A node therefore delivers cameras in countries in which the operator
+  has not (yet) assessed them; restricting a country is an act the operator has to take — this is the trade-off of "released by default".
 * **The user's own country is not considered.** The policy is about the country *of the camera*. A driver in a country that forbids
   hints who asks near a border receives what the *camera's* country allows. A host app that knows where the driver is should also
-  hold back by the driver's country — `cameraPolicy.byCountry` gives it the levels. Whether the server should also use the position
+  hold back by the driver's country — `cameraPolicy` gives it the levels. Whether the server should also use the position
   of the request is a decision for the operator (it would not work for packages and `by-tile`).
-* Boundary data and its accuracy; the notice wording; whether the emergency-brake default should become `true` once a policy exists.
+* Boundary data and its accuracy; the notice wording.
 * Camera events written before this feature get their country from the entity they are about (`load-boundaries` / `resolve-countries`); an
   expiry event of such a report has no position and is not delivered at level `zones`.
 * The content of a zone differs by source (section 5.3): packages count persistent devices only. A client unions by zone id.

@@ -66,7 +66,7 @@ describe("empty database", () => {
     expect(res.json()).toEqual({ reports: [] });
   });
 
-  it("speed-cameras endpoints return an empty list regardless of data (namespace flag defaults to off)", async () => {
+  it("speed-cameras endpoints return an empty list (and no zones) when there is no data", async () => {
     const nearby = await app.inject({ method: "GET", url: "/v1/speed-cameras/nearby?lat=52.5&lng=13.4&radiusM=1000", headers: auth });
     expect(nearby.statusCode).toBe(200);
     expect(nearby.json()).toEqual({ cameras: [], zones: [] });
