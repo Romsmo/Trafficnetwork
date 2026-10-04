@@ -5,6 +5,7 @@
 use super::{
     LocalCorrectionProposal, PendingWrite, ProposalState, Store, StoredEntities, WriteKind,
 };
+use crate::sync::camera_policy::{CameraZone, ZoneBoundary};
 use crate::sync::types::{
     CorrectionReason, Geometry, HazardReport, HazardType, SegmentCorrection, SpeedLimitSegment,
     SpeedLimitUnit, StaticSign,
@@ -128,6 +129,7 @@ pub(crate) fn run(make: &dyn Fn() -> Box<dyn Store>) {
     a_segment_can_be_fetched_by_id(make().as_ref());
     the_partition_resolution_is_remembered_until_static_data_is_cleared(make().as_ref());
     signs_are_found_by_position_and_can_be_removed(make().as_ref());
+    camera_zones_are_stored_by_id_and_the_policy_stamp_is_remembered(make().as_ref());
 }
 
 fn cursors_are_kept_per_node(store: &dyn Store) {
@@ -137,6 +139,11 @@ fn cursors_are_kept_per_node(store: &dyn Store) {
     store.set_cursor("node1", 43).unwrap();
     assert_eq!(store.get_cursor("node1").unwrap(), Some(43));
     assert_eq!(store.get_cursor("node2").unwrap(), Some(7));
+
+    // Forgetting them all makes the next sync start from a snapshot.
+    store.clear_cursors().unwrap();
+    assert_eq!(store.get_cursor("node1").unwrap(), None);
+    assert_eq!(store.get_cursor("node2").unwrap(), None);
 }
 
 fn a_partition_and_its_hash_arrive_together(store: &dyn Store) {
@@ -348,4 +355,77 @@ fn a_segment_can_be_fetched_by_id(store: &dyn Store) {
     let found = store.speed_limit_segment("s2").unwrap();
     assert_eq!(found, Some(segment("s2", "k2", 11.5, 48.1)));
     assert_eq!(store.speed_limit_segment("nope").unwrap(), None);
+}
+
+fn camera_zone(id: &str, kinds: &[&str]) -> CameraZone {
+    CameraZone {
+        id: id.to_string(),
+        cell: "861f1d48fffffff".to_string(),
+        resolution: 6,
+        boundary: ZoneBoundary {
+            kind: "Polygon".to_string(),
+            coordinates: vec![vec![
+                [13.0, 52.0],
+                [13.1, 52.0],
+                [13.1, 52.1],
+                [13.0, 52.1],
+                [13.0, 52.0],
+            ]],
+        },
+        camera_types: kinds.iter().map(|kind| kind.to_string()).collect(),
+        status: "active".to_string(),
+    }
+}
+
+fn camera_zones_are_stored_by_id_and_the_policy_stamp_is_remembered(store: &dyn Store) {
+    let zone = camera_zone("z1", &["fixedSpeedCamera"]);
+    store
+        .upsert_static_data(&StoredEntities {
+            camera_zones: vec![zone.clone()],
+            ..Default::default()
+        })
+        .unwrap();
+    assert_eq!(store.camera_zones().unwrap(), vec![zone.clone()]);
+    assert_eq!(
+        store.all_entities().unwrap().camera_zones,
+        vec![zone.clone()]
+    );
+
+    // Replaced by id, never duplicated.
+    let changed = camera_zone("z1", &["redLightCamera"]);
+    store
+        .upsert_static_data(&StoredEntities {
+            camera_zones: vec![changed.clone()],
+            ..Default::default()
+        })
+        .unwrap();
+    assert_eq!(store.camera_zones().unwrap(), vec![changed.clone()]);
+
+    store.remove_static_entity("cameraZone", "z1").unwrap();
+    assert!(store.camera_zones().unwrap().is_empty());
+
+    // Clearing the static data takes the zones with it.
+    store
+        .upsert_static_data(&StoredEntities {
+            camera_zones: vec![zone],
+            ..Default::default()
+        })
+        .unwrap();
+    store.clear_static_data().unwrap();
+    assert!(store.camera_zones().unwrap().is_empty());
+
+    // The policy stamp is opaque text, kept until it is replaced — also when
+    // the static data goes.
+    assert_eq!(store.camera_policy_stamp().unwrap(), None);
+    store.set_camera_policy_stamp("first").unwrap();
+    assert_eq!(
+        store.camera_policy_stamp().unwrap().as_deref(),
+        Some("first")
+    );
+    store.set_camera_policy_stamp("second").unwrap();
+    store.clear_static_data().unwrap();
+    assert_eq!(
+        store.camera_policy_stamp().unwrap().as_deref(),
+        Some("second")
+    );
 }

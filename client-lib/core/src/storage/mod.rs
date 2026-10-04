@@ -32,6 +32,7 @@ pub use sqlite::SqliteStore;
 
 use serde::{Deserialize, Serialize};
 
+use crate::sync::camera_policy::CameraZone;
 use crate::sync::types::{
     CorrectionReason, FixedSpeedCamera, Geometry, HazardReport, SpeedLimitSegment, SpeedLimitUnit,
     StaticSign,
@@ -102,6 +103,10 @@ pub struct StoredEntities {
     pub static_signs: Vec<StaticSign>,
     pub fixed_speed_cameras: Vec<FixedSpeedCamera>,
     pub hazard_reports: Vec<HazardReport>,
+    /// Coarse camera areas of the countries whose camera policy is `zones`.
+    /// `default`: a snapshot written before zones existed still loads.
+    #[serde(default)]
+    pub camera_zones: Vec<CameraZone>,
 }
 
 /// A signed-but-not-yet-confirmed-delivered report submission
@@ -192,6 +197,15 @@ pub trait Store: Send + Sync {
     fn get_cursor(&self, node_id: &str) -> Result<Option<u64>, StoreError>;
     fn set_cursor(&self, node_id: &str, since: u64) -> Result<(), StoreError>;
 
+    /// Forgets every server's cursor, so the next sync of the dynamic data
+    /// starts from a fresh snapshot instead of continuing from events — what
+    /// is wanted when the rules of delivery changed (a different camera
+    /// policy) and no event will tell about what is now allowed or not.
+    /// (The default forgets nothing.)
+    fn clear_cursors(&self) -> Result<(), StoreError> {
+        Ok(())
+    }
+
     fn get_partition_hash(&self, tile: &str) -> Result<Option<String>, StoreError>;
     fn set_partition_hash(&self, tile: &str, hash: &str) -> Result<(), StoreError>;
 
@@ -268,6 +282,24 @@ pub trait Store: Send + Sync {
     /// them at once. (The default goes through `all_entities`.)
     fn fixed_speed_cameras(&self) -> Result<Vec<FixedSpeedCamera>, StoreError> {
         Ok(self.all_entities()?.fixed_speed_cameras)
+    }
+
+    /// The camera zones — a few hundred at most, so all of them at once.
+    /// (The default goes through `all_entities`.)
+    fn camera_zones(&self) -> Result<Vec<CameraZone>, StoreError> {
+        Ok(self.all_entities()?.camera_zones)
+    }
+
+    /// The camera policy the stored cameras and zones were learned under, as
+    /// the client recorded it (opaque text) — so a stricter policy than that
+    /// one is noticed and what was stored is dropped. (The default remembers
+    /// nothing, so a store that does not override this never notices.)
+    fn camera_policy_stamp(&self) -> Result<Option<String>, StoreError> {
+        Ok(None)
+    }
+
+    fn set_camera_policy_stamp(&self, _stamp: &str) -> Result<(), StoreError> {
+        Ok(())
     }
 
     /// The stored hazard reports (dynamic data: a region's worth, not the

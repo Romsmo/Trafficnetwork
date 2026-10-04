@@ -10,11 +10,17 @@
 //   POST /__instances            body: instance config   -> { url, rootPublicKey }
 //   GET  {url}/__log                                     -> [{ key, body, signatureValid }]
 //   POST {url}/__fail            body: { route, status, times }
+//   POST {url}/__set             body: instance config keys to replace; rebuilds the static
+//                                package and moves the static-data version, as a server does
+//                                when its rules (the camera policy) change
 //
 // Instance config (all optional):
 //   cameraNamespace: bool     the server's SPEED_CAMERA_NAMESPACE_ENABLED
-//   networkConfig: { version, blitzerEnabled }   signed with the instance's root key ...
+//   networkConfig: { version, blitzerEnabled, cameraPolicyByCountry? }   signed with the instance's root key ...
 //   signWith: "root" | "impostor"                ... or, for the forgery scenario, another key
+//   cameraPolicy: { defaultLevel, byCountry, namespaceEnabled?, version?, notice? }
+//                             the country-based camera policy `GET /v1/config` reports
+//   cameraData: { camera, zone }   put a camera and/or a zone near (52.0, 13.0) into the package
 //   peers: [url]              other servers listed in the directory
 //   nodeId: string
 //
@@ -76,11 +82,15 @@ let nextId = 1;
 const rootKey = generateKey();
 const impostorKey = generateKey();
 
-function createInstance(config) {
-  const id = nextId++;
-  const url = `http://127.0.0.1:${PORT}/i/${id}`;
+// A real H3 cell at the partition resolution (4): the one around Berlin
+// (52.52, 13.405) — the library works out which package held a camera from the
+// camera's position, so the package has to carry the id such a position gives.
+const PARTITION_TILE = "841f1d5ffffffff";
+
+function buildPackage(config) {
+  const data = config.cameraData ?? {};
   const pkg = {
-    tile: "t1",
+    tile: PARTITION_TILE,
     speedLimitSegments: [
       {
         id: "seg1",
@@ -109,15 +119,61 @@ function createInstance(config) {
         importedAt: "2027-01-01T00:00:00Z",
       },
     ],
-    fixedSpeedCameras: [],
+    fixedSpeedCameras: data.camera
+      ? [
+          {
+            id: "cam-1",
+            type: "fixedSpeedCamera",
+            position: { type: "Point", coordinates: [13.405, 52.52] },
+            status: "active",
+            removedAt: null,
+            source: "osm",
+            sourceLicense: null,
+            importedAt: "2027-01-01T00:00:00Z",
+            lastConfirmedAt: null,
+            removalReportCount: 0,
+          },
+        ]
+      : [],
   };
-  const packageText = JSON.stringify(pkg);
+  if (data.zone) {
+    pkg.cameraZones = [
+      {
+        id: "zone-1",
+        cell: "861f1d48fffffff",
+        resolution: 6,
+        boundary: {
+          type: "Polygon",
+          coordinates: [
+            [
+              [13.385, 52.5],
+              [13.425, 52.5],
+              [13.425, 52.54],
+              [13.385, 52.54],
+              [13.385, 52.5],
+            ],
+          ],
+        },
+        cameraTypes: ["fixedSpeedCamera", "mobileSpeedCamera"],
+        status: "active",
+      },
+    ];
+  }
+  const text = JSON.stringify(pkg);
+  return { text, hash: crypto.createHash("sha256").update(text).digest("hex") };
+}
+
+function createInstance(config) {
+  const id = nextId++;
+  const url = `http://127.0.0.1:${PORT}/i/${id}`;
+  const built = buildPackage(config);
   const instance = {
     id,
     url,
     config,
-    packageText,
-    packageHash: crypto.createHash("sha256").update(packageText).digest("hex"),
+    packageText: built.text,
+    packageHash: built.hash,
+    staticVersion: 1,
     hazards: [],
     events: [],
     sequence: 0,
@@ -165,10 +221,14 @@ function clientConfig(instance) {
         directoryKeyId: null,
         importKeyId: null,
         issuedAt: "2027-01-01T00:00:00.000Z",
+        ...(instance.config.networkConfig.cameraPolicyByCountry
+          ? { cameraPolicyByCountry: instance.config.networkConfig.cameraPolicyByCountry }
+          : {}),
       },
       signer,
     );
   }
+  const policy = instance.config.cameraPolicy;
   return {
     regionTileH3Resolution: 7,
     staticDataPartitionH3Resolution: 4,
@@ -186,9 +246,19 @@ function clientConfig(instance) {
     reportRateLimitMax: 10,
     reportRateLimitWindowMinutes: 10,
     cameraRemovalThreshold: 3,
-    staticDataVersion: 1,
+    staticDataVersion: instance.staticVersion,
     federationEnabled: false,
     networkConfig,
+    cameraPolicy: policy
+      ? {
+          version: policy.version ?? "mock-policy",
+          namespaceEnabled: policy.namespaceEnabled ?? true,
+          defaultLevel: policy.defaultLevel ?? "off",
+          byCountry: policy.byCountry ?? {},
+          zoneResolution: 6,
+          notice: policy.notice ?? { version: 1, text: { de: "Hinweis (Mock)", en: "Notice (mock)" } },
+        }
+      : undefined,
   };
 }
 
@@ -274,6 +344,14 @@ function handleInstance(instance, req, res, path, query, body) {
   const entry = { key, body };
 
   if (path === "/__log" && req.method === "GET") return json(res, 200, instance.log);
+  if (path === "/__set" && req.method === "POST") {
+    Object.assign(instance.config, body ?? {});
+    const built = buildPackage(instance.config);
+    instance.packageText = built.text;
+    instance.packageHash = built.hash;
+    instance.staticVersion += 1;
+    return json(res, 200, { staticDataVersion: instance.staticVersion });
+  }
   if (path === "/__fail" && req.method === "POST") {
     instance.failures.push({ route: body.route, status: body.status, times: body.times ?? 1 });
     return json(res, 200, {});
@@ -303,13 +381,14 @@ function handleInstance(instance, req, res, path, query, body) {
       return json(res, 200, { nodeId: instance.nodeId, publicKey: "node-key", federationEnabled: false });
     case "GET /v1/static-data/manifest":
       return json(res, 200, {
-        staticDataVersion: 1,
+        staticDataVersion: instance.staticVersion,
         generatedAt: "2027-01-01T00:00:00.000Z",
+        partitionResolution: 4,
         partitions: [
-          { tile: "t1", hash: instance.packageHash, sizeBytes: Buffer.byteLength(instance.packageText) },
+          { tile: PARTITION_TILE, hash: instance.packageHash, sizeBytes: Buffer.byteLength(instance.packageText) },
         ],
       });
-    case "GET /v1/static-data/partitions/t1":
+    case `GET /v1/static-data/partitions/${PARTITION_TILE}`:
       return json(res, 200, instance.packageText);
     case "GET /v1/snapshot":
       return json(res, 200, {

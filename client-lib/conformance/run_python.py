@@ -118,6 +118,9 @@ def run_scenario(scenario):
                 spec = step["mockFail"]
                 http("POST", f"{servers[spec['server']]}/__fail",
                      {"route": spec["route"], "status": spec["status"], "times": spec.get("times", 1)})
+            elif "mockSet" in step:
+                spec = step["mockSet"]
+                http("POST", f"{servers[spec['server']]}/__set", spec["config"])
             elif "mockLog" in step:
                 spec = step["mockLog"]
                 log = http("GET", f"{servers[spec['server']]}/__log")

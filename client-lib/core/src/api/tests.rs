@@ -393,6 +393,8 @@ async fn cameras_need_the_server_the_host_app_and_a_valid_network_configuration(
         directory_key_id: None,
         import_key_id: None,
         issued_at: "2027-01-01T00:00:00Z".to_string(),
+        camera_policy_by_country: None,
+        raw: None,
     };
     let mut config = config_json(true);
     config["networkConfig"] =
@@ -427,6 +429,8 @@ async fn the_network_status_reports_the_verified_configuration_version() {
             directory_key_id: None,
             import_key_id: None,
             issued_at: "2027-01-01T00:00:00Z".to_string(),
+            camera_policy_by_country: None,
+            raw: None,
         },
         &root,
     )
@@ -743,4 +747,336 @@ fn the_search_radius_and_positions_are_checked() {
             .code,
         code::INVALID_ARGUMENT
     );
+}
+
+// ----------------------------------------------------------- camera policy
+
+fn camera_json(id: &str, lat: f64, lng: f64) -> Value {
+    json!({
+        "id": id, "type": "fixedSpeedCamera",
+        "position": { "type": "Point", "coordinates": [lng, lat] },
+        "status": "active", "removedAt": null, "source": "osm", "sourceLicense": null,
+        "importedAt": "2027-01-01T00:00:00Z", "lastConfirmedAt": null, "removalReportCount": 0
+    })
+}
+
+fn zone_json(id: &str, lat: f64, lng: f64) -> Value {
+    json!({
+        "id": id, "cell": "861f1d48fffffff", "resolution": 6,
+        "boundary": { "type": "Polygon", "coordinates": [[
+            [lng - 0.02, lat - 0.02], [lng + 0.02, lat - 0.02],
+            [lng + 0.02, lat + 0.02], [lng - 0.02, lat + 0.02],
+            [lng - 0.02, lat - 0.02]
+        ]] },
+        "cameraTypes": ["fixedSpeedCamera", "mobileSpeedCamera"],
+        "status": "active"
+    })
+}
+
+/// A configuration whose country policy says `default_level` for every
+/// country and `by_country` for the listed ones.
+fn policy_config(default_level: &str, by_country: Value) -> Value {
+    let mut config = config_json(true);
+    config["cameraPolicy"] = json!({
+        "version": "p1", "namespaceEnabled": true,
+        "defaultLevel": default_level, "byCountry": by_country, "zoneResolution": 6,
+        "notice": { "version": 3, "text": { "de": "Hinweis vom Knoten", "en": "Notice from the node" } }
+    });
+    config
+}
+
+/// The tile of the one package of `camera_server`, at the resolution it says.
+fn camera_tile() -> String {
+    tile_at(52.0, 13.0, 4).unwrap()
+}
+
+/// A working server with `config`, whose only package holds — if asked — a
+/// camera and a zone around (52.0, 13.0); its snapshot holds an `ice` report
+/// and, with the camera, a report of a camera type (a server that withholds
+/// the camera withholds that too).
+fn camera_server(config: Value, with_camera: bool, with_zone: bool) -> Arc<ScriptedServer> {
+    let server = working_server(true);
+    server.route("GET", "/v1/config", 200, config);
+    let cameras = if with_camera {
+        vec![camera_json("cam1", 52.0, 13.0)]
+    } else {
+        vec![]
+    };
+    let zones = if with_zone {
+        vec![zone_json("zone1", 52.0, 13.0)]
+    } else {
+        vec![]
+    };
+    let package = json!({
+        "tile": camera_tile(),
+        "speedLimitSegments": [], "staticSigns": [],
+        "fixedSpeedCameras": cameras,
+        "cameraZones": zones
+    });
+    let hash = hex::encode(Sha256::digest(serde_json::to_vec(&package).unwrap()));
+    server.route(
+        "GET",
+        "/v1/static-data/manifest",
+        200,
+        json!({
+            "staticDataVersion": 7, "generatedAt": "2027-01-01T00:00:00Z",
+            "partitionResolution": 4,
+            "partitions": [{ "tile": camera_tile(), "hash": hash, "sizeBytes": 100 }]
+        }),
+    );
+    server.route(
+        "GET",
+        &format!("/v1/static-data/partitions/{}", camera_tile()),
+        200,
+        package,
+    );
+    let mut reports = vec![hazard_json("ice-report", "ice", 52.0, 13.0)];
+    if with_camera {
+        reports.push(hazard_json("cam-report", "mobileSpeedCamera", 52.0, 13.0));
+    }
+    server.route(
+        "GET",
+        "/v1/snapshot",
+        200,
+        json!({
+            "snapshotSequence": 5, "speedLimitSegments": [], "staticSigns": [],
+            "hazardReports": reports,
+            "fixedSpeedCameras": []
+        }),
+    );
+    server.route(
+        "GET",
+        "/v1/delta",
+        200,
+        json!({ "events": [], "nextSince": 5, "hasMore": false }),
+    );
+    server
+}
+
+fn host_on() -> ClientOptions {
+    let mut opts = options();
+    opts.camera_namespace_enabled = true;
+    opts
+}
+
+#[tokio::test]
+async fn a_zones_policy_shows_areas_and_never_an_individual_camera() {
+    use crate::sync::CameraLevel;
+
+    // Even a package that (wrongly) held a camera does not make one show.
+    let server = camera_server(policy_config("zones", json!({})), true, true);
+    let client = client_on(server, Arc::new(InMemoryStore::new()), host_on());
+    client.sync().await.unwrap();
+
+    let items = client
+        .get_nearby(52.0, 13.0, 500.0, &[NearbyCategory::Cameras])
+        .unwrap();
+    assert_eq!(items.len(), 1, "{items:?}");
+    assert!(matches!(&items[0], NearbyItem::CameraZone { id, .. } if id == "zone1"));
+    let wire = serde_json::to_value(&items[0]).unwrap();
+    assert_eq!(wire["kind"], "cameraZone");
+    assert_eq!(wire["distanceMeters"], json!(0.0));
+    assert_eq!(
+        wire["cameraTypes"],
+        json!(["fixedSpeedCamera", "mobileSpeedCamera"])
+    );
+    assert_eq!(wire["outline"].as_array().unwrap().len(), 5);
+    for key in ["lat", "lng", "position", "cameraType"] {
+        assert!(wire.get(key).is_none(), "a zone has no `{key}`: {wire}");
+    }
+
+    // Nor does the stored camera report of a camera type appear as a hazard.
+    let hazards = client
+        .get_nearby(52.0, 13.0, 500.0, &[NearbyCategory::Hazards])
+        .unwrap();
+    assert!(hazards
+        .iter()
+        .all(|item| !matches!(item, NearbyItem::Hazard { id, .. } if id == "cam-report")));
+    assert!(hazards
+        .iter()
+        .any(|item| matches!(item, NearbyItem::Hazard { id, .. } if id == "ice-report")));
+
+    assert_eq!(
+        client.get_camera_policy().unwrap().max_level,
+        CameraLevel::Zones
+    );
+}
+
+#[tokio::test]
+async fn a_full_country_shows_individual_cameras_and_the_host_switch_decides() {
+    let config = policy_config("off", json!({ "DE": "full", "FR": "zones" }));
+
+    // The host app did not switch cameras on (the default): nothing at all.
+    let off = client_on(
+        camera_server(config.clone(), true, true),
+        Arc::new(InMemoryStore::new()),
+        options(),
+    );
+    off.sync().await.unwrap();
+    assert!(off
+        .get_nearby(52.0, 13.0, 500.0, &[NearbyCategory::Cameras])
+        .unwrap()
+        .is_empty());
+    assert!(!off.get_camera_policy().unwrap().active);
+    assert!(!off.get_camera_policy().unwrap().host_enabled);
+
+    // Switched on: the camera of a `full` country, and the zone of the other.
+    let on = client_on(
+        camera_server(config, true, true),
+        Arc::new(InMemoryStore::new()),
+        host_on(),
+    );
+    on.sync().await.unwrap();
+    let items = on
+        .get_nearby(52.0, 13.0, 500.0, &[NearbyCategory::Cameras])
+        .unwrap();
+    assert!(items
+        .iter()
+        .any(|item| matches!(item, NearbyItem::Camera { id, .. } if id == "cam1")));
+    assert!(items
+        .iter()
+        .any(|item| matches!(item, NearbyItem::CameraZone { id, .. } if id == "zone1")));
+    let policy = on.get_camera_policy().unwrap();
+    assert!(policy.active && policy.host_enabled && policy.enabled);
+}
+
+#[tokio::test]
+async fn a_policy_that_gets_stricter_removes_what_was_stored_and_refetches_the_packages() {
+    let store = Arc::new(InMemoryStore::new());
+
+    // Learned under a policy that lets individual cameras through everywhere.
+    let loose = camera_server(policy_config("full", json!({})), true, true);
+    let first = client_on(loose, store.clone(), host_on());
+    first.sync().await.unwrap();
+    assert_eq!(store.fixed_speed_cameras().unwrap().len(), 1);
+    assert_eq!(store.camera_zones().unwrap().len(), 1);
+    assert_eq!(store.hazard_reports().unwrap().len(), 2);
+    assert!(store
+        .camera_policy_stamp()
+        .unwrap()
+        .is_some_and(|stamp| stamp.contains("\"defaultLevel\":\"full\"")));
+
+    // Germany is cut to zones. The package is rebuilt without the camera.
+    let strict = camera_server(policy_config("full", json!({ "DE": "zones" })), false, true);
+    let second = client_on(strict.clone(), store.clone(), host_on());
+    second.sync().await.unwrap();
+
+    assert!(
+        store.fixed_speed_cameras().unwrap().is_empty(),
+        "the camera is gone"
+    );
+    let reports: Vec<String> = store
+        .hazard_reports()
+        .unwrap()
+        .into_iter()
+        .map(|report| report.id)
+        .collect();
+    assert_eq!(
+        reports,
+        vec!["ice-report".to_string()],
+        "only the camera report went"
+    );
+    assert_eq!(
+        strict.count(
+            "GET",
+            &format!("/v1/static-data/partitions/{}", camera_tile())
+        ),
+        1,
+        "the package that held cameras was fetched again"
+    );
+    assert_eq!(
+        store.camera_zones().unwrap().len(),
+        1,
+        "the zone came back with it"
+    );
+    assert!(second
+        .get_nearby(52.0, 13.0, 500.0, &[NearbyCategory::Cameras])
+        .unwrap()
+        .iter()
+        .all(|item| !matches!(item, NearbyItem::Camera { .. })));
+
+    // The same policy again changes nothing.
+    let again = client_on(strict.clone(), store.clone(), host_on());
+    again.sync().await.unwrap();
+    assert_eq!(
+        strict.count(
+            "GET",
+            &format!("/v1/static-data/partitions/{}", camera_tile())
+        ),
+        1,
+        "nothing was dropped, so nothing is fetched again"
+    );
+}
+
+#[tokio::test]
+async fn the_emergency_brake_removes_every_camera_locally() {
+    let store = Arc::new(InMemoryStore::new());
+    let loose = camera_server(policy_config("full", json!({})), true, true);
+    client_on(loose, store.clone(), host_on())
+        .sync()
+        .await
+        .unwrap();
+    assert_eq!(store.fixed_speed_cameras().unwrap().len(), 1);
+
+    let mut braked = policy_config("full", json!({}));
+    braked["cameraPolicy"]["namespaceEnabled"] = json!(false);
+    braked["speedCameraNamespaceEnabled"] = json!(false);
+    let client = client_on(
+        camera_server(braked, false, false),
+        store.clone(),
+        host_on(),
+    );
+    client.sync().await.unwrap();
+
+    assert!(store.fixed_speed_cameras().unwrap().is_empty());
+    assert!(store.camera_zones().unwrap().is_empty());
+    assert!(client
+        .get_nearby(52.0, 13.0, 500.0, &[NearbyCategory::Cameras])
+        .unwrap()
+        .is_empty());
+    assert!(!client.get_camera_policy().unwrap().active);
+}
+
+#[tokio::test]
+async fn the_host_app_gets_the_levels_and_the_notice_through_the_api() {
+    let client = client(working_server(true));
+
+    // Before any configuration: nothing is allowed, and the library's own
+    // notice is there to show.
+    let before = client.call("getCameraPolicy", json!({})).await.unwrap();
+    assert_eq!(before["hostEnabled"], json!(false));
+    assert_eq!(before["active"], json!(false));
+    assert_eq!(before["maxLevel"], json!("off"));
+    assert_eq!(before["version"], Value::Null);
+    assert!(before["notice"]["text"]["de"]
+        .as_str()
+        .unwrap()
+        .contains("Beifahrer"));
+    assert!(before["notice"]["text"]["en"]
+        .as_str()
+        .unwrap()
+        .contains("Switzerland"));
+
+    // With one: the node's levels and the node's wording.
+    let server = camera_server(
+        policy_config("off", json!({ "DE": "full", "CH": "off" })),
+        false,
+        false,
+    );
+    let client = client_on(server, Arc::new(InMemoryStore::new()), options());
+    client.sync().await.unwrap();
+    let policy = client.call("getCameraPolicy", json!({})).await.unwrap();
+    assert_eq!(policy["maxLevel"], json!("full"));
+    assert_eq!(policy["defaultLevel"], json!("off"));
+    assert_eq!(policy["byCountry"], json!({ "CH": "off", "DE": "full" }));
+    assert_eq!(policy["zoneResolution"], json!(6));
+    assert_eq!(policy["version"], json!("p1"));
+    assert_eq!(policy["notice"]["version"], json!(3));
+    assert_eq!(
+        policy["notice"]["text"]["en"],
+        json!("Notice from the node")
+    );
+    // The host did not switch it on, so nothing is shown yet.
+    assert_eq!(policy["hostEnabled"], json!(false));
+    assert_eq!(policy["active"], json!(false));
 }

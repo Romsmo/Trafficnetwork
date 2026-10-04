@@ -4,10 +4,11 @@
 //! convention as `discovery::types`, so these structs deserialize the
 //! server's JSON with no translation layer to get wrong.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
 use serde::{Deserialize, Serialize};
 
+use super::camera_policy::{CameraPolicyConfig, CameraZone};
 use crate::crypto::SignedEnvelope;
 
 /// `event_log.sequence` is a Postgres `bigserial`, and the endpoints that
@@ -259,6 +260,10 @@ pub struct SnapshotResult {
     pub hazard_reports: Vec<HazardReport>,
     #[serde(rename = "fixedSpeedCameras")]
     pub fixed_speed_cameras: Vec<FixedSpeedCamera>,
+    /// Coarse camera areas of the countries whose policy is `zones`
+    /// (`server/docs/camera-country-policy.md`); absent on an older server.
+    #[serde(rename = "cameraZones", default)]
+    pub camera_zones: Vec<CameraZone>,
 }
 
 /// One `event_log` row as `GET /v1/delta` (and the WebSocket push) return it
@@ -337,6 +342,9 @@ pub struct PartitionContent {
     pub static_signs: Vec<StaticSign>,
     #[serde(rename = "fixedSpeedCameras")]
     pub fixed_speed_cameras: Vec<FixedSpeedCamera>,
+    /// Absent (or empty) in a package without zones, and on an older server.
+    #[serde(rename = "cameraZones", default)]
+    pub camera_zones: Vec<CameraZone>,
 }
 
 /// The network-wide config a root-key holder signs offline
@@ -344,25 +352,114 @@ pub struct PartitionContent {
 /// payload of `ClientConfig.network_config`, once independently re-verified
 /// against the network root key (never taken on the server's word alone,
 /// see [`effective_camera_namespace_enabled`]).
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+///
+/// The signature covers the JSON the root-key holder signed, not this
+/// struct: a field the signer left out, or one this build does not know yet
+/// (the policy grows), must not change what is verified. So a payload read
+/// from JSON keeps that JSON in `raw` and serializes as exactly that — and
+/// verification, which canonicalizes what serialization gives, checks the
+/// signed bytes.
+#[derive(Debug, Clone, Default)]
 pub struct NetworkConfigPayload {
     pub version: u64,
-    #[serde(rename = "blitzerEnabled")]
     pub blitzer_enabled: bool,
-    #[serde(rename = "eventLogRetentionDaysDynamic")]
     pub event_log_retention_days_dynamic: u32,
-    #[serde(rename = "eventLogRetentionDaysStatic")]
     pub event_log_retention_days_static: u32,
-    #[serde(rename = "minVersion")]
     pub min_version: String,
-    #[serde(rename = "excludedNodeIds")]
     pub excluded_node_ids: Vec<String>,
-    #[serde(rename = "directoryKeyId")]
     pub directory_key_id: Option<String>,
-    #[serde(rename = "importKeyId")]
     pub import_key_id: Option<String>,
-    #[serde(rename = "issuedAt")]
     pub issued_at: String,
+    /// The signed per-country camera levels (ISO 3166-1 alpha-2 → level
+    /// text), if the field is present.
+    pub camera_policy_by_country: Option<BTreeMap<String, String>>,
+    /// The payload exactly as it was read; `None` for one built in code.
+    /// Ignored when comparing.
+    pub raw: Option<serde_json::Value>,
+}
+
+impl PartialEq for NetworkConfigPayload {
+    fn eq(&self, other: &Self) -> bool {
+        self.version == other.version
+            && self.blitzer_enabled == other.blitzer_enabled
+            && self.event_log_retention_days_dynamic == other.event_log_retention_days_dynamic
+            && self.event_log_retention_days_static == other.event_log_retention_days_static
+            && self.min_version == other.min_version
+            && self.excluded_node_ids == other.excluded_node_ids
+            && self.directory_key_id == other.directory_key_id
+            && self.import_key_id == other.import_key_id
+            && self.issued_at == other.issued_at
+            && self.camera_policy_by_country == other.camera_policy_by_country
+    }
+}
+
+#[derive(Serialize, Deserialize)]
+struct NetworkConfigPayloadWire {
+    version: u64,
+    #[serde(rename = "blitzerEnabled")]
+    blitzer_enabled: bool,
+    #[serde(rename = "eventLogRetentionDaysDynamic")]
+    event_log_retention_days_dynamic: u32,
+    #[serde(rename = "eventLogRetentionDaysStatic")]
+    event_log_retention_days_static: u32,
+    #[serde(rename = "minVersion")]
+    min_version: String,
+    #[serde(rename = "excludedNodeIds")]
+    excluded_node_ids: Vec<String>,
+    #[serde(rename = "directoryKeyId")]
+    directory_key_id: Option<String>,
+    #[serde(rename = "importKeyId")]
+    import_key_id: Option<String>,
+    #[serde(rename = "issuedAt")]
+    issued_at: String,
+    #[serde(
+        rename = "cameraPolicyByCountry",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    camera_policy_by_country: Option<BTreeMap<String, String>>,
+}
+
+impl Serialize for NetworkConfigPayload {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        if let Some(raw) = &self.raw {
+            return raw.serialize(serializer);
+        }
+        NetworkConfigPayloadWire {
+            version: self.version,
+            blitzer_enabled: self.blitzer_enabled,
+            event_log_retention_days_dynamic: self.event_log_retention_days_dynamic,
+            event_log_retention_days_static: self.event_log_retention_days_static,
+            min_version: self.min_version.clone(),
+            excluded_node_ids: self.excluded_node_ids.clone(),
+            directory_key_id: self.directory_key_id.clone(),
+            import_key_id: self.import_key_id.clone(),
+            issued_at: self.issued_at.clone(),
+            camera_policy_by_country: self.camera_policy_by_country.clone(),
+        }
+        .serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for NetworkConfigPayload {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let raw = serde_json::Value::deserialize(deserializer)?;
+        let wire: NetworkConfigPayloadWire =
+            serde_json::from_value(raw.clone()).map_err(serde::de::Error::custom)?;
+        Ok(NetworkConfigPayload {
+            version: wire.version,
+            blitzer_enabled: wire.blitzer_enabled,
+            event_log_retention_days_dynamic: wire.event_log_retention_days_dynamic,
+            event_log_retention_days_static: wire.event_log_retention_days_static,
+            min_version: wire.min_version,
+            excluded_node_ids: wire.excluded_node_ids,
+            directory_key_id: wire.directory_key_id,
+            import_key_id: wire.import_key_id,
+            issued_at: wire.issued_at,
+            camera_policy_by_country: wire.camera_policy_by_country,
+            raw: Some(raw),
+        })
+    }
 }
 
 /// `GET /v1/config` response — the curated subset of server tunables a
@@ -408,6 +505,12 @@ pub struct ClientConfig {
     #[serde(rename = "communityCorrections")]
     #[serde(default, deserialize_with = "lenient_option")]
     pub community_corrections: Option<CommunityCorrectionsConfig>,
+    /// The country-based camera policy of this node. Absent on a server that
+    /// predates it - then `speed_camera_namespace_enabled` is the one switch
+    /// for everything. Parsed leniently like the other add-ons.
+    #[serde(rename = "cameraPolicy")]
+    #[serde(default, deserialize_with = "lenient_option")]
+    pub camera_policy: Option<CameraPolicyConfig>,
 }
 
 fn lenient_option<'de, D, T>(deserializer: D) -> Result<Option<T>, D::Error>
@@ -724,6 +827,7 @@ mod tests {
             federation_enabled: false,
             network_config: None,
             community_corrections: None,
+            camera_policy: None,
         }
     }
 
@@ -738,6 +842,8 @@ mod tests {
             directory_key_id: None,
             import_key_id: None,
             issued_at: "2026-01-01T00:00:00Z".to_string(),
+            camera_policy_by_country: None,
+            raw: None,
         }
     }
 }

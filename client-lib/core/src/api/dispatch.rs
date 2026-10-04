@@ -165,6 +165,7 @@ impl TrafficNetworkClient {
             "planBootstrap" => to_json(self.plan_bootstrap().await?),
             "getSyncStatus" => to_json(self.get_sync_status()?),
             "getNetworkStatus" => to_json(self.get_network_status()?),
+            "getCameraPolicy" => to_json(self.get_camera_policy()?),
             "pollEvents" => Ok(json!({ "events": to_json(self.poll_events())? })),
             "close" => {
                 self.close();

@@ -23,6 +23,8 @@ export interface ClientOptions {
   cameraNamespaceEnabled?: boolean;
   /** How often `tick()` syncs, at the most. Default 30. */
   syncIntervalSeconds?: number;
+  /** How long a fetched server configuration is used before it is fetched again (default 120); also how long a change of the camera policy can go unnoticed. */
+  configRefreshSeconds?: number;
 }
 
 /**
@@ -88,7 +90,49 @@ export type NearbyItem =
       pending: boolean;
     }
   | { kind: "sign"; id: string; signType: string; lat: number; lng: number; distanceMeters: number }
-  | { kind: "camera"; id: string; cameraType: string; lat: number; lng: number; distanceMeters: number };
+  | { kind: "camera"; id: string; cameraType: string; lat: number; lng: number; distanceMeters: number }
+  | {
+      /**
+       * A coarse area in which cameras of some kinds exist — all a country at
+       * level `zones` lets through. Draw `outline` as an area, not a pin: there
+       * is no position of a single camera.
+       */
+      kind: "cameraZone";
+      id: string;
+      /** The H3 index of the cell. */
+      cell: string;
+      resolution: number;
+      /** The cell's outline as `[lng, lat]` positions (the outer ring). */
+      outline: [number, number][];
+      /** The kinds of camera present, sorted. */
+      cameraTypes: string[];
+      /** 0 when the position is inside the zone. */
+      distanceMeters: number;
+    };
+
+/** How much of a camera a country allows: nothing, a coarse area, the camera itself. */
+export type CameraLevel = "off" | "zones" | "full";
+
+/** What the camera policy of the network allows right now (client-lib/docs/api.md, "Camera policy"). */
+export interface CameraPolicy {
+  /** The host's own switch (the `cameraNamespaceEnabled` option) — off unless the host turned it on. */
+  hostEnabled: boolean;
+  /** Cameras (or zones) are shown by `getNearby` right now: the host switch is on and the policy lets something through. */
+  active: boolean;
+  /** The emergency brake is released. `false`: every country is off. */
+  enabled: boolean;
+  /** The most any country allows: `off` shows nothing, `zones` only zones, `full` individual cameras too. */
+  maxLevel: CameraLevel;
+  /** The level of every country not in `byCountry`. */
+  defaultLevel: CameraLevel;
+  /** ISO 3166-1 alpha-2 → level: the strictest reading of the node's policy and the verified network policy. */
+  byCountry: Record<string, CameraLevel>;
+  zoneResolution: number | null;
+  /** Changes whenever the node's policy changes. */
+  version: string | null;
+  /** The legal notice by language — show it once when the user first switches cameras on, and again when `version` grows. */
+  notice: { version: number; text: Record<string, string> };
+}
 
 export interface Proposal {
   segmentKey: string;
@@ -265,6 +309,8 @@ export interface TrafficNetworkClient {
   planBootstrap(): Promise<BootstrapPlan>;
   getSyncStatus(): Promise<SyncStatus>;
   getNetworkStatus(): Promise<NetworkStatus>;
+  /** The levels the network allows per country, and the legal notice to show before cameras are switched on. Local. */
+  getCameraPolicy(): Promise<CameraPolicy>;
   pollEvents(): Promise<ClientEvent[]>;
   /** Closes the client: every later call fails with `closed`. */
   close(): Promise<unknown>;
@@ -301,6 +347,7 @@ export class BaseClient {
   planBootstrap(): Promise<BootstrapPlan>;
   getSyncStatus(): Promise<SyncStatus>;
   getNetworkStatus(): Promise<NetworkStatus>;
+  getCameraPolicy(): Promise<CameraPolicy>;
   pollEvents(): Promise<ClientEvent[]>;
   close(): Promise<unknown>;
 }

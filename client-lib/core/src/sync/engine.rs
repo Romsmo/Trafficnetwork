@@ -19,6 +19,7 @@
 //! facade (F-C0 plan §3's `api.rs`), once there's an actual host-app-facing
 //! surface to hang a refresh policy off of.
 
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
 use serde::de::DeserializeOwned;
@@ -28,6 +29,7 @@ use crate::discovery::{DiscoveryError, DiscoveryService, KnownServer};
 use crate::platform::{Clock, HttpRequest, HttpResponse};
 use crate::storage::{is_storage_full, Store, StoreError, StoredEntities};
 
+use super::camera_policy::CameraZone;
 use super::types::{
     ClientConfig, DeltaPage, EventLogEntry, HazardReport, PartitionContent, PartitionSummary,
     SnapshotResult, SpeedLimitSegment, StaticDataManifest, StaticSign,
@@ -159,6 +161,9 @@ pub struct SyncEngine {
     clock: Arc<dyn Clock>,
     observer: Option<Arc<dyn SyncObserver>>,
     withholding_sample_rate: f64,
+    /// The `staticDataVersion` of the last manifest this engine fetched; `0`
+    /// before there was one.
+    last_static_data_version: AtomicU64,
 }
 
 impl SyncEngine {
@@ -173,6 +178,19 @@ impl SyncEngine {
             clock,
             observer: None,
             withholding_sample_rate: withholding::DEFAULT_SAMPLE_RATE,
+            last_static_data_version: AtomicU64::new(0),
+        }
+    }
+
+    /// The `staticDataVersion` of the last manifest this engine fetched, if
+    /// it fetched one. It moves when the server's packages were rebuilt —
+    /// which a change of the camera policy always causes
+    /// (`server/docs/camera-country-policy.md`, section 7) — so a caller can
+    /// tell that what it knows of the server's rules may be out of date.
+    pub fn last_static_data_version(&self) -> Option<u64> {
+        match self.last_static_data_version.load(Ordering::Relaxed) {
+            0 => None,
+            version => Some(version),
         }
     }
 
@@ -334,10 +352,42 @@ impl SyncEngine {
         self.store
             .upsert_hazard_reports(&snapshot.hazard_reports)
             .map_err(SyncError::from_store)?;
+        if !snapshot.camera_zones.is_empty() {
+            let zones = self.united_with_stored_zones(snapshot.camera_zones)?;
+            self.store
+                .upsert_static_data(&StoredEntities {
+                    camera_zones: zones,
+                    ..Default::default()
+                })
+                .map_err(SyncError::from_store)?;
+        }
         self.store
             .set_cursor(&server.node_id, snapshot.snapshot_sequence)
             .map_err(SyncError::from_store)?;
         Ok(())
+    }
+
+    /// Packages hold the persistent devices only, snapshots and events also
+    /// the live reports of a cell — so a zone that arrives in a package or a
+    /// snapshot is united with the one already stored (the camera kinds of
+    /// both), where an event replaces it (it carries the cell's state now).
+    fn united_with_stored_zones(
+        &self,
+        incoming: Vec<CameraZone>,
+    ) -> Result<Vec<CameraZone>, SyncError> {
+        if incoming.is_empty() {
+            return Ok(incoming);
+        }
+        let stored = self.store.camera_zones().map_err(SyncError::from_store)?;
+        Ok(incoming
+            .into_iter()
+            .map(
+                |zone| match stored.iter().find(|existing| existing.id == zone.id) {
+                    Some(existing) => existing.united_with(&zone),
+                    None => zone,
+                },
+            )
+            .collect())
     }
 
     async fn fetch_snapshot(
@@ -447,7 +497,7 @@ impl SyncEngine {
     pub(crate) fn apply_event(&self, event: &EventLogEntry) -> Result<(), SyncError> {
         let result = match event.entity_type.as_str() {
             "hazardReport" => self.apply_hazard_report_event(event),
-            "speedLimitSegment" | "staticSign" | "fixedSpeedCamera" => {
+            "speedLimitSegment" | "staticSign" | "fixedSpeedCamera" | "cameraZone" => {
                 self.apply_static_entity_event(event)
             }
             // Forward-compatible: an entity type this build doesn't know
@@ -517,6 +567,18 @@ impl SyncEngine {
                         .map_err(SyncError::from_store);
                 }
                 data.fixed_speed_cameras.push(camera);
+            }
+            "cameraZone" => {
+                let zone = serde_json::from_value::<CameraZone>(event.payload.clone())
+                    .map_err(|e| SyncError::InvalidResponse(e.to_string()))?;
+                if zone.status == "removed" {
+                    return self
+                        .store
+                        .remove_static_entity("cameraZone", &zone.id)
+                        .map_err(SyncError::from_store);
+                }
+                // An event carries the state of the cell now: it replaces.
+                data.camera_zones.push(zone);
             }
             _ => return Ok(()),
         }
@@ -632,6 +694,7 @@ impl SyncEngine {
                 static_signs: content.static_signs,
                 fixed_speed_cameras: content.fixed_speed_cameras,
                 hazard_reports: Vec::new(),
+                camera_zones: self.united_with_stored_zones(content.camera_zones)?,
             };
             self.store
                 .upsert_static_partition(&partition.tile, &partition.hash, &data)
@@ -665,7 +728,10 @@ impl SyncEngine {
             })
             .await
             .map_err(SyncError::Discovery)?;
-        Ok((server, parse_ok(&response)?))
+        let manifest: StaticDataManifest = parse_ok(&response)?;
+        self.last_static_data_version
+            .store(manifest.static_data_version, Ordering::Relaxed);
+        Ok((server, manifest))
     }
 
     /// One package from `server`, checked against the manifest's hash. The

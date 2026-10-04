@@ -28,8 +28,8 @@ pub use secure_store::LocalStorageSecureStore;
 pub use secure_store::{MemorySecureStore, SecureStore};
 pub use tiles::{ring_for_speed, tile_at, tiles_around, DEFAULT_REGION_RESOLUTION};
 pub use types::{
-    BootstrapPlanView, NearbyCategory, NearbyItem, NetworkStatusView, NodeView, OriginView,
-    PositionUpdate, ProposalView, SpeedLimitAnswer, SyncReport, SyncStatus, TickResult,
+    BootstrapPlanView, CameraPolicyView, NearbyCategory, NearbyItem, NetworkStatusView, NodeView,
+    OriginView, PositionUpdate, ProposalView, SpeedLimitAnswer, SyncReport, SyncStatus, TickResult,
 };
 
 // Native-only: both use `#[tokio::test]`, which needs a real tokio runtime

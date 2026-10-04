@@ -976,6 +976,7 @@ mod tests {
             federation_enabled: false,
             network_config: None,
             community_corrections,
+            camera_policy: None,
         }
     }
 

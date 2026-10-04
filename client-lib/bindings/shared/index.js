@@ -131,6 +131,10 @@ export class BaseClient {
     return this.call("getNetworkStatus");
   }
 
+  getCameraPolicy() {
+    return this.call("getCameraPolicy");
+  }
+
   async pollEvents() {
     return (await this.call("pollEvents")).events;
   }

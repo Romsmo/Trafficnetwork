@@ -279,6 +279,11 @@ class TrafficNetworkClient {
 
   Future<Map<String, Object?>> getNetworkStatus() => _object('getNetworkStatus');
 
+  /// What the network's camera policy allows right now: levels per country, the
+  /// host switch (`cameraNamespaceEnabled`), the legal notice to show before
+  /// cameras are switched on.
+  Future<Map<String, Object?>> getCameraPolicy() => _object('getCameraPolicy');
+
   Future<List<Object?>> pollEvents() async =>
       (await _object('pollEvents'))['events'] as List<Object?>;
 
