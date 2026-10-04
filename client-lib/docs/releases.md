@@ -13,7 +13,7 @@ publishing them is a decision of its own. You use the files directly, as below.
 
 | File | For | What to do with it | Guide |
 |---|---|---|---|
-| `trafficnetwork-c-abi-<v>-linux-x86_64.tar.gz`, `…-macos-universal.tar.gz`, `…-windows-x86_64.zip` | C, C++, anything with an FFI | link the library, include `trafficnetwork.h` (both are in the archive, with the licence) | [integration-c.md](integration-c.md) |
+| `trafficnetwork-c-abi-<v>-linux-x86_64.tar.gz`, `…-macos-universal.tar.gz`, `…-windows-x86_64.zip` | C, C++, anything with an FFI | link the library, include `trafficnetwork.h` (both are in the archive, with the licence). The Windows archive holds the DLL, **not** its import library: link it with MinGW as in the guide, load it at run time, or build from source (`cargo build -p trafficnetwork-c-abi --release` also writes `trafficnetwork.dll.lib`) when you need MSVC | [integration-c.md](integration-c.md) |
 | `trafficnetwork-android-<v>.aar` | Android (Kotlin/Java) | put it in `app/libs/`, add the JNA dependency | [integration-android.md](integration-android.md) |
 | `trafficnetwork-swift-<v>.zip` | iOS / macOS (Swift Package) | unzip, add as a local package | [integration-ios.md](integration-ios.md) |
 | `TrafficNetworkFFI-<v>.xcframework.zip` | iOS / macOS | the XCFramework on its own | [integration-ios.md](integration-ios.md) |

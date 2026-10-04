@@ -1,6 +1,45 @@
 # Changelog
 
-Versionierung je Paket, kein gemeinsames Release-Datum oder gemeinsame Versionsnummer: `server/` (inklusive der eingebauten Weboberfläche) und `ingestion/` folgen SemVer eigenständig; `client-lib/` bleibt bei `0.x`, solange die Anbindungen (WASM/JS-TS, Kotlin, Swift, Dart, React Native) und paketübergreifende Konformitätstests fehlen — eine `1.0.0` wäre dort ein Stabilitätsversprechen, das die öffentliche API noch nicht einlöst.
+Versionierung je Paket, kein gemeinsames Release-Datum oder gemeinsame Versionsnummer: `server/` (inklusive der eingebauten Weboberfläche), `ingestion/` und `client-lib/` folgen SemVer eigenständig.
+
+## client-lib v1.0.0 — 2026-10-03
+
+Erster stabiler Release der Client-Bibliothek: **ein Rust-Kern, dünne Anbindungen, überall gleiches Verhalten** — an einem gemeinsamen Szenariensatz über sechs Anbindungen gemessen, nicht angenommen. Die öffentliche API (`call(methode, argumenteJson)`, Methodenreferenz in [`client-lib/docs/api.md`](client-lib/docs/api.md)) folgt ab jetzt SemVer: `apiVersion` steigt nur bei einer inkompatiblen Änderung einer Methode oder eines Ergebnisformats.
+
+**Kern:** Kryptografie (Ed25519, RFC-8785-kanonisches JSON, gegen den Server verifiziert), Server-Discovery mit Mehrserver-Failover, Sync-Engine (Snapshot-Bootstrap, Delta-Pull, inhaltsadressierte Statikdaten-Pakete, echter WebSocket-Push mit Wiederverbindung und Lückenschluss), Offline-Schreibpuffer, lokales Map-Matching, Verfallsberechnung, Stichproben-Prüfung gegen zurückgehaltene Daten, Tempolimit-Korrekturen, „aktuell online"-Anzeige; SQLite mit R\*Tree auf nativen Plattformen, IndexedDB im Browser. Gegen ein echtes Mehrknoten-Testnetz verifiziert (Kaltstart, Serverausfall mitten im Sync, Duplikate über zwei Server, bösartige Antworten).
+
+**Anbindungen** — jede mit Integrationsanleitung und Minimalbeispiel in `client-lib/docs/`, das in CI gebaut bzw. ausgeführt wird:
+
+| Plattform | Anbindung | in CI |
+|---|---|---|
+| C-ABI | `libtrafficnetwork` (Linux, macOS universal, Windows) | gebaut, getestet, Beispiel ausgeführt — alle drei Systeme |
+| Python | `ctypes`-Wrapper über das C-ABI | Konformität + Beispiel — Linux, macOS, Windows |
+| Node.js | `koffi` über das C-ABI, TypeScript-Typen | Konformität + Beispiel, als Tarball aus leerem Projekt |
+| Browser | WebAssembly (`wasm-bindgen`), Speicher in IndexedDB, TypeScript-Typen | Konformität in Headless-Chrome + Beispielseite, als Tarball aus leerem Projekt |
+| Android | Kotlin über UniFFI, AAR (4 ABIs) | Konformität (JVM), AAR + Beispiel-App gebaut |
+| iOS / macOS | Swift über UniFFI, XCFramework (iOS Gerät/Simulator, macOS) | Konformität (macOS), für iOS-Gerät und -Simulator gebaut |
+| Flutter / Dart | `flutter_rust_bridge`; Plugin mit gebündelter Bibliothek | Konformität (Dart-VM); frisch erzeugte Flutter-Apps für Android und iOS gebaut; **App läuft auf einem Android-Emulator** |
+| React Native | `uniffi-bindgen-react-native` aus demselben UniFFI-Crate | Bibliothek + Beispiel-App für Android und iOS gebaut |
+
+**Konformität:** derselbe Szenariensatz (`client-lib/conformance/scenarios.json`, 9 Szenarien, geskripteter Server mit echtem Ed25519/RFC 8785, unabhängig vom echten Server-Code) läuft mit gleichem Ergebnis über Python (drei Betriebssysteme), Node.js, WebAssembly, Kotlin, Swift und Dart; Kotlin, Swift und Dart über je eine kleine Brücke, die der **eine** Szenarien-Runner antreibt — die Szenarien werden nicht pro Sprache neu geschrieben. Jede Brücke läuft auch mit einem vom Host implementierten `SecureStore`. Keine Abweichung zwischen den Anbindungen gefunden; plattformbedingte Unterschiede (Speicher im Browser, Geheimnisse, Hintergrund) stehen in den Anleitungen.
+
+**Abnahme vom frischen Klon:** Server in Docker (`docker compose up -d`), echte API-Aufrufe, Weboberfläche und die Bibliothek über zwei Anbindungen (Python/C-ABI und Browser, aus den Release-Dateien) mit Registrieren, Bootstrap, Tempolimit, Meldung, Push und Offline-Puffer sowie dem Zusammenspiel mit der Weboberfläche — Befehle, Ausgaben und Bilder in [`docs/final-report.md`](docs/final-report.md), Abschnitt 4.
+
+**Unterwegs gefunden und behoben:**
+- **TLS auf Android:** reqwest 0.13 prüft Zertifikate standardmäßig mit dem Plattform-Verifier, der auf Android nur mit Handarbeit in jeder App funktioniert — ein AAR ohne Zusatz-Setup wäre auf Android nicht benutzbar gewesen. Der HTTP-Transport vertraut jetzt den eingebauten Mozilla-Wurzeln (der WebSocket-Transport tat es schon). Preis: ein Server mit privater CA wird nicht vertraut.
+- Aufrufe laufen auf Threads der Bibliothek mit 8-MiB-Stack, nicht auf denen des Hosts (Android-/JVM-/macOS-Threads haben 0,5–1 MiB) — vorher ein SIGSEGV im Node-Lauf.
+- `libc` 0.2.190 bricht `backtrace` (Abhängigkeit von `flutter_rust_bridge`) auf iOS; gehalten unter 0.2.190, mit Begründung im Manifest.
+- `initialize()` des Dart-Pakets war nicht idempotent (vom Emulator-Lauf gefunden).
+- Ergebnis-Umschlag, `call_json` und `open_native` liegen einmal im Kern statt je Anbindung.
+- **Echtzeit-Push erreichte einen echten Server nie** (vom Ende-zu-Ende-Lauf gegen den Docker-Server gefunden, in keinem Mock-Test sichtbar): die Bibliothek öffnete `http://…/v1/ws` statt `ws://`/`wss://` und ging in den Backoff. Behoben im Kern (alle Anbindungen), abgesichert durch URL-Tests und einen Mehrknoten-Test, der eine Meldung *während der Verbindung* über den echten WebSocket eines echten Servers ankommen lässt.
+- **Erster Zugang im Docker-Stack fehlte in der Anleitung:** `server/scripts/` liegt nicht im Image. `server/docs/installation.md` beschreibt jetzt den Weg („Create the first client“), die Integrationsanleitungen verweisen darauf. Außerdem: die „Verbinden“-Seite der Weboberfläche versprach noch Codebeispiele „sobald die Bindings fertig sind“ — Text korrigiert (nur Text in `server/web`, keine Serverlogik).
+
+**Bekannt offen, kein Grund gegen dieses 1.0 (siehe [`docs/todo.md`](docs/todo.md)):**
+- *Ausgeführt* wird nur die Flutter-App auf einem Android-Emulator; Kotlin/Android, Swift/iOS und React Native werden gebaut und gelinkt (Konformität: JVM/macOS), aber nicht auf Gerät, Emulator oder iOS-Simulator ausgeführt; das erzeugte React-Native-JSI-Zwischenstück läuft in keinem Test. Flutter auf iOS: gebaut, nicht ausgeführt.
+- Alle Tests laufen gegen `http://`-Mocks: ein echter TLS-Handshake gegen einen Server ist nirgends getestet.
+- Browser-Grenzen (Persistenz hinkt dem Speicher hinterher, ganzer Speicher im RAM, ein Tab je Datenbank, Geheimnisse in `localStorage`, keine Hintergrund-Synchronisation) stehen offen in `client-lib/docs/integration-web.md`.
+- Nichts ist in einer Registry veröffentlicht (npm, Maven, pub.dev, CocoaPods): die Pakete sind `"private"` bzw. `publish_to: none`; ein Release hängt die Artefakte mit Prüfsummen an ein GitHub-Release (`client-lib-v*`, `release.yml`), das Auslösen ist eine eigene Entscheidung.
+- Das Flutter-Plugin bündelt die Bibliothek für Android und iOS, nicht für Desktop; React Native folgt dem neuesten React Native und einem jungen Generator (alle Werkzeugversionen festgenagelt).
 
 ## server v1.0.0 — 2026-09-28
 
@@ -32,7 +71,3 @@ Erster stabiler Release: self-hostbarer Relay-/Moderator-Server mit Föderation,
 - Quellenkatalog: Baustellen (DATEX II v2/v3, Autobahn-JSON), amtliche Verkehrszeichen (NVDB Norwegen)
 - Qualitätsbericht (`npm run report:quality`), vollständige Quellen-Attribution
 - HERE/TomTom/Mobilithek katalogisiert, standardmäßig abgeschaltet (keine Zugänge bzw. keine Lizenzentscheidung)
-
-## client-lib v0.1.0 — unverändert, kein 1.0-Release
-
-**Bleibt bei `0.x`:** der plattformunabhängige Kern ist fertig und gegen ein echtes Mehrknoten-Testnetz verifiziert — Kryptografie, Server-Discovery mit Mehrserver-Failover, Sync-Engine mit echtem WebSocket-Push (Wiederverbindung, Lückenschluss), Offline-Schreibpuffer, lokales Map-Matching, Tempolimit-Korrekturen, „aktuell online"-Anzeige. Ein C-ABI und ein erstes Binding (Python) existieren. Es fehlen noch: WASM/JS-TS, Kotlin, Swift, Dart, React Native und Konformitätstests über mehrere Anbindungen hinweg — siehe [`client-lib/README.md`](client-lib/README.md), „Was noch fehlt". Bis die stehen, ist die öffentliche API nicht stabil genug für ein Versprechen wie `1.0.0`.
