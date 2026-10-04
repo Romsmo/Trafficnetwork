@@ -32,6 +32,10 @@ export const staticPackages = pgTable(
     // builder clears the flag only if the version it built for is at least
     // that high, so a write that lands during a build is never lost.
     dirty: boolean("dirty").notNull().default(false),
+    // Set (together with `dirty`) when the camera policy got stricter for a country that has cameras in this tile: the
+    // built package may hold camera data that is no longer deliverable, so it must not be served until it is rebuilt
+    // (modules/cameras/policy/sync.ts). Cleared with the dirty mark by the build that supersedes it.
+    policyStale: boolean("policy_stale").notNull().default(false),
     dirtyVersion: integer("dirty_version"),
     dirtyMarkedAt: timestamp("dirty_marked_at", { withTimezone: true }).defaultNow(),
   },

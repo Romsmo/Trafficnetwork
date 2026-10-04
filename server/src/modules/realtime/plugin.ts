@@ -4,6 +4,7 @@ import { z } from "zod";
 import { verifyToken } from "../auth/jwt.js";
 import { expandTile } from "../../lib/h3.js";
 import { SubscriptionRegistry } from "./registry.js";
+import { zoneStates } from "../cameras/policy/delivery.js";
 import { isWebSessionSubject } from "../web/guard.js";
 
 const AUTH_TIMEOUT_MS = 10_000;
@@ -22,7 +23,12 @@ const clientMessageSchema = z.discriminatedUnion("type", [
  * A connection that never authenticates within AUTH_TIMEOUT_MS is closed.
  */
 export async function registerRealtimeModule(app: FastifyInstance): Promise<SubscriptionRegistry> {
-  const registry = new SubscriptionRegistry(() => app.deps.env.SPEED_CAMERA_NAMESPACE_ENABLED);
+  const registry = new SubscriptionRegistry({
+    current: () => app.cameraPolicy.current(),
+    regionTileResolution: app.deps.env.REGION_TILE_H3_RESOLUTION,
+    zoneStates: (cells) => zoneStates(app.deps.db, app.cameraPolicy.current(), cells),
+    onError: (err) => app.log.error({ err }, "camera zone push failed"),
+  });
   await app.register(websocketPlugin);
 
   app.get("/v1/ws", { websocket: true }, (socket, req) => {

@@ -250,12 +250,11 @@ describe("multi-node federation network (F-S5)", () => {
     expect(entryForA.tier).toBe("probation");
   });
 
-  it("federation carries camera-adjacent reports, but each node's own local flag still gates whether it's ever served back out", async () => {
-    // Neither node here has a signed network config — each is purely
-    // governed by its own local SPEED_CAMERA_NAMESPACE_ENABLED, and
-    // federation has no mechanism to override that (only hazard-report
-    // *creation* replicates — there is no "camera flag" federation message
-    // type at all, see server/docs/federation-protocol.md).
+  it("a camera report does not leave a node that has released no country: it is stored, but neither pulled nor pushed on, nor served", async () => {
+    // Neither node here has a signed camera policy, so every country is off on both. Writing is never blocked (the report is
+    // stored with its device signature), but a camera report is passed on to peers only where the individual camera may be
+    // delivered (level full) - GET /v1/federation/events used to return every camera report regardless of any flag.
+    // The positive case (full releases it, zones/off do not) is tests/integration/camera-policy-multi-node.test.ts.
     const device = generateEd25519KeyPair();
     const envelope = deviceCreateEnvelope(device, { lat: 40, lng: 40, type: "mobileSpeedCamera", speedKmh: 80 });
 
@@ -265,38 +264,34 @@ describe("multi-node federation network (F-S5)", () => {
       headers: authHeader(await testToken(a.env)),
       payload: { type: "mobileSpeedCamera", lat: 40, lng: 40, speedKmh: 80, deviceAssertion: envelope },
     });
-    expect(res.statusCode).toBe(201);
+    expect(res.statusCode).toBe(202);
+    expect(res.json()).toEqual({ accepted: true });
+    const storedOnA = await a.testDb.db.execute<{ n: number } & Record<string, unknown>>(sql`select count(*)::int as n from hazard_reports where type = 'mobileSpeedCamera'`);
+    expect(storedOnA[0]!.n).toBe(1);
 
-    // Can't confirm replication via /v1/hazard-reports/nearby — that
-    // endpoint structurally excludes every camera-adjacent type regardless
-    // of any flag (docs/api.md: "always excludes all five, regardless of
-    // the namespace flag"), and /v1/speed-cameras/nearby is exactly the
-    // flag-gated read this test is trying to distinguish from replication
-    // itself. GET /v1/federation/events is unfiltered by either, so it's
-    // the right place to confirm the event actually reached B.
-    await waitFor(async () => {
-      const pull = await b.app.inject({ method: "GET", url: "/v1/federation/events?after=0&limit=200" });
-      const events = pull.json().events as { envelope: { payload: { lat: number; lng: number } } }[];
-      const found = events.some((e) => e.envelope.payload.lat === 40 && e.envelope.payload.lng === 40);
-      return found ? true : undefined;
-    });
+    // Neither the pull endpoint of A nor B's anti-entropy loop ever sees it ...
+    const pullA = await a.app.inject({ method: "GET", url: "/v1/federation/events?after=0&limit=200" });
+    const eventsOnA = pullA.json().events as { envelope: { payload: { lat: number; type: string } } }[];
+    expect(eventsOnA.some((e) => e.envelope.payload.type === "mobileSpeedCamera")).toBe(false);
+    await pullFromPeers(b.workerDeps);
+    await new Promise((r) => setTimeout(r, 500));
+    const onB = await b.testDb.db.execute<{ n: number } & Record<string, unknown>>(sql`select count(*)::int as n from hazard_reports where type = 'mobileSpeedCamera'`);
+    expect(onB[0]!.n).toBe(0);
 
-    // The underlying data replicated (writes are never namespace-gated —
-    // see server/README.md's "Schreibzugriffe... funktionieren unabhängig
-    // vom Flag"), but B never had SPEED_CAMERA_NAMESPACE_ENABLED set, so its
-    // own /v1/speed-cameras/* reads still filter it out regardless.
-    const camerasOnB = await b.app.inject({
+    // ... and nobody is served it.
+    const camerasOnA = await a.app.inject({
       method: "GET",
       url: "/v1/speed-cameras/nearby?lat=40&lng=40&radiusM=1000",
-      headers: authHeader(await testToken(b.env)),
+      headers: authHeader(await testToken(a.env)),
     });
-    expect(camerasOnB.json().cameras).toEqual([]);
+    expect(camerasOnA.json()).toEqual({ cameras: [], zones: [] });
   });
 
-  it("persistent enforcement devices stay node-local (add-on D): a device-signed redLightCamera report federates as an expiring report, a persistent device does not", async () => {
+  it("persistent enforcement devices stay node-local (add-on D), and a node that has released no country passes no camera report on either", async () => {
     // Fixed cameras have never been federated (federation-protocol.md §7), and the persistent red-light and
-    // distance devices follow the same rule: static data reaches a node by its own import or a dump. What does
-    // federate is the *report* of a red-light camera — an ordinary, expiring hazard report.
+    // distance devices follow the same rule: static data reaches a node by its own import or a dump. What federates
+    // is the *report* of a red-light camera - an ordinary, expiring hazard report - and, since the country policy, only
+    // from a node that delivers that camera individually (camera-policy-multi-node.test.ts).
     const bulk = authHeader(await testToken(a.env, { scopes: ["bulk-import"] }));
     const imported = await a.app.inject({
       method: "POST",
@@ -314,21 +309,17 @@ describe("multi-node federation network (F-S5)", () => {
       headers: authHeader(await testToken(a.env)),
       payload: { type: "redLightCamera", lat: 42, lng: 42, deviceAssertion: envelope },
     });
-    expect(reported.statusCode).toBe(201);
+    expect(reported.statusCode).toBe(202);
 
-    const events = await waitFor(async () => {
-      const pull = await b.app.inject({ method: "GET", url: "/v1/federation/events?after=0&limit=200" });
-      const all = pull.json().events as { envelope: { payload: { lat: number; lng: number; type: string } } }[];
-      return all.some((e) => e.envelope.payload.lat === 42) ? all : undefined;
-    });
-    // Only the report travelled; nothing about the imported device was ever offered to a peer.
-    expect(events.some((e) => e.envelope.payload.lat === 41)).toBe(false);
+    // Nothing about the imported device, and (no country released here) nothing about the report, is offered to a peer.
+    const pull = await a.app.inject({ method: "GET", url: "/v1/federation/events?after=0&limit=200" });
+    const all = pull.json().events as { envelope: { payload: { lat: number; lng: number; type: string } } }[];
+    expect(all.some((e) => e.envelope.payload.lat === 41 || e.envelope.payload.lat === 42)).toBe(false);
+    await pullFromPeers(b.workerDeps);
+    await new Promise((r) => setTimeout(r, 500));
 
-    const onB = await b.testDb.db.execute<{ type: string; expires_at: string } & Record<string, unknown>>(
-      sql`select type, expires_at from hazard_reports where type = 'redLightCamera'`,
-    );
-    expect(onB).toHaveLength(1);
-    expect(new Date(onB[0]!.expires_at).getTime()).toBeGreaterThan(Date.now());
+    const onB = await b.testDb.db.execute<{ n: number } & Record<string, unknown>>(sql`select count(*)::int as n from hazard_reports where type = 'redLightCamera'`);
+    expect(onB[0]!.n).toBe(0);
     const devicesOnB = await b.testDb.db.execute<{ n: number } & Record<string, unknown>>(sql`select count(*)::int as n from fixed_speed_cameras`);
     expect(devicesOnB[0]!.n).toBe(0);
     const devicesOnA = await a.testDb.db.execute<{ camera_type: string } & Record<string, unknown>>(sql`select camera_type from fixed_speed_cameras`);

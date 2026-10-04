@@ -68,6 +68,13 @@ async function sendMissing(service: StaticPackageService, tile: string, reply: F
   });
 }
 
+function sendPolicyStale(reply: FastifyReply) {
+  reply.header("retry-after", "30");
+  return reply.status(503).send({
+    error: { code: "PACKAGES_BUILDING", message: "This package is being rebuilt after a change of the camera policy; retry shortly" },
+  });
+}
+
 async function sendPackage(
   service: StaticPackageService,
   req: FastifyRequest,
@@ -109,7 +116,7 @@ async function sendPackage(
 }
 
 export async function registerStaticDataRoutes(app: FastifyInstance) {
-  const service = () => getPackageService(app.deps.db, app.deps.env, app.log);
+  const service = () => getPackageService(app.deps.db, app.deps.env, app.log, () => app.cameraPolicy.current());
 
   app.get("/v1/static-signs/nearby", async (req) => {
     const query = req.query as Record<string, unknown>;
@@ -157,6 +164,7 @@ export async function registerStaticDataRoutes(app: FastifyInstance) {
     }
     const row = await svc.current(tile);
     if (!row) throw notFound(`No static-data partition for tile ${tile}`);
+    if (await svc.isPolicyStale(tile)) return sendPolicyStale(reply);
     return sendPackage(svc, req, reply, tile, row.hash!, "private, no-cache");
   });
 
@@ -166,6 +174,8 @@ export async function registerStaticDataRoutes(app: FastifyInstance) {
     const { tile, hash } = req.params as { tile: string; hash: string };
     if (!validTile(tile) || !HASH_PATTERN.test(hash)) throw notFound("No such static-data package");
     const svc = service();
+    // Checked before anything else: a withdrawn camera must not be reachable through the old, content-addressed URL either.
+    if (await svc.isPolicyStale(tile)) return sendPolicyStale(reply);
     if (!(await svc.store.has(tile, hash))) throw notFound("No such static-data package (it may have been replaced — fetch the manifest again)");
     const visibility = app.deps.env.STATIC_PACKAGES_PUBLIC ? "public" : "private";
     return sendPackage(svc, req, reply, tile, hash, `${visibility}, max-age=31536000, immutable`);

@@ -12,6 +12,12 @@ export interface AppendEventInput {
   /** Full current representation of the entity, not a diff — see event_log schema comment. */
   payload: unknown;
   regionTile?: string | null;
+  /**
+   * Country set of the camera this event is about (docs/camera-country-policy.md) — pass it for every camera event, leave it
+   * out for everything else. Delta, WebSocket push and federation egress decide from this column; a camera event without
+   * it counts as "country unknown" and is never delivered.
+   */
+  cameraCountries?: string[] | null;
   source: string;
   /** Federation (F-S3, all optional/null by default) — see db/schema/events.ts's column comments. */
   federationEventId?: string | null;
@@ -41,6 +47,7 @@ export async function appendEvent(
       entityId: input.entityId,
       payload: input.payload,
       regionTile: input.regionTile ?? null,
+      cameraCountries: input.cameraCountries ?? null,
       source: input.source,
       federationEventId: input.federationEventId ?? null,
       federationEnvelope: input.federationEnvelope ?? null,

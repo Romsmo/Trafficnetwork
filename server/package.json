@@ -28,6 +28,7 @@
     "corrections": "tsx scripts/corrections.mts",
     "measure-scale": "tsx scripts/measure-scale.mts",
     "static-packages": "tsx scripts/static-packages.mts",
+    "cameras": "tsx scripts/cameras.mts",
     "network:generate-root-key": "tsx scripts/network-generate-root-key.mts",
     "network:sign-config": "tsx scripts/network-sign-config.mts",
     "network:export-directory": "tsx scripts/network-export-directory.mts"

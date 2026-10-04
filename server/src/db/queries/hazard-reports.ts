@@ -2,6 +2,8 @@ import { sql } from "drizzle-orm";
 import type { Queryable } from "../client.js";
 import type { HazardType } from "../../config/constants.js";
 import { pgArray } from "../pg-array.js";
+import { envelopeOverlap, type Envelope } from "../../lib/geo-bbox.js";
+import { toRecord, type CameraRecord } from "./camera-record.js";
 
 export interface HazardReportApi {
   id: string;
@@ -23,6 +25,7 @@ interface Row extends Record<string, unknown> {
   id: string;
   type: HazardType;
   position_geojson: unknown;
+  countries: string[] | null;
   region_tile: string;
   reported_at: string;
   reporter_id: string;
@@ -53,8 +56,15 @@ function toApi(row: Row): HazardReportApi {
   };
 }
 
+/** A report with its country set and position (see camera-record.ts); the set is only filled for the camera types. */
+export type HazardReportRecord = CameraRecord<HazardReportApi>;
+
+function toHazardRecord(row: Row): HazardReportRecord {
+  return toRecord(toApi(row), row.countries);
+}
+
 const SELECT_COLUMNS = sql`
-  id, type, ST_AsGeoJSON(position)::json as position_geojson, region_tile, reported_at, reporter_id,
+  id, type, ST_AsGeoJSON(position)::json as position_geojson, countries, region_tile, reported_at, reporter_id,
   speed_kmh, expires_at, status, source, source_license, confirm_count, deny_count
 `;
 
@@ -66,18 +76,49 @@ const SELECT_COLUMNS = sql`
  * restricted to NON_CAMERA_HAZARD_TYPES at the route layer (see
  * modules/hazard-reports/routes.ts) regardless of what `types` the caller passes.
  */
-export async function findHazardReportsByTiles(
+export async function findHazardReportRecordsByTiles(
   db: Queryable,
   tiles: string[],
   types?: HazardType[],
-): Promise<HazardReportApi[]> {
+): Promise<HazardReportRecord[]> {
   const typeFilter = types && types.length > 0 ? sql`and type = any(${pgArray(types)}::hazard_type[])` : sql``;
   const rows = await db.execute<Row>(sql`
     select ${SELECT_COLUMNS}
     from hazard_reports
     where status = 'active' and region_tile = any(${pgArray(tiles)}) ${typeFilter}
   `);
-  return rows.map(toApi);
+  return rows.map(toHazardRecord);
+}
+
+/** For the general /v1/hazard-reports/* reads, which only ever ask for non-camera types (no policy involved). */
+export async function findHazardReportsByTiles(db: Queryable, tiles: string[], types?: HazardType[]): Promise<HazardReportApi[]> {
+  return (await findHazardReportRecordsByTiles(db, tiles, types)).map((r) => r.item);
+}
+
+/** Active reports of the given types whose position lies in one of the envelopes (index-assisted superset; the caller narrows by cell). */
+export async function findHazardReportRecordsInEnvelopes(
+  db: Queryable,
+  envelopes: readonly Envelope[],
+  types: HazardType[],
+): Promise<HazardReportRecord[]> {
+  if (types.length === 0 || envelopes.length === 0) return [];
+  const rows = await db.execute<Row>(sql`
+    select ${SELECT_COLUMNS}
+    from hazard_reports
+    where status = 'active' and type = any(${pgArray(types)}::hazard_type[]) and ${envelopeOverlap(sql`position`, envelopes)}
+  `);
+  return rows.map(toHazardRecord);
+}
+
+/** Every active report of the given types, wherever it is (camera snapshot: the number of live camera reports is small by construction — they expire within hours). */
+export async function findAllActiveHazardReportRecords(db: Queryable, types: HazardType[]): Promise<HazardReportRecord[]> {
+  if (types.length === 0) return [];
+  const rows = await db.execute<Row>(sql`
+    select ${SELECT_COLUMNS}
+    from hazard_reports
+    where status = 'active' and type = any(${pgArray(types)}::hazard_type[])
+  `);
+  return rows.map(toHazardRecord);
 }
 
 export async function findHazardReportsNearby(
@@ -87,6 +128,16 @@ export async function findHazardReportsNearby(
   radiusM: number,
   types?: HazardType[],
 ): Promise<HazardReportApi[]> {
+  return (await findHazardReportRecordsNearby(db, lat, lng, radiusM, types)).map((r) => r.item);
+}
+
+export async function findHazardReportRecordsNearby(
+  db: Queryable,
+  lat: number,
+  lng: number,
+  radiusM: number,
+  types?: HazardType[],
+): Promise<HazardReportRecord[]> {
   const typeFilter = types && types.length > 0 ? sql`and type = any(${pgArray(types)}::hazard_type[])` : sql``;
   const rows = await db.execute<Row>(sql`
     select ${SELECT_COLUMNS}
@@ -98,7 +149,7 @@ export async function findHazardReportsNearby(
         ${radiusM}
       )
   `);
-  return rows.map(toApi);
+  return rows.map(toHazardRecord);
 }
 
 /**
@@ -113,7 +164,7 @@ export async function findDuplicateCandidate(
   lat: number,
   lng: number,
   radiusM: number,
-): Promise<HazardReportApi | null> {
+): Promise<HazardReportRecord | null> {
   const rows = await db.execute<Row>(sql`
     select ${SELECT_COLUMNS}
     from hazard_reports
@@ -128,16 +179,16 @@ export async function findDuplicateCandidate(
     for update
   `);
   const row = rows[0];
-  return row ? toApi(row) : null;
+  return row ? toHazardRecord(row) : null;
 }
 
 /** Also locks the row — the confirm endpoint mutates it in the same transaction. */
-export async function findHazardReportByIdForUpdate(db: Queryable, id: string): Promise<HazardReportApi | null> {
+export async function findHazardReportByIdForUpdate(db: Queryable, id: string): Promise<HazardReportRecord | null> {
   const rows = await db.execute<Row>(sql`
     select ${SELECT_COLUMNS} from hazard_reports where id = ${id} for update
   `);
   const row = rows[0];
-  return row ? toApi(row) : null;
+  return row ? toHazardRecord(row) : null;
 }
 
 export interface InsertHazardReportInput {
@@ -148,14 +199,21 @@ export interface InsertHazardReportInput {
   speedKmh?: number;
   regionTile: string;
   expiresAt: Date;
+  /** Set for the camera types: CAMERA_POLICY_BORDER_MARGIN_M, so the country set is computed here, once. Omitted for every other type. */
+  countryMarginM?: number;
 }
 
-export async function insertHazardReportRow(db: Queryable, input: InsertHazardReportInput): Promise<HazardReportApi> {
+export async function insertHazardReportRow(db: Queryable, input: InsertHazardReportInput): Promise<HazardReportRecord> {
+  const countries =
+    input.countryMarginM === undefined
+      ? sql`null`
+      : sql`camera_countries(ST_SetSRID(ST_MakePoint(${input.lng}, ${input.lat}), 4326), ${input.countryMarginM})`;
   const rows = await db.execute<Row>(sql`
-    insert into hazard_reports (type, position, region_tile, reporter_id, speed_kmh, expires_at, status, source)
+    insert into hazard_reports (type, position, countries, region_tile, reporter_id, speed_kmh, expires_at, status, source)
     values (
       ${input.type}::hazard_type,
       ST_SetSRID(ST_MakePoint(${input.lng}, ${input.lat}), 4326),
+      ${countries},
       ${input.regionTile},
       ${input.reporterId},
       ${input.speedKmh ?? null},
@@ -167,7 +225,7 @@ export async function insertHazardReportRow(db: Queryable, input: InsertHazardRe
   `);
   const row = rows[0];
   if (!row) throw new Error("insertHazardReportRow: insert returned no row");
-  return toApi(row);
+  return toHazardRecord(row);
 }
 
 /** True if this reporter had not already recorded a confirmation/denial for this report. */
@@ -197,7 +255,7 @@ export interface ApplyConfirmationEffectInput {
 export async function applyConfirmationEffect(
   db: Queryable,
   input: ApplyConfirmationEffectInput,
-): Promise<HazardReportApi> {
+): Promise<HazardReportRecord> {
   const rows = await db.execute<Row>(sql`
     update hazard_reports
     set
@@ -210,7 +268,7 @@ export async function applyConfirmationEffect(
   `);
   const row = rows[0];
   if (!row) throw new Error("applyConfirmationEffect: update returned no row");
-  return toApi(row);
+  return toHazardRecord(row);
 }
 
 // ---------------------------------------------------------------------------------------------

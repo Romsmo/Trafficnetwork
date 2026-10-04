@@ -7,10 +7,11 @@ import {
   findHazardReportByIdForUpdate,
   insertConfirmationIfAbsent,
   insertHazardReportRow,
-  type HazardReportApi,
+  type HazardReportRecord,
 } from "../../db/queries/hazard-reports.js";
 import { hazardExpiryMs, type HazardType } from "../../config/constants.js";
 import { positionToRegionTile } from "../../lib/h3.js";
+import { isCameraType } from "../cameras/filter.js";
 import { runModerationGate } from "../moderation/gate.js";
 import { checkRateLimit } from "../moderation/rate-limit.js";
 import type { HazardReportInput } from "../moderation/plausibility.js";
@@ -21,7 +22,8 @@ export interface CreateReportInput extends HazardReportInput {
 }
 
 export interface CreateReportResult {
-  report: HazardReportApi;
+  /** The report with the country set of a camera report (camera-record.ts) — the route decides what of it a client may see. */
+  report: HazardReportRecord;
   merged: boolean;
   /** For modules/hazard-reports/routes.ts to publish via WebSocket after commit. */
   event: Awaited<ReturnType<typeof appendEvent>>;
@@ -59,19 +61,20 @@ export async function createOrMergeReport(
     const existing = await findDuplicateCandidate(tx, input.type, input.lat, input.lng, env.DUPLICATE_MERGE_RADIUS_METERS);
 
     if (existing) {
-      const isNewConfirmation = await insertConfirmationIfAbsent(tx, existing.id, input.reporterId, "stillThere");
-      const newExpiresAt = new Date(Date.now() + hazardExpiryMs(existing.type as Exclude<HazardType, "fixedSpeedCamera">, env));
+      const isNewConfirmation = await insertConfirmationIfAbsent(tx, existing.item.id, input.reporterId, "stillThere");
+      const newExpiresAt = new Date(Date.now() + hazardExpiryMs(existing.item.type as Exclude<HazardType, "fixedSpeedCamera">, env));
       const updated = await applyConfirmationEffect(tx, {
-        id: existing.id,
+        id: existing.item.id,
         incrementConfirm: isNewConfirmation,
         newExpiresAt,
       });
       const event = await appendEvent(tx, {
         type: "ReportConfirmed",
         entityType: "hazardReport",
-        entityId: updated.id,
-        payload: updated,
-        regionTile: updated.regionTile,
+        entityId: updated.item.id,
+        payload: updated.item,
+        regionTile: updated.item.regionTile,
+        cameraCountries: updated.countries,
         source: "community",
         ...opts?.federation,
       });
@@ -88,17 +91,20 @@ export async function createOrMergeReport(
       speedKmh: input.speedKmh,
       regionTile,
       expiresAt,
+      // Camera reports get their country set computed once, here (camera-record.ts); every other type has none.
+      ...(isCameraType(input.type) ? { countryMarginM: env.CAMERA_POLICY_BORDER_MARGIN_M } : {}),
     });
     // Records the creator's own implicit "stillThere" so a later nearby
     // resubmission from this same reporter is recognized as already-confirmed
     // by insertConfirmationIfAbsent above, instead of double-counting it.
-    await insertConfirmationIfAbsent(tx, created.id, input.reporterId, "stillThere");
+    await insertConfirmationIfAbsent(tx, created.item.id, input.reporterId, "stillThere");
     const event = await appendEvent(tx, {
       type: "ReportCreated",
       entityType: "hazardReport",
-      entityId: created.id,
-      payload: created,
+      entityId: created.item.id,
+      payload: created.item,
       regionTile,
+      cameraCountries: created.countries,
       source: "community",
       ...opts?.federation,
     });
@@ -113,7 +119,7 @@ export interface ConfirmReportInput {
 }
 
 export interface ConfirmReportResult {
-  report: HazardReportApi;
+  report: HazardReportRecord;
   recorded: boolean;
   /** Undefined when recorded is false (idempotent no-op — nothing to publish). */
   event?: Awaited<ReturnType<typeof appendEvent>>;
@@ -137,31 +143,32 @@ export async function confirmReport(db: Queryable, env: Env, input: ConfirmRepor
   return db.transaction(async (tx) => {
     const report = await findHazardReportByIdForUpdate(tx, input.reportId);
     if (!report) throw notFound(`No active hazard report with id ${input.reportId}`);
-    if (report.status !== "active") {
-      throw conflict("REPORT_NOT_ACTIVE", `Report ${input.reportId} is ${report.status}, not active`);
+    if (report.item.status !== "active") {
+      throw conflict("REPORT_NOT_ACTIVE", `Report ${input.reportId} is ${report.item.status}, not active`);
     }
 
-    const recorded = await insertConfirmationIfAbsent(tx, report.id, input.reporterId, input.kind);
+    const recorded = await insertConfirmationIfAbsent(tx, report.item.id, input.reporterId, input.kind);
     if (!recorded) {
       return { report, recorded: false };
     }
 
     const isStillThere = input.kind === "stillThere";
     const updated = await applyConfirmationEffect(tx, {
-      id: report.id,
+      id: report.item.id,
       incrementConfirm: isStillThere,
       incrementDeny: !isStillThere,
       newExpiresAt: isStillThere
-        ? new Date(Date.now() + hazardExpiryMs(report.type as Exclude<HazardType, "fixedSpeedCamera">, env))
+        ? new Date(Date.now() + hazardExpiryMs(report.item.type as Exclude<HazardType, "fixedSpeedCamera">, env))
         : undefined,
     });
 
     const event = await appendEvent(tx, {
       type: isStillThere ? "ReportConfirmed" : "ReportDenied",
       entityType: "hazardReport",
-      entityId: updated.id,
-      payload: updated,
-      regionTile: updated.regionTile,
+      entityId: updated.item.id,
+      payload: updated.item,
+      regionTile: updated.item.regionTile,
+      cameraCountries: updated.countries,
       source: "community",
     });
 

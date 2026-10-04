@@ -12,13 +12,15 @@ async function main() {
   const env = loadEnv();
   const { db, client } = createDb(env);
   const app = await buildApp({ env, db });
+  // The signed network config (and with it the camera policy) is re-read while the node runs - no restart needed.
+  app.cameraPolicy.startWatching();
   const expiryWorker = startExpiryWorker(db, app.log, app.realtime);
   const retentionWorker = startRetentionWorker(db, env, app.log);
   const federationWorkers: FederationWorkersHandle | null = env.FEDERATION_ENABLED
     ? startFederationWorkers({ db, env, nodeIdentity: app.nodeIdentity, realtime: app.realtime, log: app.log, online: app.online })
     : null;
   // Pre-built static-data packages (add-on E-B): rebuilt in the background after static data changes.
-  const packageWorker = env.STATIC_PACKAGES_WORKER_ENABLED ? startStaticPackageWorker(db, env, app.log) : null;
+  const packageWorker = env.STATIC_PACKAGES_WORKER_ENABLED ? startStaticPackageWorker(db, env, app.log, () => app.cameraPolicy.current()) : null;
 
   closeWithGrace(async ({ err }) => {
     if (err) app.log.error(err, "closing due to error");

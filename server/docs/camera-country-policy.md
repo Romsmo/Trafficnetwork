@@ -91,20 +91,27 @@ at write time, plus an explicit border strip. No importer-supplied code, no gues
 
 ## 4. Where the rule is applied: one place
 
-`src/modules/cameras/policy/` owns the rule. Everything that delivers camera data goes through one function family
-(`classify` → `project*`) and none of the endpoints contains a copy of it:
+`src/modules/cameras/policy/` owns the rule. The queries return **candidates** (`CameraRecord`: the public item plus the camera's
+country set and position, which are never part of the item, so a forgotten `.map()` cannot put them on the wire) and everything that
+delivers camera data goes through one function family - `projection.ts` (`individualItems`, `zonesForCells`: pure), `delivery.ts`
+(`readCamerasNear`, `readCamerasInTiles`, `readCamerasForSnapshot`, `zoneStates`, `answerForWrite`: fetch candidates, then project)
+and `events.ts` (`classifyEvent`, `projectDeltaEvents`, `mayLeaveNode`) - and none of the endpoints contains a copy of it. The
+policy object (`policy.ts`) is immutable: a request takes `app.cameraPolicy.current()` once and uses that one object throughout.
 
 | Path | How |
 |---|---|
 | `GET /v1/speed-cameras/nearby`, `…/by-tile` | queries return candidate *records* (item + countries + position); the projection decides |
 | `GET /v1/snapshot` (`fixedSpeedCameras`, `enforcementDevices`, camera `hazardReports`, new `cameraZones`) | same projection |
-| `GET /v1/delta` | camera events pass through `projectEvent`; the cursor advances over withheld events |
-| `GET /v1/ws` push | the same `projectEvent`, per event, after commit |
+| `GET /v1/delta` | camera events pass through `projectDeltaEvents`; the cursor advances over withheld events |
+| `GET /v1/ws` push | the same `classifyEvent`, per event, after commit |
 | static packages (`fixedSpeedCameras`, `enforcementDevices`, new `cameraZones`) | the tile builder projects; tile population and dirty-marking follow the same classification |
 | write responses (`POST /v1/hazard-reports` for camera types, `POST …/removal-reports`, `POST …/confirmations` on a camera report) | answered with the projection of the result, see 5.4 |
 | federation: `GET /v1/federation/events` pull and gossip push | a camera event is forwarded to a peer only if its effective level is `full` |
 
 `GET /v1/hazard-reports/nearby|by-tile` never contained camera types and still do not.
+
+Camera events are recognised **by content** (entity type, or a camera `type` in the payload), not by the column the country set is
+stored in: a camera event whose set was never filled in counts as "country unknown" and is withheld, so a forgotten column fails closed.
 
 The federation point is a **pre-existing back door** this add-on closes: `GET /v1/federation/events` is unauthenticated and
 used to return every device-signed report — camera reports with their exact coordinates included — whatever the camera
@@ -150,14 +157,23 @@ There is deliberately **nothing else**: no `position`, no source, no timestamps,
 ### 5.3 Reads
 
 * `GET /v1/speed-cameras/nearby` and `/by-tile` → `{ "cameras": [ … ], "zones": [ … ] }`. `zones` is always present.
-* `GET /v1/snapshot` → new `cameraZones: []` next to `fixedSpeedCameras` / `enforcementDevices` (`?staticData=false` omits the
-  persistent part as before; camera reports in zones countries appear as zones for the requested tiles).
+* `GET /v1/snapshot` → new `cameraZones: []` next to `fixedSpeedCameras` / `enforcementDevices`: the zones of the persistent devices
+  (omitted with `?staticData=false`, as the devices are) plus the zones of the cells the requested `tiles` speak for - which is where
+  the live camera reports of `zones` countries show up, as zones.
 * Static package of a tile → new key `cameraZones: [ … ]`, **omitted when empty** (a tile without zones keeps its bytes and hash).
   A zone is carried by the package of the tile that is the H3 parent of the zone cell, whichever tile the camera itself is in.
+  A package holds persistent devices only, so its zones list the kinds of devices; `nearby`, `by-tile`, the snapshot and events also
+  count the live reports of the cell. A client keys zones by `id` and unions their `cameraTypes`.
 * `GET /v1/delta` and WebSocket → events with `entityType: "cameraZone"`, `entityId` = the zone id, type `StaticDataUpdated`
-  (the zone exists with this content now) or `StaticDataRemoved` (the cell has no camera any more). The payload is the zone item.
-  Consecutive events for the same cell inside one delta page are collapsed. Old clients skip the unknown entity type.
-* Items of cameras at level `full` look exactly as before.
+  (the zone exists with this content now) or `StaticDataRemoved` (no camera of the requested kinds is left in the cell). The payload is
+  the zone item, `regionTile` is `null`, `source` is `"zone"`. Events of one cell inside a delta page are collapsed into one, carrying the
+  cell's state *now*. A zone event goes to a client that asked about a tile the **cell** touches (delta: `tiles`; WebSocket: a subscription
+  tile of the region resolution inside the cell) - not to the client that listens to the tile the camera is in: at the region resolution
+  (7) that would tell a listener in which seventh of the cell the camera is. Events about persistent devices carry no tile and are global,
+  like the devices. Old clients skip the unknown entity type. The delta cursor moves over withheld events, also on a page that held
+  nothing deliverable.
+* `by-tile` / snapshot tiles so coarse that they span more than 5,000 zone cells are refused with `400` rather than silently truncated.
+* Items of cameras at level `full` look exactly as before. The internal country set (`camera_countries`) never appears in an event.
 
 ### 5.4 Writes
 
@@ -179,7 +195,7 @@ the operator's to review before any level above `off` is signed.
 
 ## 6. Zones: why repeated queries cannot re-condense them into a point
 
-A zone is a cell of a **fixed grid** (H3, `CAMERA_ZONE_H3_RESOLUTION`, default 6 ≈ 36 km², edge ≈ 3.2 km) and the only thing a zone
+A zone is a cell of a **fixed grid** (H3, `CAMERA_ZONE_H3_RESOLUTION`, default 6 ≈ 36 km², edge ≈ 3.7 km) and the only thing a zone
 says is *"at least one camera of these types is somewhere in this cell"*. The properties that make this hold:
 
 1. **Membership is a function of the cell only.** Whether a zone is delivered is decided by the cell's geometry against the query
@@ -204,6 +220,17 @@ node must know it to build zones). Operators can only protect it with ordinary m
 
 * The signed file is re-read every `CAMERA_POLICY_RELOAD_SECONDS` (default 30; `0` disables) and verified against
   `NETWORK_ROOT_PUBLIC_KEY`. A restart also reads it. There is no signal handler (Windows has none) and no admin endpoint.
+* The package builder takes the policy once per tile, inside the tile's snapshot and after the version, and a policy change swaps the policy
+  first and bumps the version second: a tile built under the old policy can never be recorded as current for the new one.
+* The first start after the upgrade has no stored policy; it is taken as the empty policy, so whatever the signed file lists is "new" and the tiles
+  of those countries are marked. `npm run cameras -- load-boundaries` / `resolve-countries` mark the tiles of the cameras whose country
+  they set, like a bulk import.
+* **A stricter policy never leaves old packages reachable.** The tiles that hold cameras of a country whose level went *down* are marked
+  `policy_stale` (next to `dirty`). Their package - the current one *and* the superseded ones that are normally kept for two hours so running
+  downloads can finish - is not served (`503 PACKAGES_BUILDING`, also through the content-addressed URL) until a rebuild has replaced it, and
+  the rebuild deletes the old files at once instead of keeping them. A small dataset is rebuilt by the request that finds a stale tile, a
+  large one in the background straight away (not after the worker's debounce); the manifest answers `503` meanwhile rather than listing a
+  tile as gone (a client would drop its other data). A looser policy only marks tiles dirty: until rebuilt they just lack the new data.
 * On a change of the **effective** policy the node (a) swaps the policy atomically — requests in flight see one consistent policy —
   (b) compares it with the last one it stored (`static_data_state.camera_policy`), (c) marks only the package tiles that contain
   cameras of the countries whose level changed (and the parent tiles of their zones) as dirty and (d) bumps the static-data
@@ -226,5 +253,10 @@ nodes drop the data within the reload interval. For an immediate local cut-off s
   hold back by the driver's country — `cameraPolicy.byCountry` gives it the levels. Whether the server should also use the position
   of the request is a decision for the operator (it would not work for packages and `by-tile`).
 * Boundary data and its accuracy; the notice wording; whether the emergency-brake default should become `true` once a policy exists.
+* Camera events written before this feature get their country from the entity they are about (`load-boundaries` / `resolve-countries`); an
+  expiry event of such a report has no position and is not delivered at level `zones`.
+* The content of a zone differs by source (section 5.3): packages count persistent devices only. A client unions by zone id.
+* Camera data in the database is not encrypted or aggregated at rest: the node holds exact positions even for `off` and `zones` countries
+  (it must, to write, merge and later release them). Protecting the database is the operator's.
 * Persistent devices are node-local and the signed policy is distributed by file; automatic distribution of the signed config over
   federation is not part of this add-on.

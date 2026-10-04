@@ -4,7 +4,7 @@ import type { Database, Transaction } from "../../db/client.js";
 import type { Env } from "../../config/env.js";
 import { tileSpeedLimitSegmentsQuery } from "../../db/queries/speed-limit-segments.js";
 import { tileStaticSignsQuery } from "../../db/queries/static-signs.js";
-import { tileEnforcementDevicesQuery, tileFixedSpeedCamerasQuery } from "../../db/queries/fixed-speed-cameras.js";
+import { findDeviceRecordsInEnvelopes, tileDeviceRecordsQuery } from "../../db/queries/fixed-speed-cameras.js";
 import {
   acquireBuildLease,
   countDirtyTiles,
@@ -14,6 +14,7 @@ import {
   hasStaticDataIn,
   listDirtyTiles,
   listKnownTiles,
+  listPolicyStaleTiles,
   markAllKnownTilesDirty,
   markTilesDirty,
   recordTileBuilt,
@@ -23,6 +24,9 @@ import {
 } from "../../db/queries/static-packages.js";
 import type { PackageStore, WrittenPackage } from "./package-store.js";
 import { childTiles, pointTileOf, pruningEnvelopes, rootTiles, segmentTilesOf, tileEnvelopes } from "./tiles.js";
+import type { EffectiveCameraPolicy } from "../cameras/policy/policy.js";
+import { zoneCellsOfPackageTile } from "../cameras/policy/cells.js";
+import { zonesForCells } from "../cameras/policy/projection.js";
 
 /**
  * Builds the disk-backed static-data packages (add-on E-B, docs/europe-scale.md).
@@ -43,18 +47,34 @@ export interface BuilderDeps {
   db: Database["db"];
   env: Env;
   store: PackageStore;
+  /** The camera policy in force (docs/camera-country-policy.md). Asked once per tile, inside the tile's snapshot. */
+  policy: () => EffectiveCameraPolicy;
   log?: { info: (obj: object, msg: string) => void; warn: (obj: object, msg: string) => void };
 }
 
-/** Anything that changes *what a package contains* is part of the fingerprint; a different fingerprint makes every package stale. */
+/**
+ * Anything that changes *what a package contains* is part of the fingerprint; a different fingerprint makes every package stale.
+ * The camera policy is deliberately not in it: it changes per country, and the tiles it makes stale are marked individually
+ * (modules/cameras/policy/sync.ts) instead of rebuilding everything.
+ */
 export function packageFingerprint(env: Env): string {
   return [
-    // v2: add-on D — camera entries carry `cameraType`, tiles with persistent devices an `enforcementDevices` array.
-    "v2",
+    // v3: country camera policy — tiles may carry a `cameraZones` array. (v2: add-on D — `cameraType`, `enforcementDevices`.)
+    "v3",
     `res=${env.STATIC_DATA_PARTITION_H3_RESOLUTION}`,
-    `cameras=${env.SPEED_CAMERA_NAMESPACE_ENABLED}`,
+    `zoneRes=${env.CAMERA_ZONE_H3_RESOLUTION}`,
     `overlay=${env.COMMUNITY_CORRECTIONS_ENABLED}`,
   ].join("|");
+}
+
+/**
+ * Is a stored fingerprint the one in force? A set built by the previous version with the camera namespace off
+ * (`cameras=false`, the default) holds exactly what this version builds while no country is released, so it is not stale -
+ * rebuilding a Europe-sized set only to change a label would take the packages offline for hours.
+ */
+export function isCurrentFingerprint(stored: string | null, env: Env): boolean {
+  if (stored === packageFingerprint(env)) return true;
+  return stored === `v2|res=${env.STATIC_DATA_PARTITION_H3_RESOLUTION}|cameras=false|overlay=${env.COMMUNITY_CORRECTIONS_ENABLED}`;
 }
 
 const LEASE_SECONDS = 120;
@@ -80,6 +100,8 @@ async function streamEntities<T>(
   write: (text: string) => Promise<void>,
   pageRows: number,
   wrap?: { open: string; close: string },
+  /** What goes into the file for a kept item (default: the item itself). */
+  render: (item: T) => unknown = (item) => item,
 ): Promise<number> {
   const cursor = `pkg_cur_${++cursorCounter}`;
   await tx.execute(sql`declare ${sql.raw(cursor)} no scroll cursor for ${source.query}`);
@@ -100,7 +122,7 @@ async function streamEntities<T>(
     for (const row of rows) {
       const item = source.map(row);
       if (!keep(item)) continue;
-      const json = JSON.stringify(item);
+      const json = JSON.stringify(render(item));
       buffer.push(json);
       bufferBytes += json.length;
       kept++;
@@ -123,6 +145,9 @@ export async function buildTile(deps: BuilderDeps, tile: string): Promise<TileRe
     async (tx) => {
       // First statement of the snapshot: the version this tile's content corresponds to.
       const version = await currentStaticDataVersion(tx);
+      // After the version, never before: a policy change swaps the policy first and bumps the version second, so a build
+      // that saw the new version has certainly seen the new policy (and one that saw the old version is marked dirty again).
+      const policy = deps.policy();
       const writer = await store.createWriter(tile);
       try {
         const counts: BuiltCounts = { segments: 0, signs: 0, cameras: 0 };
@@ -143,26 +168,43 @@ export async function buildTile(deps: BuilderDeps, tile: string): Promise<TileRe
           pageRows,
         );
         await writer.write(`],"fixedSpeedCameras":[`);
-        if (env.SPEED_CAMERA_NAMESPACE_ENABLED) {
+        // Persistent devices go in only where the policy delivers the individual device (level full of every country it is in).
+        const deliverable = (record: { countries: string[] | null; lat: number; lng: number; item: { position: unknown } }) =>
+          policy.levelOf(record.countries) === "full" && pointTileOf(record.item.position, resolution) === tile;
+        if (policy.anyFull) {
           await streamEntities(
             tx,
-            tileFixedSpeedCamerasQuery(envelopes),
-            (camera) => pointTileOf(camera.position, resolution) === tile,
+            tileDeviceRecordsQuery(envelopes),
+            (record) => record.item.cameraType === "fixedSpeedCamera" && deliverable(record),
             (text) => writer.write(text),
             pageRows,
+            undefined,
+            (record) => record.item,
           );
         }
         await writer.write("]");
-        if (env.SPEED_CAMERA_NAMESPACE_ENABLED) {
+        if (policy.anyFull) {
           // Every persistent device of every kind (speed cameras included) — the count that decides whether the tile is empty.
           counts.cameras = await streamEntities(
             tx,
-            tileEnforcementDevicesQuery(envelopes),
-            (device) => pointTileOf(device.position, resolution) === tile,
+            tileDeviceRecordsQuery(envelopes),
+            deliverable,
             (text) => writer.write(text),
             pageRows,
             { open: `,"enforcementDevices":[`, close: "]" },
+            (record) => record.item,
           );
+        }
+        if (policy.anyZones) {
+          // Zones of the persistent devices in countries at level `zones`: carried by the tile that is the parent of the zone cell,
+          // whichever tile the device itself is in. The key is omitted when there are none, so a tile without zones keeps its bytes.
+          const cells = zoneCellsOfPackageTile(tile, policy.zoneResolution);
+          const records = await findDeviceRecordsInEnvelopes(tx, cells.flatMap((cell) => tileEnvelopes(cell)));
+          const zones = zonesForCells(policy, records, new Set(cells));
+          if (zones.length > 0) {
+            await writer.write(`,"cameraZones":${JSON.stringify(zones)}`);
+            counts.cameras += zones.length;
+          }
         }
         await writer.write("}");
 
@@ -190,18 +232,85 @@ export async function buildTile(deps: BuilderDeps, tile: string): Promise<TileRe
 export async function enumerateTiles(deps: BuilderDeps, onLevel?: (resolution: number, cells: number) => void): Promise<string[]> {
   const { db, env } = deps;
   const target = env.STATIC_DATA_PARTITION_H3_RESOLUTION;
+  const policy = deps.policy();
   let frontier = rootTiles();
   for (let res = 0; res <= target; res++) {
     const populated: string[] = [];
     for (const tile of frontier) {
       const envelopes = res === target ? tileEnvelopes(tile) : pruningEnvelopes(tile);
-      if (await hasStaticDataIn(db, envelopes, env.SPEED_CAMERA_NAMESPACE_ENABLED)) populated.push(tile);
+      // A tile also carries the zones of the cells below it, which may reach a little over its border.
+      const cameraEnvelopes = !policy.deliversAnything
+        ? null
+        : res === target && policy.anyZones
+          ? [...envelopes, ...zoneCellsOfPackageTile(tile, policy.zoneResolution).flatMap((cell) => tileEnvelopes(cell))]
+          : envelopes;
+      if (await hasStaticDataIn(db, envelopes, cameraEnvelopes)) populated.push(tile);
     }
     onLevel?.(res, populated.length);
     if (res === target) return populated;
     frontier = populated.flatMap((tile) => childTiles(tile));
   }
   return [];
+}
+
+/**
+ * Builds one tile, records it, and collects the files it supersedes. A tile that was stale under the camera policy (it may hold
+ * camera data no longer deliverable) keeps none of its old files: unlike an ordinary replacement they are not retained for downloads
+ * that are already running, because the content-addressed URL of the old bytes would otherwise keep serving what was withdrawn.
+ */
+async function buildAndRecordTile(deps: BuilderDeps, tile: string, result: Pick<BuildResult, "bytesWritten" | "tilesEmpty">): Promise<void> {
+  const { db, env, store } = deps;
+  const previous = await findPackageRow(db, tile);
+  const built = await buildTile(deps, tile);
+  await recordTileBuilt(db, tile, built.written, built.counts, built.version);
+  const graceMs = previous?.policyStale ? 0 : env.STATIC_PACKAGES_KEEP_MINUTES * 60_000;
+  if (built.written) {
+    result.bytesWritten += built.written.gzipBytes + built.written.brotliBytes;
+    const keep = new Set([built.written.hash]);
+    if (previous?.hash && !previous.policyStale) keep.add(previous.hash);
+    await store.collect(tile, keep, graceMs);
+  } else {
+    result.tilesEmpty++;
+    await store.collect(tile, new Set(), graceMs);
+    await store.pruneEmptyTileDir(tile);
+  }
+}
+
+/**
+ * Rebuilds just the tiles that are `policy_stale` - the ones whose packages may hold camera data a stricter policy withdrew - under the
+ * builder lease, ahead of any other dirty tile. Until a tile is done its package is not served (modules/static-data/routes.ts), so this
+ * runs as soon as the policy changes. A tile that fails stays stale and unserved: failing closed.
+ */
+export async function rebuildPolicyStale(deps: BuilderDeps): Promise<{ status: "built" | "busy"; tilesBuilt: number; tilesFailed: number }> {
+  const { db } = deps;
+  const owner = `policy-${process.pid}-${randomBytes(4).toString("hex")}`;
+  const outcome = { status: "busy" as "built" | "busy", tilesBuilt: 0, tilesFailed: 0 };
+  if (!(await acquireBuildLease(db, owner, LEASE_SECONDS))) return outcome;
+  outcome.status = "built";
+  const scratch = { bytesWritten: 0, tilesEmpty: 0 };
+  const attempted = new Set<string>();
+  try {
+    for (;;) {
+      const batch = (await listPolicyStaleTiles(db, 200)).filter((tile) => !attempted.has(tile));
+      if (batch.length === 0) break;
+      for (const tile of batch) {
+        attempted.add(tile);
+        await acquireBuildLease(db, owner, LEASE_SECONDS);
+        try {
+          await buildAndRecordTile(deps, tile, scratch);
+          outcome.tilesBuilt++;
+        } catch (err) {
+          outcome.tilesFailed++;
+          deps.log?.warn({ err, tile }, "static packages: rebuilding a policy-stale tile failed (it stays unserved and is retried)");
+        }
+      }
+    }
+  } finally {
+    await releaseBuildLease(db, owner);
+    // The manifest cache of every process is keyed by this row's timestamp: the packages just changed.
+    if (outcome.tilesBuilt > 0) await setPackageState(db, {});
+  }
+  return outcome;
 }
 
 export interface BuildOptions {
@@ -230,7 +339,7 @@ export interface BuildResult {
  * tile's state is in the database, so a stopped run simply continues.
  */
 export async function runBuild(deps: BuilderDeps, opts: BuildOptions = {}): Promise<BuildResult> {
-  const { db, env, store } = deps;
+  const { db, env } = deps;
   const owner = `builder-${process.pid}-${randomBytes(4).toString("hex")}`;
   const started = Date.now();
   const result: BuildResult = { status: "busy", tilesBuilt: 0, tilesFailed: 0, tilesEmpty: 0, bytesWritten: 0, seconds: 0, ready: false };
@@ -240,12 +349,16 @@ export async function runBuild(deps: BuilderDeps, opts: BuildOptions = {}): Prom
   try {
     const fingerprint = packageFingerprint(env);
     let state = await getPackageState(db);
-    if (state.fingerprint !== fingerprint) {
+    if (state.fingerprint !== fingerprint && isCurrentFingerprint(state.fingerprint, env)) {
+      // Only the label changed (see isCurrentFingerprint): the set stays valid.
+      await setPackageState(db, { fingerprint });
+      state = { ...state, fingerprint };
+    } else if (state.fingerprint !== fingerprint) {
       // A setting that shapes package content changed: every existing package is stale.
       if (state.fingerprint !== null) {
         deps.log?.warn(
           { from: state.fingerprint, to: fingerprint },
-          "static packages: a setting that shapes the packages changed (partition resolution, camera namespace or corrections overlay) — every package is rebuilt, and clients holding the old ones must download everything again. All nodes of a network must use the same partition resolution.",
+          "static packages: a setting that shapes the packages changed (partition resolution, camera zone resolution or corrections overlay) — every package is rebuilt, and clients holding the old ones must download everything again. All nodes of a network must use the same partition resolution.",
         );
       }
       await markAllKnownTilesDirty(db);
@@ -284,19 +397,7 @@ export async function runBuild(deps: BuilderDeps, opts: BuildOptions = {}): Prom
         attempted.add(tile);
         await acquireBuildLease(db, owner, LEASE_SECONDS);
         try {
-          const previous = await findPackageRow(db, tile);
-          const built = await buildTile(deps, tile);
-          await recordTileBuilt(db, tile, built.written, built.counts, built.version);
-          if (built.written) {
-            result.bytesWritten += built.written.gzipBytes + built.written.brotliBytes;
-            const keep = new Set([built.written.hash]);
-            if (previous?.hash) keep.add(previous.hash);
-            await store.collect(tile, keep, env.STATIC_PACKAGES_KEEP_MINUTES * 60_000);
-          } else {
-            result.tilesEmpty++;
-            await store.collect(tile, new Set(), env.STATIC_PACKAGES_KEEP_MINUTES * 60_000);
-            await store.pruneEmptyTileDir(tile);
-          }
+          await buildAndRecordTile(deps, tile, result);
           result.tilesBuilt++;
         } catch (err) {
           result.tilesFailed++;

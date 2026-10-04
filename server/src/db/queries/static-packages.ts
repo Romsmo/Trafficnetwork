@@ -68,14 +68,32 @@ export async function releaseBuildLease(db: Queryable, owner: string): Promise<v
  * it reads here (its own, uncommitted bump) is what the builder compares
  * against: it clears the mark only if it built from a snapshot at or after it.
  */
-export async function markTilesDirty(tx: Queryable, tiles: readonly string[]): Promise<void> {
+export async function markTilesDirty(tx: Queryable, tiles: readonly string[], opts: { policyStale?: boolean } = {}): Promise<void> {
   if (tiles.length === 0) return;
+  const stale = opts.policyStale === true;
   await tx.execute(sql`
-    insert into static_packages (tile, dirty, dirty_version, dirty_marked_at)
-    select t, true, (select version from static_data_state where id = 1), now()
+    insert into static_packages (tile, dirty, policy_stale, dirty_version, dirty_marked_at)
+    select t, true, ${stale}, (select version from static_data_state where id = 1), now()
     from unnest(${pgArray(tiles)}::text[]) as t
-    on conflict (tile) do update set dirty = true, dirty_version = excluded.dirty_version, dirty_marked_at = now()
+    on conflict (tile) do update set dirty = true, policy_stale = static_packages.policy_stale or excluded.policy_stale,
+      dirty_version = excluded.dirty_version, dirty_marked_at = now()
   `);
+}
+
+/**
+ * Tiles whose built package may still hold camera data that the camera policy no longer allows (see the column's comment).
+ * Their packages are not served - neither current nor superseded - until a rebuild has replaced them.
+ */
+export async function countPolicyStale(db: Queryable): Promise<number> {
+  const rows = await db.execute<{ n: number } & Record<string, unknown>>(sql`select count(*)::int as n from static_packages where policy_stale`);
+  return rows[0]?.n ?? 0;
+}
+
+export async function listPolicyStaleTiles(db: Queryable, limit: number): Promise<string[]> {
+  const rows = await db.execute<{ tile: string } & Record<string, unknown>>(sql`
+    select tile from static_packages where policy_stale order by dirty_marked_at, tile limit ${limit}
+  `);
+  return rows.map((r) => r.tile);
 }
 
 /** Every known tile becomes dirty (the build fingerprint changed, or an operator asked for a full rebuild). */
@@ -120,6 +138,7 @@ export interface PackageRow {
   cameraCount: number | null;
   builtForVersion: number | null;
   dirty: boolean;
+  policyStale: boolean;
 }
 
 function toPackageRow(r: Record<string, unknown>): PackageRow {
@@ -135,10 +154,11 @@ function toPackageRow(r: Record<string, unknown>): PackageRow {
     cameraCount: num(r["camera_count"]),
     builtForVersion: num(r["built_for_version"]),
     dirty: r["dirty"] as boolean,
+    policyStale: r["policy_stale"] === true,
   };
 }
 
-const PACKAGE_COLUMNS = sql`tile, hash, size_bytes, gzip_bytes, brotli_bytes, segment_count, sign_count, camera_count, built_for_version, dirty`;
+const PACKAGE_COLUMNS = sql`tile, hash, size_bytes, gzip_bytes, brotli_bytes, segment_count, sign_count, camera_count, built_for_version, dirty, policy_stale`;
 
 /** Rows for the manifest: with `since`, only tiles built after that version (including tombstones, so a client learns a tile went away). */
 export async function listPackageRows(db: Queryable, since?: number): Promise<PackageRow[]> {
@@ -186,6 +206,7 @@ export async function recordTileBuilt(
       segment_count = excluded.segment_count, sign_count = excluded.sign_count, camera_count = excluded.camera_count,
       built_for_version = excluded.built_for_version, built_at = now(),
       dirty = (static_packages.dirty and coalesce(static_packages.dirty_version, 0) > ${builtForVersion}),
+      policy_stale = (static_packages.policy_stale and coalesce(static_packages.dirty_version, 0) > ${builtForVersion}),
       dirty_version = case when static_packages.dirty and coalesce(static_packages.dirty_version, 0) > ${builtForVersion}
                            then static_packages.dirty_version else null end
   `);
@@ -230,13 +251,17 @@ export async function estimateStaticRows(db: Queryable, cap: number): Promise<nu
   return Number(r.n);
 }
 
-/** True if any static data (segment, sign, or — when they are packaged — an active camera) overlaps the envelopes. Used to prune the tile enumeration. */
-export async function hasStaticDataIn(db: Queryable, envelopes: readonly Envelope[], includeCameras: boolean): Promise<boolean> {
+/**
+ * True if any static data (segment, sign, or — when cameras may be delivered at all — an active camera) overlaps the
+ * envelopes. Used to prune the tile enumeration. `cameraEnvelopes` is where cameras are looked for (null = not at all): a tile
+ * also carries the zones of cells that reach a little over its own border, so it can be wider than `envelopes`.
+ */
+export async function hasStaticDataIn(db: Queryable, envelopes: readonly Envelope[], cameraEnvelopes: readonly Envelope[] | null): Promise<boolean> {
   const rows = await db.execute<{ found: boolean } & Record<string, unknown>>(sql`
     select (
       exists (select 1 from speed_limit_segments s where ${envelopeOverlap(sql`s.geometry`, envelopes)})
       or exists (select 1 from static_signs g where ${envelopeOverlap(sql`g.position`, envelopes)})
-      ${includeCameras ? sql`or exists (select 1 from fixed_speed_cameras c where c.status = 'active' and ${envelopeOverlap(sql`c.position`, envelopes)})` : sql``}
+      ${cameraEnvelopes ? sql`or exists (select 1 from fixed_speed_cameras c where c.status = 'active' and ${envelopeOverlap(sql`c.position`, cameraEnvelopes)})` : sql``}
     ) as found
   `);
   return rows[0]?.found === true;

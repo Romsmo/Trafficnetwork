@@ -78,6 +78,13 @@
       "when": 1790504193494,
       "tag": "0010_seed_reports",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1791064318086,
+      "tag": "0011_camera_country_policy",
+      "breakpoints": true
     }
   ]
 }

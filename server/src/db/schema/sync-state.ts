@@ -1,4 +1,4 @@
-import { boolean, integer, pgTable } from "drizzle-orm/pg-core";
+import { boolean, integer, jsonb, pgTable } from "drizzle-orm/pg-core";
 
 /**
  * Single-row table (id is always 1) tracking a global, monotonically
@@ -19,4 +19,7 @@ export const staticDataState = pgTable("static_data_state", {
   // (and emit events) for clients to drop/regain corrected values — see
   // modules/speed-limit-corrections/switch.ts.
   correctionsOverlayEnabled: boolean("corrections_overlay_enabled").notNull().default(true),
+  // The effective camera policy the last sync ran with ({ byCountry, zoneResolution }); null before the first one.
+  // A change bumps `version` and marks the affected package tiles dirty — see modules/cameras/policy/sync.ts.
+  cameraPolicy: jsonb("camera_policy"),
 });

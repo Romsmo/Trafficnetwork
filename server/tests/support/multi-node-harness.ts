@@ -36,6 +36,8 @@ import { startFederationWorkers, type FederationWorkersHandle } from "../../src/
 import { generateEd25519KeyPair } from "../../src/modules/crypto/keys.js";
 import { signEnvelope } from "../../src/modules/crypto/envelope.js";
 import type { DeviceCreateEventPayload } from "../../src/modules/federation/device-event.js";
+import type { CameraLevel } from "../../src/modules/cameras/policy/levels.js";
+import { createPolicyFixture, EUROPE_BOXES, loadBoundaries, WORLD_AS_DE, type PolicyFixture } from "../integration/camera-policy-helper.js";
 
 const ADMIN_PORT = Number(process.env.MULTI_NODE_HARNESS_PORT ?? 4100);
 let nextPort = 19100;
@@ -61,6 +63,8 @@ interface Node {
   proxyServer: http.Server;
   federation: FederationWorkersHandle | null;
   faults: Fault[];
+  /** Present when the node was started with a camera policy: the signed config it reads, rewritten by `/camera-policy`. */
+  policy?: PolicyFixture;
 }
 
 const nodes = new Map<string, Node>();
@@ -133,7 +137,18 @@ interface StartNodeRequest {
   federationEnabled?: boolean;
   /** Harness node ids of already-running nodes to join at startup. */
   federationSeedIds?: string[];
+  /** The node's own emergency brake (SPEED_CAMERA_NAMESPACE_ENABLED). Alone it releases nothing: see `cameraPolicy`. */
   cameraNamespace?: boolean;
+  /**
+   * Country-based camera policy (docs/camera-country-policy.md): the levels the node's signed network config lists, e.g.
+   * `{ "DE": "full", "FR": "zones" }`. Giving it signs a config (blitzerEnabled: true), releases the node's brake and loads
+   * synthetic country boundaries (`boundaries`). Change it later with `POST /nodes/:id/camera-policy`.
+   */
+  cameraPolicy?: Record<string, CameraLevel>;
+  /** Which synthetic country rectangles to load: "europe" (DE, FR, CH, AT - see integration/camera-policy-helper.ts) or "worldAsDe" (one country covering every test coordinate). Default "europe". */
+  boundaries?: "europe" | "worldAsDe";
+  /** CAMERA_POLICY_LOCAL_CAPS of this node, e.g. "DE=zones". */
+  cameraLocalCaps?: string;
   /**
    * Reuse this exact credential instead of provisioning a fresh one — for a
    * client that needs the *same* device identity valid on several
@@ -157,6 +172,12 @@ async function startNode(request: StartNodeRequest): Promise<Node> {
     .map((seedId) => nodes.get(seedId))
     .filter((n): n is Node => Boolean(n))
     .map((n) => `http://127.0.0.1:${n.port}`);
+  let policy: PolicyFixture | undefined;
+  if (request.cameraPolicy) {
+    policy = createPolicyFixture();
+    await loadBoundaries(testDb.db, request.boundaries === "worldAsDe" ? WORLD_AS_DE : EUROPE_BOXES);
+    policy.write(request.cameraPolicy);
+  }
   const env = loadEnv({
     DATABASE_URL: testDb.container.getConnectionUri(),
     JWT_SECRET: "multi-node-harness-secret-at-least-32-chars",
@@ -166,6 +187,8 @@ async function startNode(request: StartNodeRequest): Promise<Node> {
     FEDERATION_HEARTBEAT_INTERVAL_SECONDS: "1",
     FEDERATION_ANTI_ENTROPY_INTERVAL_SECONDS: "1",
     SPEED_CAMERA_NAMESPACE_ENABLED: request.cameraNamespace ? "true" : "false",
+    ...(policy ? policy.env() : {}),
+    ...(request.cameraLocalCaps ? { CAMERA_POLICY_LOCAL_CAPS: request.cameraLocalCaps } : {}),
   });
 
   const app = await buildApp({ env, db: testDb.db });
@@ -178,7 +201,7 @@ async function startNode(request: StartNodeRequest): Promise<Node> {
   // node object (mutated later by `/fault`), not a snapshot — `proxyServer`
   // is filled in on the next line, before anything can observe it unset.
   const node: Node = {
-    id, app, testDb, env, port, proxyPort, federation, faults: [],
+    id, app, testDb, env, port, proxyPort, federation, faults: [], policy,
     proxyServer: undefined as unknown as http.Server,
   };
   node.proxyServer = startFaultProxy(node);
@@ -192,6 +215,7 @@ async function stopNode(node: Node): Promise<void> {
   node.federation?.stop();
   await node.app.close();
   await node.testDb.teardown();
+  node.policy?.cleanup();
   await new Promise<void>((resolve) => node.proxyServer.close(() => resolve()));
   nodes.delete(node.id);
 }
@@ -234,6 +258,14 @@ const server = http.createServer(async (req, res) => {
     if (node && req.method === "POST" && nodeMatch![2] === "/stop") {
       await stopNode(node);
       return json(res, 200, { ok: true });
+    }
+    if (node && req.method === "POST" && nodeMatch![2] === "/camera-policy") {
+      // Signs the next version of the node's network config and makes the running node read it - no restart, like a real reload.
+      if (!node.policy) return json(res, 409, { error: "this node was started without a cameraPolicy" });
+      const body = (await readBody(req)) as { levels: Record<string, CameraLevel>; blitzerEnabled?: boolean };
+      node.policy.write(body.levels, { blitzerEnabled: body.blitzerEnabled ?? true });
+      const result = await node.app.cameraPolicy.reload();
+      return json(res, 200, { status: result.status, byCountry: node.app.cameraPolicy.current().byCountry });
     }
     if (node && req.method === "POST" && nodeMatch![2] === "/fault") {
       const body = (await readBody(req)) as Omit<Fault, "remaining"> & { times?: number };

@@ -1,6 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { getStaticDataVersion } from "../../db/queries/sync-state.js";
 import { CAMERA_NAMESPACE_TYPES, hazardExpiryMs, PERSISTENT_CAMERA_TYPES, REPORTABLE_HAZARD_TYPES } from "../../config/constants.js";
+import { describePolicy } from "../cameras/policy/policy.js";
 
 /**
  * Curated subset of server env tunables a client-lib instance must mirror
@@ -11,6 +12,7 @@ import { CAMERA_NAMESPACE_TYPES, hazardExpiryMs, PERSISTENT_CAMERA_TYPES, REPORT
 export async function registerConfigRoutes(app: FastifyInstance) {
   app.get("/v1/config", async () => {
     const env = app.deps.env;
+    const cameraPolicy = app.cameraPolicy.current();
     const expiryByType = Object.fromEntries(
       REPORTABLE_HAZARD_TYPES.map((type) => [type, hazardExpiryMs(type, env)]),
     );
@@ -18,7 +20,11 @@ export async function registerConfigRoutes(app: FastifyInstance) {
     return {
       regionTileH3Resolution: env.REGION_TILE_H3_RESOLUTION,
       staticDataPartitionH3Resolution: env.STATIC_DATA_PARTITION_H3_RESOLUTION,
-      speedCameraNamespaceEnabled: env.SPEED_CAMERA_NAMESPACE_ENABLED,
+      // Old meaning kept: "this node delivers camera data" - now: for at least one country, as the policy below says which.
+      speedCameraNamespaceEnabled: cameraPolicy.deliversAnything,
+      // Country-based camera policy (docs/camera-country-policy.md): what is delivered for which country - individually
+      // ("full"), as coarse zones ("zones") or not at all ("off", also every country not listed).
+      cameraPolicy: describePolicy(cameraPolicy),
       cameraNamespaceHazardTypes: CAMERA_NAMESPACE_TYPES,
       // Add-on D: the kinds of permanently installed enforcement device this server knows (never
       // expiring, delivered in the snapshot's `enforcementDevices` and the packages). A server that

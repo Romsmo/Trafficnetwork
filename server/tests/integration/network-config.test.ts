@@ -10,6 +10,8 @@ import { authHeader, testToken } from "./auth-helper.js";
 import { generateEd25519KeyPair } from "../../src/modules/crypto/keys.js";
 import { signEnvelope } from "../../src/modules/crypto/envelope.js";
 import type { NetworkConfigPayload } from "../../src/modules/network/config.js";
+import { insertFixedSpeedCamera } from "../../src/db/queries/fixed-speed-cameras.js";
+import { loadBoundaries, WORLD_AS_DE } from "./camera-policy-helper.js";
 
 describe("signed network config (F-S2)", () => {
   let testDb: TestDatabase;
@@ -18,6 +20,9 @@ describe("signed network config (F-S2)", () => {
   beforeAll(async () => {
     testDb = await startTestDatabase();
     dir = mkdtempSync(path.join(tmpdir(), "network-config-integration-"));
+    // A camera in a country the policy below releases: only the brake (local flag AND signed blitzerEnabled) decides whether it is delivered.
+    await loadBoundaries(testDb.db, WORLD_AS_DE);
+    await insertFixedSpeedCamera(testDb.db, { lat: 52.5, lng: 13.4, source: "test", marginM: 1000 });
   });
 
   afterAll(async () => {
@@ -29,6 +34,7 @@ describe("signed network config (F-S2)", () => {
     const payload: NetworkConfigPayload = {
       version: 1,
       blitzerEnabled,
+      cameraPolicyByCountry: { DE: "full" },
       eventLogRetentionDaysDynamic: 3,
       eventLogRetentionDaysStatic: 30,
       minVersion: "0.1.0",
@@ -68,7 +74,28 @@ describe("signed network config (F-S2)", () => {
         headers: auth,
       });
       expect(res.statusCode).toBe(200);
-      expect(res.json()).toEqual({ cameras: [] });
+      expect(res.json()).toEqual({ cameras: [], zones: [] });
+    });
+
+    it("with both agreeing the same camera is delivered, so the two tests around it really test the brake", async () => {
+      const root = generateEd25519KeyPair();
+      const configPath = writeConfig(root, true);
+
+      resetEnvCache();
+      const env = loadEnv({
+        DATABASE_URL: testDb.container.getConnectionUri(),
+        JWT_SECRET: "a".repeat(32),
+        SPEED_CAMERA_NAMESPACE_ENABLED: "true",
+        NETWORK_CONFIG_PATH: configPath,
+        NETWORK_ROOT_PUBLIC_KEY: root.publicKeyRaw,
+      });
+      app = await buildApp({ env, db: testDb.db });
+      const res = await app.inject({
+        method: "GET",
+        url: "/v1/speed-cameras/nearby?lat=52.5&lng=13.4&radiusM=1000",
+        headers: authHeader(await testToken(env)),
+      });
+      expect(res.json().cameras).toHaveLength(1);
     });
 
     it("a network config with blitzerEnabled:true never turns on a locally-disabled flag", async () => {
@@ -91,7 +118,7 @@ describe("signed network config (F-S2)", () => {
         url: "/v1/speed-cameras/nearby?lat=52.5&lng=13.4&radiusM=1000",
         headers: auth,
       });
-      expect(res.json()).toEqual({ cameras: [] });
+      expect(res.json()).toEqual({ cameras: [], zones: [] });
     });
 
     it("refuses to start when NETWORK_CONFIG_PATH points at a config signed by the wrong key", async () => {
