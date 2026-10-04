@@ -20,7 +20,8 @@ import { createPolicyFixture, EUROPE_BOXES, loadBoundaries, type PolicyFixture }
 
 /**
  * The country-based camera policy end to end (docs/camera-country-policy.md): one real Postgres/PostGIS, synthetic country
- * rectangles (no geodata is shipped), a signed network config per scenario. Every delivery path is read for every level.
+ * rectangles (no geodata is shipped), a signed network config per scenario. Cameras are delivered in full unless the signed policy
+ * takes a country back, so most scenarios sign a few EXCEPTIONS and read every delivery path.
  */
 
 type Json = Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any
@@ -80,7 +81,7 @@ describe("country-based camera policy", () => {
       STATIC_PACKAGES_DIR: packagesDir,
       STATIC_PACKAGES_GZIP_LEVEL: "4",
       STATIC_PACKAGES_BROTLI_QUALITY: "3",
-      ...(levels ? policy.env() : { SPEED_CAMERA_NAMESPACE_ENABLED: "true" }),
+      ...(levels ? policy.env() : {}),
       ...extra,
     });
     const app = await buildApp({ env, db: testDb.db });
@@ -121,7 +122,7 @@ describe("country-based camera policy", () => {
     await testDb.db.execute(sql`update static_data_state set version = 1, camera_policy = null`);
   }
 
-  /** Writes through a node that releases nothing: writes are never gated, so this is a neutral way to put data in. */
+  /** Writes through a node with the default policy; writes are never gated, so any node would do. */
   async function seed() {
     const { app, env } = await startApp(null);
     try {
@@ -148,7 +149,7 @@ describe("country-based camera policy", () => {
           headers: authHeader(await testToken(env, { sub: `reporter-${i}` })),
           payload: { type: "mobileSpeedCamera", lat: site.lat, lng: site.lng, speedKmh: 90 },
         });
-        expect(res.statusCode, res.body).toBe(202);
+        expect(res.statusCode, res.body).toBe(201);
       }
     } finally {
       await stop(app);
@@ -225,33 +226,46 @@ describe("country-based camera policy", () => {
   // ------------------------------------------------------------------ the levels
 
   describe("one case per level, read through every path", () => {
-    it("delivers nothing, on any path, until the operator has signed a policy - not even with the brake released", async () => {
+    it("delivers every camera individually, on every path, when the operator has signed nothing - also one that could not be placed in a country", async () => {
       await reset();
       await seed();
       await withApp(null, async (ctx) => {
         const bag = await collect(ctx);
-        for (const [name, site] of Object.entries(SITES)) expect(discloses(bag, site), name).toBe(false);
-        expect(bag.items).toEqual([]);
+        for (const [name, site] of Object.entries(SITES)) {
+          if (name === "MUNICH" || name === "LYON") continue; // no camera there
+          expect(itemsAt(bag, site).length, name).toBeGreaterThan(0);
+        }
         expect(bag.zones).toEqual([]);
         const config = await ctx.get("/v1/config");
-        expect(config.speedCameraNamespaceEnabled).toBe(false);
-        // no signed config at all: the brake stays on (it needs the network's blitzerEnabled), and no country is above off
-        expect(config.cameraPolicy).toMatchObject({ namespaceEnabled: false, defaultLevel: "off", byCountry: {} });
+        expect(config.speedCameraNamespaceEnabled).toBe(true);
+        expect(config.cameraPolicy).toMatchObject({ namespaceEnabled: true, defaultLevel: "full", byCountry: {} });
+        expect(config.networkConfig).toBeNull();
       });
     });
 
-    it("level off: a country that is off - or not listed, or in no country at all - delivers nothing, whatever the neighbours are", async () => {
-      await withApp({ DE: "full", FR: "zones", CH: "off" /* AT and the sea are not listed */ }, async (ctx) => {
+    it("level off: a restricted country - and a camera that cannot be placed while a restriction exists - delivers nothing, on any path", async () => {
+      await withApp({ DE: "full", FR: "zones", CH: "off" }, async (ctx) => {
         const bag = await collect(ctx);
-        for (const [name, site] of [["ZURICH (CH, listed as off)", ZURICH], ["VIENNA (AT, not listed)", VIENNA], ["SEA (no country)", SEA]] as const) {
+        // Zurich (CH, off) and the sea (in no known country: strictest level applies as soon as something is restricted)
+        for (const [name, site] of [["ZURICH (CH, listed as off)", ZURICH], ["SEA (no country)", SEA]] as const) {
           expect(discloses(bag, site), name).toBe(false);
         }
-        // the raw responses never mention them either: no id, no coordinate, no type hint
-        const text = bag.raw.join("\n");
-        expect(text).not.toContain("8.5417");
-        expect(text).not.toContain("16.37");
-        // and the camera types of AT/CH never show up in any zone
-        for (const { zone } of bag.zones) expect(zone.cameraTypes).not.toContain("distanceControl");
+        // the raw responses never mention it either: no id, no coordinate, no type hint
+        expect(bag.raw.join("\n")).not.toContain("8.5417");
+        // Austria is not listed, so it is full like any other country
+        expect(itemsAt(bag, VIENNA).length).toBeGreaterThan(0);
+      });
+    });
+
+    it("a restriction lets a camera in an unlisted country through, and a policy without restrictions even one in no country at all", async () => {
+      await withApp({ FR: "zones" }, async (ctx) => {
+        const bag = await collect(ctx);
+        expect(itemsAt(bag, VIENNA).length).toBeGreaterThan(0); // AT: full
+        expect(itemsAt(bag, SEA)).toEqual([]); // no country: the strictest level there is (zones) - a zone, never the item
+        expect(bag.zones.some((z) => z.zone.cell === cellOf(SEA))).toBe(true);
+      });
+      await withApp({}, async (ctx) => {
+        expect(itemsAt(await collect(ctx), SEA).length).toBeGreaterThan(0);
       });
     });
 
@@ -436,10 +450,10 @@ describe("country-based camera policy", () => {
   // ------------------------------------------------------------------ changing the policy
 
   describe("a policy change takes effect without a restart", () => {
-    it("tightens, loosens, refuses a rollback and fails closed on a broken file", async () => {
+    it("restricts, loosens, refuses a rollback and fails closed on a broken file", async () => {
       await reset();
       await seed();
-      const { app, env, policy } = await startApp({ DE: "full", FR: "zones" });
+      const { app, env, policy } = await startApp({ FR: "zones" });
       try {
         const get = async (url: string) => (await app.inject({ method: "GET", url, headers: authHeader(await testToken(env)) })).json() as Json;
         const berlinNearby = `/v1/speed-cameras/nearby?lat=${BERLIN.lat}&lng=${BERLIN.lng}&radiusM=5000`;
@@ -456,8 +470,8 @@ describe("country-based camera policy", () => {
         const before = (await get("/v1/config")).cameraPolicy as Json;
         const versionBefore = (await get("/v1/config")).staticDataVersion as number;
 
-        // --- withdraw Germany: signed version 2 without it
-        policy.write({ FR: "zones" });
+        // --- take Germany back: signed version 2 lists it as off
+        policy.write({ DE: "off", FR: "zones" });
         expect((await app.cameraPolicy.reload()).status).toBe("applied");
         // The old package - the one with the German cameras in it - is not reachable any more, not even through its
         // content-addressed URL: unserved while the rebuild is pending (503), gone once it is done (404). Never 200.
@@ -465,16 +479,16 @@ describe("country-based camera policy", () => {
         expect(await get(berlinNearby)).toEqual({ cameras: [], zones: [] });
         expect((await get(parisNearby)).zones.length).toBeGreaterThan(0);
         const config = await get("/v1/config");
-        expect(config.cameraPolicy.byCountry).toEqual({ FR: "zones" });
+        expect(config.cameraPolicy.byCountry).toEqual({ DE: "off", FR: "zones" });
         expect(config.cameraPolicy.version).not.toBe(before.version);
         expect(config.staticDataVersion).toBeGreaterThan(versionBefore);
         // the package of Berlin's tile is rebuilt without the devices (it held nothing else: it is gone from the manifest)
         expect(await partitionTiles()).not.toContain(berlinTile);
         expect(await fetchPackage()).toBe(404);
         const stored = await testDb.db.execute<{ camera_policy: Json } & Record<string, unknown>>(sql`select camera_policy from static_data_state where id = 1`);
-        expect(stored[0]!.camera_policy.byCountry).toEqual({ FR: "zones" });
+        expect(stored[0]!.camera_policy.byCountry).toEqual({ DE: "off", FR: "zones" });
 
-        // --- release Germany as zones: the same tile now carries a zone and no device
+        // --- Germany as zones: the same tile now carries a zone and no device
         policy.write({ DE: "zones", FR: "zones" });
         expect((await app.cameraPolicy.reload()).status).toBe("applied");
         const berlinZones = await get(berlinNearby);
@@ -485,7 +499,7 @@ describe("country-based camera policy", () => {
         expect((berlinPackage.cameraZones as Json[]).map((z) => z.cell)).toContain(cellOf(BERLIN));
 
         // --- an older, still validly signed (and more generous) file is a rollback: refused
-        policy.write({ DE: "full", FR: "full" }, { version: 1 });
+        policy.write({}, { version: 1 });
         const refused = await app.cameraPolicy.reload();
         expect(refused.status).toBe("refused");
         expect((await get(berlinNearby)).cameras).toEqual([]);
@@ -496,11 +510,12 @@ describe("country-based camera policy", () => {
         expect((await app.cameraPolicy.reload()).status).toBe("failed-closed");
         expect(await get(berlinNearby)).toEqual({ cameras: [], zones: [] });
         expect(await get(parisNearby)).toEqual({ cameras: [], zones: [] });
-        expect((await get("/v1/config")).cameraPolicy.namespaceEnabled).toBe(false);
+        expect((await get("/v1/config")).cameraPolicy).toMatchObject({ namespaceEnabled: false, defaultLevel: "off" });
         expect((await get("/v1/config")).speedCameraNamespaceEnabled).toBe(false);
-        policy.write({ DE: "full" }, { version: 50 });
+        policy.write({}, { version: 50 }); // and with no exceptions at all everything is full again
         expect((await app.cameraPolicy.reload()).status).toBe("applied");
         expect((await get(berlinNearby)).cameras.length).toBeGreaterThan(0);
+        expect((await get(parisNearby)).cameras.length).toBeGreaterThan(0);
       } finally {
         await stop(app);
       }
@@ -509,11 +524,11 @@ describe("country-based camera policy", () => {
     it("a change made while the node was down is found at start-up and marks the packages", async () => {
       await reset();
       await seed();
-      await withApp({ DE: "full" }, async (ctx) => {
+      await withApp({}, async (ctx) => {
         expect(((await ctx.get("/v1/static-data/manifest")).partitions as Json[]).map((p) => p.tile)).toContain(cellOf(BERLIN, PARTITION_RES));
       });
-      // restart with Germany withdrawn
-      await withApp({ FR: "zones" }, async (ctx) => {
+      // restart with Germany taken back
+      await withApp({ DE: "off" }, async (ctx) => {
         expect(((await ctx.get("/v1/static-data/manifest")).partitions as Json[]).map((p) => p.tile)).not.toContain(cellOf(BERLIN, PARTITION_RES));
         expect((await ctx.get(`/v1/speed-cameras/nearby?lat=${BERLIN.lat}&lng=${BERLIN.lng}&radiusM=5000`)).cameras).toEqual([]);
       });
@@ -532,7 +547,7 @@ describe("country-based camera policy", () => {
         expect(bag.items).toEqual([]);
         expect(bag.zones).toEqual([]);
         const config = await ctx.get("/v1/config");
-        expect(config.cameraPolicy).toMatchObject({ namespaceEnabled: false, byCountry: {} });
+        expect(config.cameraPolicy).toMatchObject({ namespaceEnabled: false, defaultLevel: "off", byCountry: {} });
         expect(config.speedCameraNamespaceEnabled).toBe(false);
         // the signed envelope still carries the raw network policy, for clients that verify it themselves
         expect(config.networkConfig.payload.cameraPolicyByCountry).toEqual({ DE: "full", FR: "zones" });
@@ -553,13 +568,14 @@ describe("country-based camera policy", () => {
         const bag = await collect(ctx);
         expect(itemsAt(bag, BERLIN)).toEqual([]);
         expect(bag.zones.some((z) => z.zone.cell === cellOf(BERLIN))).toBe(true);
-        expect(discloses(bag, ZURICH)).toBe(false); // the cap "*=full" grants nothing for a country the network does not list
+        expect(itemsAt(bag, ZURICH).length).toBeGreaterThan(0); // CH: the cap "CH=full" grants nothing the default does not already give
+        expect(itemsAt(bag, VIENNA).length).toBeGreaterThan(0); // AT: unlisted, so full
       }, { CAMERA_POLICY_LOCAL_CAPS: "DE=zones,CH=full,*=full" });
       await withApp({ DE: "full", FR: "zones" }, async (ctx) => {
         const bag = await collect(ctx);
         expect(discloses(bag, BERLIN)).toBe(false);
         expect(bag.zones.some((z) => z.zone.cell === cellOf(PARIS))).toBe(false);
-        expect((await ctx.get("/v1/config")).cameraPolicy.byCountry).toEqual({});
+        expect((await ctx.get("/v1/config")).cameraPolicy).toMatchObject({ defaultLevel: "off", byCountry: {} });
       }, { CAMERA_POLICY_LOCAL_CAPS: "*=off" });
     });
   });
@@ -608,11 +624,12 @@ describe("country-based camera policy", () => {
       });
     });
 
-    it("rows with no resolved country - and every camera while no boundaries are loaded - are not delivered, until they are resolved", async () => {
+    it("while a country is restricted, a camera without a resolved country is withheld; with no restriction it is delivered - and resolving it lets the restriction decide", async () => {
       await reset();
       await testDb.db.execute(sql`delete from country_boundary_parts`);
       try {
-        await withApp({ DE: "full" }, async (ctx) => {
+        // a restriction exists but no boundary data: the camera cannot be placed, so the strictest level applies
+        await withApp({ CH: "off" }, async (ctx) => {
           const written = await ctx.app.inject({
             method: "POST",
             url: "/v1/hazard-reports",
@@ -624,11 +641,15 @@ describe("country-based camera policy", () => {
           expect(stored[0]!.countries).toEqual([]); // no boundary within reach: no country
           expect(await ctx.get(`/v1/speed-cameras/nearby?lat=${BERLIN.lat}&lng=${BERLIN.lng}&radiusM=5000`)).toEqual({ cameras: [], zones: [] });
         });
+        // nothing restricted: where the camera is does not matter
+        await withApp({}, async (ctx) => {
+          expect((await ctx.get(`/v1/speed-cameras/nearby?lat=${BERLIN.lat}&lng=${BERLIN.lng}&radiusM=5000`)).cameras).toHaveLength(1);
+        });
       } finally {
         await loadBoundaries(testDb.db, EUROPE_BOXES);
       }
-      // boundaries arrive; the operator resolves the stored cameras (npm run cameras -- resolve-countries --all)
-      await withApp({ DE: "full" }, async (ctx) => {
+      // boundaries arrive; the operator resolves the stored cameras (npm run cameras -- resolve-countries): now it is in Germany, which is not restricted
+      await withApp({ CH: "off" }, async (ctx) => {
         expect((await ctx.get(`/v1/speed-cameras/nearby?lat=${BERLIN.lat}&lng=${BERLIN.lng}&radiusM=5000`)).cameras).toEqual([]);
         await testDb.db.execute(sql`update fixed_speed_cameras set countries = null`); // as a row from before the migration looks
         expect((await ctx.get(`/v1/speed-cameras/nearby?lat=${BERLIN.lat}&lng=${BERLIN.lng}&radiusM=5000`)).cameras).toEqual([]);
@@ -646,13 +667,13 @@ describe("country-based camera policy", () => {
         insert into fixed_speed_cameras (position, countries, source)
         values (ST_SetSRID(ST_MakePoint(${BERLIN.lng}, ${BERLIN.lat}), 4326), camera_countries(ST_SetSRID(ST_MakePoint(${BERLIN.lng}, ${BERLIN.lat}), 4326), 1000), 'berlin')`);
       const berlinTile = cellOf(BERLIN, PARTITION_RES);
-      await withApp({ DE: "full" }, async (ctx) => {
+      await withApp({ XX: "off" }, async (ctx) => {
         await ctx.get("/v1/static-data/manifest"); // builds the packages
         const staleOf = async () =>
           (await testDb.db.execute<{ policy_stale: boolean } & Record<string, unknown>>(sql`select policy_stale from static_packages where tile = ${berlinTile}`))[0]?.policy_stale;
         expect(await staleOf()).toBe(false);
 
-        // New boundary data puts Berlin in another country: the camera was deliverable before and may not be now.
+        // New boundary data puts Berlin in a country that is restricted: the camera was deliverable before and is not now.
         await loadBoundaries(testDb.db, [{ iso2: "XX", west: 7, south: 47.5, east: 15, north: 55 }]);
         try {
           const result = await resolveCountries(testDb.db, 1000, { all: true, partitionRes: PARTITION_RES, zoneRes: ZONE_RES });
@@ -753,9 +774,9 @@ describe("country-based camera policy", () => {
   describe("the delta cursor moves over events the client may not see", () => {
     it("pages through withheld camera events to the end instead of asking for the same page forever", async () => {
       await reset();
-      await withApp({ DE: "full" }, async (ctx) => {
+      await withApp({ CH: "off" }, async (ctx) => {
         for (let i = 0; i < 9; i++) {
-          const site = near(ZURICH, 1000 * (i + 1)); // CH is not released: every camera event is withheld
+          const site = near(ZURICH, 1000 * (i + 1)); // CH is off: every camera event is withheld
           await ctx.app.inject({
             method: "POST",
             url: "/v1/hazard-reports",
@@ -795,7 +816,7 @@ describe("country-based camera policy", () => {
   describe("WebSocket push", () => {
     it("pushes a camera event as it is at level full, as a zone event at zones, and not at all at off", async () => {
       await reset();
-      const { app, env } = await startApp({ DE: "full", FR: "zones" });
+      const { app, env } = await startApp({ FR: "zones", CH: "off" });
       try {
         await app.listen({ port: 0, host: "127.0.0.1" });
         const address = app.server.address();
@@ -862,8 +883,8 @@ describe("country-based camera policy", () => {
         expect(config.speedCameraNamespaceEnabled).toBe(true);
         expect(config.cameraPolicy).toMatchObject({
           namespaceEnabled: true,
-          defaultLevel: "off",
-          byCountry: { DE: "full", FR: "zones" },
+          defaultLevel: "full",
+          byCountry: { FR: "zones", CH: "off" }, // the exceptions; DE is listed as full, which is no exception
           zoneResolution: ZONE_RES,
         });
         expect(typeof config.cameraPolicy.version).toBe("string");
@@ -872,7 +893,7 @@ describe("country-based camera policy", () => {
         expect(config.cameraPolicy.notice.text.en).toContain("passengers");
         const again = await ctx.get("/v1/config");
         expect(again.cameraPolicy.version).toBe(config.cameraPolicy.version);
-        ctx.policy.write({ DE: "full", FR: "zones", CH: "off", AT: "off" }); // listing a country as off changes nothing that is delivered
+        ctx.policy.write({ DE: "full", FR: "zones", CH: "off", AT: "full" }); // listing a country as full changes nothing that is delivered
         await ctx.app.cameraPolicy.reload();
         expect((await ctx.get("/v1/config")).cameraPolicy.version).toBe(config.cameraPolicy.version);
         ctx.policy.write({ DE: "full", FR: "full", CH: "off" });

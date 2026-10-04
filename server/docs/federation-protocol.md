@@ -143,13 +143,13 @@ The root-signed network config (`NetworkConfigPayload`, the same document as `ex
 cameraPolicyByCountry?: { [ISO 3166-1 alpha-2, upper case]: "off" | "zones" | "full" }
 ```
 
-It says, per country, what camera data a node may **deliver to its own clients** (individual cameras, coarse zones, nothing).
-A country that is not listed - and an absent field - is `off`; `blitzerEnabled: false` remains the network-wide emergency brake
-that turns every country off. A node reads the file itself (`NETWORK_CONFIG_PATH`, re-read while running) and may only be
+It lists the **exceptions** to "cameras are delivered in full": per country what camera data a node may **deliver to its own clients**
+(individual cameras, coarse zones, nothing). A country that is not listed - and an absent field - is `full`; `blitzerEnabled: false` remains
+the network-wide emergency brake that turns every country off. A node reads the file itself (`NETWORK_CONFIG_PATH`, re-read while running) and may only be
 **stricter** than it (`CAMERA_POLICY_LOCAL_CAPS`, `SPEED_CAMERA_NAMESPACE_ENABLED`); the policy is *not* distributed by
 federation messages - exactly like `excludedNodeIds` it is a file the operator signs and hands to every node. The field is
 optional and additive: a node that predates it ignores it (and has no country policy at all), a node that knows it treats a
-file without it as "nothing released". Validation is all-or-nothing: a key that is not `^[A-Z]{2}$`, a value that is not one of
+file without it as "no exceptions". Validation is all-or-nothing: a key that is not `^[A-Z]{2}$`, a value that is not one of
 the three levels or more than 300 entries make the **whole file invalid** (refused at start-up, fail-closed while running),
 because a policy that cannot be understood completely must not be applied partly. Reload rule: `version` must not go down, and the
 same `version` with different content is refused. See [`camera-country-policy.md`](camera-country-policy.md).

@@ -5,7 +5,6 @@ import { buildApp } from "../../src/app.js";
 import { loadEnv, resetEnvCache } from "../../src/config/env.js";
 import { startTestDatabase, type TestDatabase } from "./setup.js";
 import { authHeader, testToken } from "./auth-helper.js";
-import { createPolicyFixture, loadBoundaries, WORLD_AS_DE, type PolicyFixture } from "./camera-policy-helper.js";
 
 const JWT_SECRET = "a".repeat(32);
 const JWT_TTL_SECONDS = 3600;
@@ -17,14 +16,9 @@ async function tokenFor(name: string) {
 
 describe("speed-camera namespace", () => {
   let testDb: TestDatabase;
-  let policy: PolicyFixture;
 
   beforeAll(async () => {
     testDb = await startTestDatabase();
-    policy = createPolicyFixture();
-    // One synthetic country covers every coordinate these tests use; the policy below releases it.
-    await loadBoundaries(testDb.db, WORLD_AS_DE);
-    policy.write({ DE: "full" });
   });
 
   afterEach(async () => {
@@ -35,7 +29,6 @@ describe("speed-camera namespace", () => {
   });
 
   afterAll(async () => {
-    policy.cleanup();
     await testDb.teardown();
   });
 
@@ -51,10 +44,10 @@ describe("speed-camera namespace", () => {
     return buildApp({ env, db: testDb.db });
   }
 
-  describe("no policy released (default)", () => {
+  describe("emergency brake on (SPEED_CAMERA_NAMESPACE_ENABLED=false)", () => {
     let app: FastifyInstance;
     beforeAll(async () => {
-      app = await buildTestApp();
+      app = await buildTestApp({ SPEED_CAMERA_NAMESPACE_ENABLED: "false" });
     });
     afterAll(async () => app.close());
 
@@ -103,10 +96,10 @@ describe("speed-camera namespace", () => {
     });
   });
 
-  describe("country released at level full", () => {
+  describe("default (cameras are delivered in full in every country)", () => {
     let app: FastifyInstance;
     beforeAll(async () => {
-      app = await buildTestApp(policy.env());
+      app = await buildTestApp();
     });
     afterAll(async () => app.close());
 

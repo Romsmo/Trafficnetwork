@@ -57,11 +57,13 @@ describe("effective level of a camera (its country set)", () => {
       generateEd25519KeyPair(),
     );
 
-  it("an unknown country set is off - never 'whatever the default is'", () => {
-    const policy = buildEffectivePolicy(env(), signed({ DE: "full" }));
-    expect(policy.levelOf(null)).toBe("off");
-    expect(policy.levelOf(undefined)).toBe("off");
-    expect(policy.levelOf([])).toBe("off");
+  it("a camera without a known country gets the strictest level any country has - full while nothing is restricted", () => {
+    const open = buildEffectivePolicy(env(), signed({ DE: "full" }));
+    for (const unknown of [null, undefined, []] as const) expect(open.levelOf(unknown)).toBe("full");
+    const zones = buildEffectivePolicy(env(), signed({ FR: "zones" }));
+    expect(zones.levelOf(null)).toBe("zones");
+    const restricted = buildEffectivePolicy(env(), signed({ FR: "zones", CH: "off" }));
+    for (const unknown of [null, undefined, []] as const) expect(restricted.levelOf(unknown)).toBe("off");
   });
 
   it("the strictest country of a border camera wins, in both directions", () => {
@@ -70,7 +72,8 @@ describe("effective level of a camera (its country set)", () => {
     expect(policy.levelOf(["DE", "FR"])).toBe("zones");
     expect(policy.levelOf(["FR", "DE"])).toBe("zones");
     expect(policy.levelOf(["DE", "CH"])).toBe("off");
-    expect(policy.levelOf(["DE", "XX"])).toBe("off"); // a neighbour the policy does not list is off
+    expect(policy.levelOf(["DE", "XX"])).toBe("full"); // a neighbour the policy does not list is full, like any other
+    expect(policy.levelOf(["XX", "CH"])).toBe("off");
   });
 });
 
@@ -90,19 +93,20 @@ describe("the policy fingerprint", () => {
 
   it("changes exactly when what would be delivered changes", () => {
     const env = base();
-    const a = withPolicy(env, { DE: "full" });
-    expect(withPolicy(env, { DE: "full", CH: "off" }).fingerprint).toBe(a.fingerprint); // listing a country as off changes nothing
-    expect(withPolicy(env, { DE: "zones" }).fingerprint).not.toBe(a.fingerprint);
-    expect(withPolicy(env, { DE: "full", FR: "zones" }).fingerprint).not.toBe(a.fingerprint);
+    const a = withPolicy(env, {});
+    expect(withPolicy(env, { DE: "full" }).fingerprint).toBe(a.fingerprint); // listing a country as full is no exception: nothing changes
+    expect(withPolicy(env, { CH: "off" }).fingerprint).not.toBe(a.fingerprint);
+    expect(withPolicy(env, { CH: "zones" }).fingerprint).not.toBe(withPolicy(env, { CH: "off" }).fingerprint);
+    expect(withPolicy(env, { CH: "off", FR: "zones" }).fingerprint).not.toBe(withPolicy(env, { CH: "off" }).fingerprint);
     resetEnvCache();
     const otherResolution = loadEnv({ DATABASE_URL: "postgres://x", JWT_SECRET: "a".repeat(32), SPEED_CAMERA_NAMESPACE_ENABLED: "true", CAMERA_ZONE_H3_RESOLUTION: "7" });
-    expect(withPolicy(otherResolution, { DE: "full" }).fingerprint).not.toBe(a.fingerprint);
+    expect(withPolicy(otherResolution, {}).fingerprint).not.toBe(a.fingerprint);
   });
 
-  it("describes the effective levels for GET /v1/config, without the countries that are off", () => {
+  it("describes the effective levels for GET /v1/config: the default and the exceptions", () => {
     const described = describePolicy(withPolicy(base(), { DE: "full", FR: "zones", CH: "off" }));
-    expect(described.byCountry).toEqual({ DE: "full", FR: "zones" });
-    expect(described.defaultLevel).toBe("off");
+    expect(described.byCountry).toEqual({ FR: "zones", CH: "off" });
+    expect(described.defaultLevel).toBe("full");
     expect(described.namespaceEnabled).toBe(true);
     expect(described.zoneResolution).toBe(6);
     expect(described.notice.text.de.length).toBeGreaterThan(0);
@@ -111,11 +115,12 @@ describe("the policy fingerprint", () => {
 });
 
 describe("CameraPolicyService (the signed file, re-read while running)", () => {
-  it("starts with nothing delivered when the node has no signed config", async () => {
+  it("a node with no signed config delivers every country in full", async () => {
     resetEnvCache();
-    const env = loadEnv({ DATABASE_URL: "postgres://x", JWT_SECRET: "a".repeat(32), SPEED_CAMERA_NAMESPACE_ENABLED: "true" });
+    const env = loadEnv({ DATABASE_URL: "postgres://x", JWT_SECRET: "a".repeat(32) });
     const service = await CameraPolicyService.load(env);
-    expect(service.current().deliversAnything).toBe(false);
+    expect(service.current().deliversAnything).toBe(true);
+    expect(service.current().levelOfCountry("CH")).toBe("full");
     expect(service.current().envelope).toBeNull();
     expect(await service.reload()).toEqual({ status: "unchanged" });
   });
@@ -137,13 +142,13 @@ describe("CameraPolicyService (the signed file, re-read while running)", () => {
 
   it("a request keeps the policy object it started with: a swap never changes it half way", async () => {
     const { env, root, file } = setup();
-    sign(root, file, 1, { DE: "full" });
+    sign(root, file, 1, { CH: "off" });
     const service = await CameraPolicyService.load(env);
     const held = service.current();
     sign(root, file, 2, {});
     await service.reload();
-    expect(held.levelOfCountry("DE")).toBe("full");
-    expect(service.current().levelOfCountry("DE")).toBe("off");
+    expect(held.levelOfCountry("CH")).toBe("off");
+    expect(service.current().levelOfCountry("CH")).toBe("full");
   });
 
   it("refuses an older version (rollback protection) and keeps the running policy", async () => {
@@ -187,15 +192,15 @@ describe("CameraPolicyService (the signed file, re-read while running)", () => {
     expect(service.current().failedClosed).toBeNull();
   });
 
-  it("a withdrawn country is off after the reload, and 'unchanged' when nothing changed", async () => {
+  it("a lifted restriction is full again after the reload, and 'unchanged' when nothing changed", async () => {
     const { env, root, file } = setup();
-    sign(root, file, 1, { DE: "full", FR: "zones" });
+    sign(root, file, 1, { CH: "off", FR: "zones" });
     const service = await CameraPolicyService.load(env);
     expect((await service.reload()).status).toBe("unchanged");
-    sign(root, file, 2, { DE: "full" });
+    sign(root, file, 2, { CH: "off" });
     await service.reload();
-    expect(service.current().levelOfCountry("FR")).toBe("off");
-    expect(service.current().levelOfCountry("DE")).toBe("full");
+    expect(service.current().levelOfCountry("FR")).toBe("full");
+    expect(service.current().levelOfCountry("CH")).toBe("off");
   });
 
   it("refuses to start on a config it cannot authenticate", async () => {

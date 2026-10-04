@@ -12,13 +12,13 @@ import { generateEd25519KeyPair } from "../../src/modules/crypto/keys.js";
 import { signEnvelope } from "../../src/modules/crypto/envelope.js";
 import { buildEffectivePolicy } from "../../src/modules/cameras/policy/policy.js";
 
-describe("the emergency brake (local flag AND signed blitzerEnabled)", () => {
-  const baseEnv = (flag: boolean, caps = "") => {
+describe("the emergency brake (local flag AND signed blitzerEnabled) and the default level", () => {
+  const baseEnv = (flag?: boolean, caps = "") => {
     resetEnvCache();
     return loadEnv({
       DATABASE_URL: "postgres://x",
       JWT_SECRET: "a".repeat(32),
-      SPEED_CAMERA_NAMESPACE_ENABLED: String(flag),
+      ...(flag === undefined ? {} : { SPEED_CAMERA_NAMESPACE_ENABLED: String(flag) }),
       CAMERA_POLICY_LOCAL_CAPS: caps,
     });
   };
@@ -37,44 +37,73 @@ describe("the emergency brake (local flag AND signed blitzerEnabled)", () => {
       generateEd25519KeyPair(),
     );
 
-  it("without a signed config nothing is delivered, even with the local flag on", () => {
-    const policy = buildEffectivePolicy(baseEnv(true), null);
-    expect(policy.deliversAnything).toBe(false);
-    expect(policy.levelOfCountry("DE")).toBe("off");
-  });
-
-  it("the network can switch a locally enabled flag off (AND-gate): every country is off", () => {
-    const policy = buildEffectivePolicy(baseEnv(true), signed(false, { DE: "full" }));
-    expect(policy.namespaceEnabled).toBe(false);
-    expect(policy.levelOfCountry("DE")).toBe("off");
-  });
-
-  it("the network can never switch a locally disabled flag on", () => {
-    const policy = buildEffectivePolicy(baseEnv(false), signed(true, { DE: "full" }));
-    expect(policy.namespaceEnabled).toBe(false);
-    expect(policy.levelOfCountry("DE")).toBe("off");
-  });
-
-  it("with both agreeing, the signed levels apply and unlisted countries stay off", () => {
-    const policy = buildEffectivePolicy(baseEnv(true), signed(true, { DE: "full", FR: "zones", CH: "off" }));
-    expect(policy.levelOfCountry("DE")).toBe("full");
-    expect(policy.levelOfCountry("FR")).toBe("zones");
-    expect(policy.levelOfCountry("CH")).toBe("off");
-    expect(policy.levelOfCountry("AT")).toBe("off");
-  });
-
-  it("a released brake alone grants nothing: no policy field means every country is off", () => {
-    const policy = buildEffectivePolicy(baseEnv(true), signed(true));
+  it("without a signed config - and with the defaults - every country is full", () => {
+    const policy = buildEffectivePolicy(baseEnv(), null);
     expect(policy.namespaceEnabled).toBe(true);
+    expect(policy.deliversAnything).toBe(true);
+    expect(policy.defaultLevel).toBe("full");
+    expect(policy.unknownLevel).toBe("full");
+    expect(policy.levelOfCountry("DE")).toBe("full");
+    expect(policy.levelOfCountry("CH")).toBe("full");
+    expect(policy.byCountry).toEqual({});
+  });
+
+  it("the local brake turns every country off, signed config or not", () => {
+    for (const envelope of [null, signed(true), signed(true, { DE: "full" })]) {
+      const policy = buildEffectivePolicy(baseEnv(false), envelope);
+      expect(policy.namespaceEnabled).toBe(false);
+      expect(policy.deliversAnything).toBe(false);
+      expect(policy.levelOfCountry("DE")).toBe("off");
+      expect(policy.unknownLevel).toBe("off");
+    }
+  });
+
+  it("the network can pull the brake (AND-gate): blitzerEnabled false turns every country off even where the node's flag is on", () => {
+    const policy = buildEffectivePolicy(baseEnv(true), signed(false, { CH: "off" }));
+    expect(policy.namespaceEnabled).toBe(false);
     expect(policy.deliversAnything).toBe(false);
+    expect(policy.levelOfCountry("DE")).toBe("off");
+  });
+
+  it("a signed config without exceptions leaves every country full", () => {
+    const policy = buildEffectivePolicy(baseEnv(), signed(true));
+    expect(policy.levelOfCountry("DE")).toBe("full");
+    expect(policy.unknownLevel).toBe("full");
+  });
+
+  it("the signed exceptions take single countries back; every other country stays full", () => {
+    const policy = buildEffectivePolicy(baseEnv(), signed(true, { CH: "off", FR: "zones", DE: "full" }));
+    expect(policy.levelOfCountry("CH")).toBe("off");
+    expect(policy.levelOfCountry("FR")).toBe("zones");
+    expect(policy.levelOfCountry("DE")).toBe("full");
+    expect(policy.levelOfCountry("AT")).toBe("full");
+    expect(policy.defaultLevel).toBe("full");
+    // listing a country as full is no exception, so it is not reported as one
+    expect(policy.byCountry).toEqual({ CH: "off", FR: "zones" });
+  });
+
+  it("a camera whose country is unknown gets the strictest level any country has, so a restriction cannot be escaped by it", () => {
+    expect(buildEffectivePolicy(baseEnv(), signed(true, { CH: "off", FR: "zones" })).unknownLevel).toBe("off");
+    expect(buildEffectivePolicy(baseEnv(), signed(true, { FR: "zones" })).unknownLevel).toBe("zones");
+    expect(buildEffectivePolicy(baseEnv(), signed(true, {})).unknownLevel).toBe("full");
   });
 
   it("a local cap can only withhold more, never grant more", () => {
-    const policy = buildEffectivePolicy(baseEnv(true, "DE=zones,FR=full,AT=off"), signed(true, { DE: "full", FR: "zones", IT: "full" }));
+    const policy = buildEffectivePolicy(baseEnv(true, "DE=zones,FR=full,AT=off"), signed(true, { DE: "full", FR: "zones", IT: "off" }));
     expect(policy.levelOfCountry("DE")).toBe("zones"); // capped down
-    expect(policy.levelOfCountry("FR")).toBe("zones"); // cap above the network level changes nothing
-    expect(policy.levelOfCountry("IT")).toBe("full"); // no cap
-    expect(policy.levelOfCountry("AT")).toBe("off"); // a cap on a country the network does not list grants nothing
+    expect(policy.levelOfCountry("FR")).toBe("zones"); // a cap above the network level changes nothing
+    expect(policy.levelOfCountry("IT")).toBe("off"); // the network's restriction stays
+    expect(policy.levelOfCountry("AT")).toBe("off"); // a cap restricts a country the network does not list
+    expect(policy.levelOfCountry("NL")).toBe("full");
+  });
+
+  it("a catch-all cap lowers every country, listed or not", () => {
+    const policy = buildEffectivePolicy(baseEnv(true, "*=zones"), signed(true, { CH: "off", DE: "full" }));
+    expect(policy.defaultLevel).toBe("zones");
+    expect(policy.levelOfCountry("DE")).toBe("zones");
+    expect(policy.levelOfCountry("CH")).toBe("off");
+    expect(policy.levelOfCountry("NL")).toBe("zones");
+    expect(buildEffectivePolicy(baseEnv(true, "*=off"), signed(true, { DE: "full" })).deliversAnything).toBe(false);
   });
 });
 

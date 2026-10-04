@@ -16,9 +16,9 @@ export interface NetworkConfigPayload {
   /** Network-wide emergency brake: false switches every country off, whatever `cameraPolicyByCountry` says. */
   blitzerEnabled: boolean;
   /**
-   * What the camera categories may deliver, per ISO 3166-1 alpha-2 country (docs/camera-country-policy.md). A country
-   * that is not listed — and an absent field — is `off`. This is the operator's legal decision, signed offline; the
-   * code never fills it in.
+   * The exceptions to "cameras are delivered in full": per ISO 3166-1 alpha-2 country what the camera categories may deliver
+   * (docs/camera-country-policy.md). A country that is not listed — and an absent field — is `full`. Taking a country back
+   * (`zones`, `off`) is the operator's legal decision, signed offline; the code never fills it in.
    */
   cameraPolicyByCountry?: Record<string, CameraLevel>;
   eventLogRetentionDaysDynamic: number;

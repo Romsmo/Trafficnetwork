@@ -13,7 +13,6 @@ import { runExpirySweep } from "../../src/modules/expiry/worker.js";
 import { serializePartition } from "../../src/modules/static-data/partitions.js";
 import { startTestDatabase, type TestDatabase } from "./setup.js";
 import { authHeader, testToken } from "./auth-helper.js";
-import { createPolicyFixture, loadBoundaries, WORLD_AS_DE, type PolicyFixture } from "./camera-policy-helper.js";
 
 /**
  * Persistent enforcement devices (add-on D, docs/persistent-enforcement-devices.md): red-light and
@@ -30,22 +29,15 @@ const RES = 4;
 
 describe("persistent enforcement devices (add-on D)", () => {
   let testDb: TestDatabase;
-  let policy: PolicyFixture;
   const dirs: string[] = [];
   const apps: FastifyInstance[] = [];
 
   beforeAll(async () => {
     testDb = await startTestDatabase();
-    // One synthetic country covers every coordinate here; the signed policy releases it (the persistent devices are
-    // delivered individually where a country is at level `full`).
-    policy = createPolicyFixture();
-    await loadBoundaries(testDb.db, WORLD_AS_DE);
-    policy.write({ DE: "full" });
   }, 90_000);
 
   afterAll(async () => {
     for (const app of apps) await app.close();
-    policy.cleanup();
     await testDb.teardown();
     for (const dir of dirs) rmSync(dir, { recursive: true, force: true });
   });
@@ -58,7 +50,6 @@ describe("persistent enforcement devices (add-on D)", () => {
       DATABASE_URL: testDb.container.getConnectionUri(),
       JWT_SECRET: "a".repeat(32),
       LOG_LEVEL: "silent",
-      ...policy.env(),
       CAMERA_REMOVAL_THRESHOLD: "2",
       DUPLICATE_MERGE_RADIUS_METERS: "500",
       STATIC_DATA_PARTITION_H3_RESOLUTION: String(RES),

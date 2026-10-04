@@ -14,12 +14,12 @@ const envSchema = z.object({
 
   SPEED_CAMERA_NAMESPACE_ENABLED: z
     .enum(["true", "false"])
-    .default("false")
+    .default("true")
     .transform((v) => v === "true"),
 
-  // Country-based camera policy (docs/camera-country-policy.md). SPEED_CAMERA_NAMESPACE_ENABLED above is the node's
-  // emergency brake: false = every country is off, whatever the signed policy says. What a country may receive is
-  // decided by the root-signed `cameraPolicyByCountry`; nothing here grants anything.
+  // Country-based camera policy (docs/camera-country-policy.md). Cameras are delivered at level `full` in every country unless the
+  // root-signed `cameraPolicyByCountry` takes a country back (`zones`, `off`). SPEED_CAMERA_NAMESPACE_ENABLED above is the node's
+  // emergency brake: false = every country is off, whatever the signed policy says.
   //
   // A node-local upper bound per country, `DE=zones,CH=off,*=full` — can only withhold more than the network policy.
   CAMERA_POLICY_LOCAL_CAPS: z.string().default(""),

@@ -142,6 +142,8 @@ export class StaticPackageService {
     const inlineMax = this.env.STATIC_PACKAGES_INLINE_BUILD_MAX_ROWS;
     const small = (await staticRowsAtLeast(this.db, inlineMax)) <= inlineMax;
     if (small) {
+      // A rebuild of policy-stale tiles started by a policy change holds the builder lease: let it finish rather than answer "busy".
+      await this.policyRebuild;
       const result = await this.singleflight(() => runBuild(this.builderDeps));
       if (result.status === "busy") return { ready: current, reason: "another process is building the packages" };
       return { ready: result.ready || current };

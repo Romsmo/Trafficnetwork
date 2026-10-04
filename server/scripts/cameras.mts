@@ -29,7 +29,8 @@ import { pgArray } from "../src/db/pg-array.js";
  * marks the affected static-data packages dirty and bumps the static-data version, like a bulk import does.
  * This process cannot push WebSocket messages: a running server picks the change up through its packages and delta/snapshot.
  *
- * Which countries may deliver anything is not decided here: that is the signed policy (npm run network:sign-config).
+ * Cameras are delivered in every country unless the signed policy restricts one (npm run network:sign-config -- --camera-policy ...). The
+ * country of a camera only matters once a restriction exists: while none does, boundary data is optional.
  */
 
 async function loadBoundaries(db: Queryable, file: string, opts: { property?: string; name?: string; marginM: number }): Promise<void> {
@@ -53,7 +54,8 @@ async function status(db: Queryable, env: ReturnType<typeof loadEnv>): Promise<v
   const parts = (await db.execute<{ n: number; c: number } & Record<string, unknown>>(sql`select count(*)::int as n, count(distinct iso2)::int as c from country_boundary_parts`))[0]!;
   console.log("Boundaries");
   if (parts.n === 0) {
-    console.log("  none loaded - no camera has a known country, so nothing is delivered (npm run cameras -- load-boundaries <file>)");
+    console.log("  none loaded - no camera has a known country. Harmless while no country is restricted; once the policy restricts one, cameras without a");
+    console.log("  known country get the strictest restricted level (npm run cameras -- load-boundaries <file>)");
   } else {
     console.log(`  ${parts.c} countries, ${parts.n} parts; dataset: ${String(state?.["dataset"] ?? "?")}; loaded: ${String(state?.["loaded_at"] ?? "?")}`);
     const stored = state?.["margin_m"] as number | null | undefined;
@@ -81,9 +83,16 @@ async function status(db: Queryable, env: ReturnType<typeof loadEnv>): Promise<v
 
   const policy = (await CameraPolicyService.load(env)).current();
   console.log("Camera policy in force (signed network config, local caps and the brake applied)");
-  if (!policy.namespaceEnabled) console.log("  emergency brake ON (SPEED_CAMERA_NAMESPACE_ENABLED=false, blitzerEnabled=false or no readable signed config): every country is off");
-  const levels = Object.entries(policy.byCountry).filter(([, level]) => level !== "off");
-  console.log(levels.length === 0 ? "  no country above off - no camera data is delivered" : `  ${levels.map(([c, l]) => `${c}=${l}`).join(", ")}   (every other country: off)`);
+  if (!policy.namespaceEnabled) {
+    console.log("  emergency brake ON (SPEED_CAMERA_NAMESPACE_ENABLED=false, blitzerEnabled=false or an unreadable signed config): every country is off");
+  } else {
+    const exceptions = Object.entries(policy.byCountry);
+    console.log(
+      exceptions.length === 0
+        ? `  every country: ${policy.defaultLevel}`
+        : `  every other country: ${policy.defaultLevel}; exceptions: ${exceptions.map(([c, l]) => `${c}=${l}`).join(", ")}; a camera without a known country: ${policy.unknownLevel}`,
+    );
+  }
 }
 
 async function main() {

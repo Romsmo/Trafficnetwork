@@ -75,7 +75,11 @@ export async function buildApp(deps: AppDependencies): Promise<FastifyInstance> 
   const cameraPolicy = await CameraPolicyService.load(deps.env, app.log);
   app.decorate("cameraPolicy", cameraPolicy);
   app.decorate("networkConfig", { getter: () => cameraPolicy.current().envelope });
-  app.addHook("onClose", async () => cameraPolicy.stop());
+  app.addHook("onClose", async () => {
+    cameraPolicy.stop();
+    // a rebuild of policy-stale package tiles started by a policy change must not outlive the server (or its database connection)
+    await getPackageService(deps.db, deps.env, app.log).idle();
+  });
 
   await app.register(cors, { origin: true });
   // global: false — only routes that opt in via `config: { rateLimit: {...} }`
@@ -116,7 +120,7 @@ export async function buildApp(deps: AppDependencies): Promise<FastifyInstance> 
   // Bring the static-data packages in line with the policy in force: now (a change made while the node was down) and on
   // every change while it runs. Only the tiles of countries whose level changed are marked.
   const logPolicySync = (result: Awaited<ReturnType<typeof syncCameraPolicy>>) => {
-    if (result.changedCountries.length > 0) app.log.info(result, "camera policy: static-data packages marked for rebuild");
+    if (result.tilesMarked > 0 || result.changedCountries.length > 0 || result.defaultChanged) app.log.info(result, "camera policy: static-data packages marked for rebuild");
     // A country got stricter: the packages of its tiles are not served until rebuilt, so start rebuilding now.
     if (result.staleTiles > 0) getPackageService(deps.db, deps.env, app.log, () => cameraPolicy.current()).kickPolicyRebuild();
   };

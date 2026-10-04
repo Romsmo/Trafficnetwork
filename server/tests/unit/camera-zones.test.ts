@@ -223,7 +223,7 @@ describe("projection: individual cameras and zones", () => {
 });
 
 describe("event classification (delta, WebSocket, federation)", () => {
-  const policy = policyOf({ DE: "full", FR: "zones" });
+  const policy = policyOf({ DE: "full", FR: "zones", CH: "off" });
   const cameraEvent = (countries: string[] | null, over: Record<string, unknown> = {}) => ({
     entityType: "fixedSpeedCamera",
     payload: { id: "x", type: "fixedSpeedCamera", position: { type: "Point", coordinates: [2.3522, 48.8566] } },
@@ -239,7 +239,7 @@ describe("event classification (delta, WebSocket, federation)", () => {
     expect(isCameraEvent({ entityType: "speedLimitSegment", payload: { type: "fixedSpeedCamera" } })).toBe(false);
   });
 
-  it("passes other events, delivers full, turns zones into a cell, withholds the rest", () => {
+  it("passes other events, delivers full, turns zones into a cell, withholds the rest (a restriction exists, so an unplaced camera is withheld)", () => {
     expect(classifyEvent(policy, { entityType: "hazardReport", payload: { type: "traffic" }, cameraCountries: null })).toEqual({ kind: "pass" });
     expect(classifyEvent(policy, cameraEvent(["DE"]))).toEqual({ kind: "item" });
     expect(classifyEvent(policy, cameraEvent(["FR"]))).toEqual({ kind: "zone", cell: zoneCellOf(48.8566, 2.3522, 6) });
@@ -260,5 +260,13 @@ describe("event classification (delta, WebSocket, federation)", () => {
     expect(mayLeaveNode(policy, camera(["CH"]))).toBe(false);
     expect(mayLeaveNode(policy, camera(null))).toBe(false);
     expect(mayLeaveNode(policy, { isCamera: false, cameraCountries: null })).toBe(true);
+  });
+
+  it("with no restriction at all a camera without a known country is delivered like any other", () => {
+    const open = policyOf({});
+    expect(classifyEvent(open, { entityType: "fixedSpeedCamera", payload: {}, cameraCountries: null })).toEqual({ kind: "item" });
+    expect(mayLeaveNode(open, { isCamera: true, cameraCountries: null })).toBe(true);
+    expect(mayLeaveNode(open, { isCamera: true, cameraCountries: [] })).toBe(true);
+    expect(individualItems(open, [camera(50, 10, null), camera(50, 10, [])])).toHaveLength(2);
   });
 });
