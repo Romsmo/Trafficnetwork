@@ -168,3 +168,10 @@ Konformitätstests darüber stehen noch aus — Einzelheiten in
 ## Danach / separate Projekte
 - [ ] Flutter-App (eigenes Projekt, startet erst wenn Backend steht)
 - [ ] ESP32-Firmware — bereits spezifiziert (`prompt-esp32-blitzer-display.md`), unverändert eigenständig
+
+## Zusatz Blitzer-Funktion länderabhängig
+
+- [x] Teil A (Server, `feature/camera-country-policy`): Länder-Politik `cameraPolicyByCountry` (off/zones/full), zentrale Ausliefer-Schicht, Zonen, Richtlinienwechsel ohne Neustart, Doku, Tests — gepusht, PR wartet auf Freigabe
+- [ ] Teil B (Web, `feature/camera-ui`): Kategorie nur bei Freigabe, Flächen statt Punkte bei `zones`, Rechtshinweis (`cameraPolicy.notice`)
+- [ ] Teil C (Client-Bibliothek, `feature/camera-policy`): Politik aus `GET /v1/config`, lokale Daten bei Verschärfung entfernen, Stufe + Hinweis in der öffentlichen API
+- [ ] Betreiber: rechtliche Prüfung je Land, Grenzdatensatz laden, Politik signieren — ohne das bleibt die Auslieferung leer (`server/docs/operating.md`, „Camera policy“)
