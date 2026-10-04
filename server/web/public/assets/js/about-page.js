@@ -31,6 +31,8 @@ function render() {
     ),
     h("section", { class: "card" }, h("h2", null, t("about.data.title")), h("p", null, t("about.data.body"))),
     h("section", { class: "card" }, h("h2", null, t("about.safety.title")), h("p", null, t("about.safety.body"))),
+    // The notice every visitor is shown once when they switch speed cameras on; here it stays for good.
+    h("section", { class: "card", id: "cameras" }, h("h2", null, t("about.cameras.title")), h("p", null, t("about.cameras.body")), h("p", null, t("about.cameras.region"))),
     h(
       "section",
       { class: "card", id: "privacy" },

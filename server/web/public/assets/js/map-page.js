@@ -1,14 +1,18 @@
 import { ApiClient } from "./api.js";
 import { loadWebConfig } from "./config.js";
 import { clear, h } from "./dom.js";
-import { selectableTypes, sortNewestFirst } from "./filter.js";
+import { readCameraPolicy } from "./camera-policy.js";
+import { CameraNotice } from "./camera-notice.js";
+import { anyCameraEnabled, isCameraType, selectableTypes, sortNewestFirst, zoneLatLngs } from "./filter.js";
 import { formatAge, formatKm, formatRemaining } from "./format.js";
 import { HazardLayer, reportLatLng } from "./hazard-layer.js";
 import { applyTranslations, currentTranslator, initI18n, onLangChange, t } from "./i18n.js";
 import { mountLayout } from "./layout.js";
 import { LimitsLayer, limitsStateText } from "./limits-layer.js";
 import { LiveConnection } from "./live.js";
+import { initialSelection, loadFilterPrefs, markNoticeSeen, noticeSeen, saveFilterPref } from "./prefs.js";
 import { describeSubmitFailure, ReportDialog } from "./report-dialog.js";
+import { ZoneLayer } from "./zone-layer.js";
 
 const L = window.L;
 const LIVE_K = 2;
@@ -26,10 +30,15 @@ const config = await loadWebConfig();
 mountLayout(config, "map");
 
 // What this node allows arrives while the map is already on screen; until then the general categories are assumed.
-let cameraEnabled = false;
+// The camera categories exist only where the node delivers camera data, and even then they start switched off: the visitor ticks them
+// themselves (and is told the legal position once). What they chose is remembered in this browser.
+let cameraAvailable = false;
+let zonesSomewhere = false;
+let noticeVersion = 1;
 let tileResolution = 7;
 let types = selectableTypes(false);
-const enabledTypes = new Set(types);
+const filterPrefs = loadFilterPrefs();
+const enabledTypes = initialSelection(types, filterPrefs);
 
 // ---- map -------------------------------------------------------------------------------------------------------
 const map = L.map("map", {
@@ -88,7 +97,10 @@ $("map").setAttribute("aria-label", t("map.aria"));
 
 // ---- hazards ---------------------------------------------------------------------------------------------------
 const hazards = new HazardLayer({ map, onVote: vote, onChange: () => renderList() });
-hazards.setFilter(enabledTypes, cameraEnabled);
+// Where a country shows cameras only as areas, the node delivers zones; they are drawn as areas, never as pins.
+const zones = new ZoneLayer({ map, onChange: () => renderList() });
+hazards.setFilter(enabledTypes, cameraAvailable);
+zones.setFilter(enabledTypes, cameraAvailable);
 
 let loadTicket = 0;
 let hazardAbort = null;
@@ -122,10 +134,12 @@ async function loadHazards({ force = false } = {}) {
   try {
     const query = { lat: center.lat.toFixed(6), lng: center.lng.toFixed(6), radiusM: radius };
     const requests = [api.get("/v1/hazard-reports/nearby", query, { signal: controller.signal })];
-    if (cameraEnabled) requests.push(api.get("/v1/speed-cameras/nearby", query, { signal: controller.signal }));
+    // Camera data is asked for only while the visitor has a camera category switched on.
+    if (cameraAvailable && anyCameraEnabled(enabledTypes)) requests.push(api.get("/v1/speed-cameras/nearby", query, { signal: controller.signal }));
     const results = await Promise.all(requests);
     if (ticket !== loadTicket) return;
     hazards.replaceAll([...(results[0].data.reports ?? []), ...(results[1]?.data.cameras ?? [])]);
+    zones.replaceAll(results[1]?.data.zones ?? []);
     $("list-status").textContent = "";
   } catch (error) {
     if (ticket !== loadTicket || error?.name === "AbortError") return;
@@ -148,9 +162,17 @@ function handleEvent(event) {
   if (event.entityType === "hazardReport") {
     if (event.type === "ReportExpired") hazards.remove(event.entityId ?? payload.id);
     else if (event.type === "ReportCreated" || event.type === "ReportConfirmed" || event.type === "ReportDenied") hazards.upsert({ ...payload, id: payload.id ?? event.entityId });
-  } else if (event.entityType === "fixedSpeedCamera" && cameraEnabled) {
+  } else if (event.entityType === "fixedSpeedCamera" && cameraAvailable) {
     if (event.type === "StaticDataRemoved") hazards.remove(event.entityId);
     else hazards.upsert({ ...payload, id: payload.id ?? event.entityId, type: "fixedSpeedCamera" });
+  } else if (event.entityType === "enforcementDevice" && cameraAvailable) {
+    // Red-light and distance devices: a persistent camera of its own kind (the payload names it in `type`).
+    if (event.type === "StaticDataRemoved") hazards.remove(event.entityId);
+    else hazards.upsert({ ...payload, id: payload.id ?? event.entityId });
+  } else if (event.entityType === "cameraZone" && cameraAvailable) {
+    // An area, not a camera: the node delivers it where it shows cameras only roughly.
+    if (event.type === "StaticDataRemoved") zones.remove(payload.id ?? event.entityId);
+    else zones.upsert({ ...payload, id: payload.id ?? event.entityId });
   }
 }
 
@@ -174,13 +196,18 @@ async function subscribeAroundCenter() {
 async function loadServerConfig() {
   try {
     const { data } = await api.get("/v1/config");
-    cameraEnabled = data?.speedCameraNamespaceEnabled === true;
+    const policy = readCameraPolicy(data);
+    cameraAvailable = policy.available;
+    zonesSomewhere = policy.hasZones;
+    noticeVersion = policy.noticeVersion;
     tileResolution = data?.regionTileH3Resolution ?? tileResolution;
-    types = selectableTypes(cameraEnabled);
-    for (const type of types) enabledTypes.add(type);
-    hazards.setFilter(enabledTypes, cameraEnabled);
+    types = selectableTypes(cameraAvailable);
+    enabledTypes.clear();
+    for (const type of initialSelection(types, filterPrefs)) enabledTypes.add(type);
+    hazards.setFilter(enabledTypes, cameraAvailable);
+    zones.setFilter(enabledTypes, cameraAvailable);
     renderFilters();
-    if (cameraEnabled) void loadHazards({ force: true });
+    if (cameraAvailable && anyCameraEnabled(enabledTypes)) void loadHazards({ force: true });
     void subscribeAroundCenter();
   } catch {
     $("map-status").textContent = t("map.session.error");
@@ -215,13 +242,39 @@ function renderFilters() {
   box.append(h("legend", null, tr.t("map.filters.title")));
   for (const type of types) {
     const input = h("input", { type: "checkbox", value: type, checked: enabledTypes.has(type) ? true : undefined });
-    input.addEventListener("change", () => {
-      if (input.checked) enabledTypes.add(type);
-      else enabledTypes.delete(type);
-      hazards.setFilter(enabledTypes, cameraEnabled);
-    });
+    input.addEventListener("change", () => onFilterChange(type, input.checked));
     box.append(h("label", null, input, h("span", null, tr.t(`type.${type}`))));
   }
+  if (cameraAvailable) {
+    // Where the node shows cameras only as areas, say so; the legal notice is always one link away.
+    box.append(
+      h(
+        "p",
+        { class: "hint filter-note" },
+        zonesSomewhere ? `${tr.t("map.filters.cameraZones")} ` : null,
+        h("a", { href: "/about#cameras" }, tr.t("cameraNotice.link")),
+      ),
+    );
+  }
+}
+
+const cameraNotice = new CameraNotice({ dialog: $("camera-notice") });
+
+function onFilterChange(type, on) {
+  const hadCameras = anyCameraEnabled(enabledTypes);
+  if (on) enabledTypes.add(type);
+  else enabledTypes.delete(type);
+  saveFilterPref(type, on);
+  hazards.setFilter(enabledTypes, cameraAvailable);
+  zones.setFilter(enabledTypes, cameraAvailable);
+  if (!isCameraType(type) || !on) return;
+  // The first time a visitor switches a camera category on: the legal position, once. The category is already on behind it.
+  if (!noticeSeen(noticeVersion)) {
+    markNoticeSeen(noticeVersion);
+    cameraNotice.show();
+  }
+  // Camera data was not loaded while every camera category was off.
+  if (!hadCameras) void loadHazards({ force: true });
 }
 
 let limitsState = { kind: "off" };
@@ -248,8 +301,9 @@ function renderList() {
     const ll = reportLatLng(report);
     return ll && bounds.contains(ll);
   }));
+  const areas = zones.visible.filter((zone) => zoneInView(zone, bounds));
   clear(list);
-  if (items.length === 0) {
+  if (items.length === 0 && areas.length === 0) {
     list.append(h("li", null, h("span", { class: "hint" }, tr.t("map.list.empty"))));
     return;
   }
@@ -263,6 +317,22 @@ function renderList() {
       ),
     );
   }
+  // Areas come after the reports: they have no age or lifetime, only the kinds of camera that are somewhere in them.
+  for (const zone of areas) {
+    list.append(
+      h(
+        "li",
+        null,
+        h("div", null, h("strong", null, tr.t("zone.listTitle")), h("div", { class: "meta" }, zones.describe(zone))),
+        h("button", { type: "button", class: "small", onclick: () => zones.focus(zone.id) }, tr.t("map.list.show")),
+      ),
+    );
+  }
+}
+
+function zoneInView(zone, bounds) {
+  const latlngs = zoneLatLngs(zone);
+  return latlngs ? L.latLngBounds(latlngs).intersects(bounds) : false;
 }
 
 // ---- votes and reports ------------------------------------------------------------------------------------------
@@ -281,9 +351,16 @@ async function vote(id, kind) {
 async function submitReport({ type, lat, lng }) {
   try {
     const { data } = await api.post("/v1/hazard-reports", { type, lat, lng });
+    // A camera the node does not show individually is answered "accepted" (202) — the same for a new and a merged one — with the
+    // area it falls in where the node shows areas. Nothing about it is drawn as a pin, and nothing says whether it was merged.
+    const hiddenByFilter = isCameraType(type) && !enabledTypes.has(type) ? { filterOffType: type } : {};
+    if (data.accepted) {
+      if (data.zone) zones.upsert(data.zone);
+      return { kind: "accepted", zone: Boolean(data.zone), ...hiddenByFilter };
+    }
     const created = data.report ?? data.camera;
     if (created) hazards.upsert(created);
-    return { kind: data.merged ? "merged" : "created" };
+    return { kind: data.merged ? "merged" : "created", ...hiddenByFilter };
   } catch (error) {
     return describeSubmitFailure(error);
   }

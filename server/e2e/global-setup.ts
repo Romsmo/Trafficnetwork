@@ -1,10 +1,15 @@
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { PostgreSqlContainer } from "@testcontainers/postgresql";
 import postgres from "postgres";
-import { INSTANCES, instanceUrl, type InstanceName } from "./instances.js";
+import { INSTANCES, instanceUrl, type Instance, type InstanceName } from "./instances.js";
 import { SEGMENTS } from "./seed.js";
+import { generateEd25519KeyPair } from "../src/modules/crypto/keys.js";
+import { signEnvelope } from "../src/modules/crypto/envelope.js";
+import type { NetworkConfigPayload } from "../src/modules/network/config.js";
 
 const serverDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const JWT_SECRET = "e2e-jwt-secret-e2e-jwt-secret-1234";
@@ -58,9 +63,32 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
   const databaseUrl = container.getConnectionUri();
   const children: ChildProcess[] = [];
 
+  const configDir = mkdtempSync(path.join(tmpdir(), "tn-e2e-config-"));
+
   const teardown = async () => {
     for (const child of children) child.kill();
     await container.stop();
+    rmSync(configDir, { recursive: true, force: true });
+  };
+
+  /** The signed network config of an instance with a camera policy; one throw-away root key for the whole run. */
+  const root = generateEd25519KeyPair();
+  const policyEnv = (name: InstanceName): Record<string, string> => {
+    const instance: Instance = INSTANCES[name];
+    if (!instance.policy) return {};
+    const file = path.join(configDir, `${name}.json`);
+    const payload: NetworkConfigPayload = {
+      version: 1,
+      blitzerEnabled: true,
+      cameraPolicyByCountry: instance.policy,
+      eventLogRetentionDaysDynamic: 3,
+      eventLogRetentionDaysStatic: 30,
+      minVersion: "0.1.0",
+      excludedNodeIds: [],
+      issuedAt: new Date().toISOString(),
+    };
+    writeFileSync(file, JSON.stringify(signEnvelope(payload, root)));
+    return { NETWORK_CONFIG_PATH: file, NETWORK_ROOT_PUBLIC_KEY: root.publicKeyRaw };
   };
 
   try {
@@ -74,6 +102,9 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
         const wkt = `LINESTRING(${segment.line.map(([lng, lat]) => `${lng} ${lat}`).join(", ")})`;
         await sql`insert into speed_limit_segments (geometry, speed_limit, speed_limit_unit, source) values (ST_SetSRID(ST_GeomFromText(${wkt}), 4326), ${segment.kmh}, 'kmh', 'e2e-seed')`;
       }
+      // The country the test town lies in. The server ships no geodata; the camera policy needs *some* country to apply to.
+      await sql`delete from country_boundary_parts`;
+      await sql`insert into country_boundary_parts (iso2, geom) values ('DE', ST_MakeEnvelope(11.0, 47.7, 12.2, 48.6, 4326))`;
       // The node derives its "region hint" (where the map opens) from the planner's spatial extent statistics.
       await sql`analyze speed_limit_segments`;
     } finally {
@@ -85,7 +116,7 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
         const output: string[] = [];
         const child = spawn(process.execPath, ["--import", "tsx", "src/server.ts"], {
           cwd: serverDir,
-          env: nodeEnv(databaseUrl, { ...INSTANCES[name].env, PORT: String(INSTANCES[name].port) }),
+          env: nodeEnv(databaseUrl, { ...INSTANCES[name].env, ...policyEnv(name), PORT: String(INSTANCES[name].port) }),
           stdio: ["ignore", "pipe", "pipe"],
         });
         child.stdout?.on("data", (chunk: Buffer) => output.push(chunk.toString()));

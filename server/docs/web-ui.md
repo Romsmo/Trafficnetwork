@@ -54,16 +54,35 @@ The Docker image contains the UI (`server/web` is copied into it); `docker-compo
   kept. Everything works without location permission.
 * **Confirm** — "still there" / "gone" on a marker. The page tells the truth about the outcome: counted, not counted (own
   report or already voted), or which limit was hit and when to retry.
-* **Camera categories** (fixed/mobile speed cameras, red-light, distance control) exist in the page **only when the node's
-  effective `speedCameraNamespaceEnabled` flag is on** (see `GET /v1/config`; the flag is already combined with the signed
-  network config). With the flag off there is no such filter, no such report category, no such marker, and the node neither
-  returns nor pushes such reports.
+* **Camera categories** (fixed/mobile speed cameras, trailer, red-light, distance control) are ordinary categories with a
+  filter like "Traffic jam" or "Ice" — with one difference: **the filter is off on the first visit**, so a first-time visitor
+  sees no camera until they switch one on. While every camera filter is off, the page does not even ask the node for cameras.
+  What the visitor switches on or off (any category) is remembered in the browser (see Privacy). How the page learns what the
+  node delivers (`GET /v1/config`, [`../docs/camera-country-policy.md`](../docs/camera-country-policy.md)):
+  * **Emergency brake pulled** (`SPEED_CAMERA_NAMESPACE_ENABLED=false`) or **every country at `off`** (e.g. the operator's
+    `CAMERA_POLICY_LOCAL_CAPS=*=off`): the category is **absent entirely** — no filter, no report type, no marker, and the
+    node neither returns nor pushes such reports. A choice remembered from another node is ignored.
+  * **Default (`full`)**: single spots (markers), like any other category.
+  * **A country at `zones`** (signed `cameraPolicyByCountry`): the node delivers a coarse **area** (a fixed H3 cell) instead of
+    spots there. The page draws it as an **area** (dashed, translucent, with the popup "approximate area — the exact place is
+    not shown"), never as a pin, and lists it next to the map for keyboard users. A note at the filters tells the visitor
+    that this node shows cameras only as areas in some countries.
+  * **A country at `off`** (but others delivered): the category exists, nothing is delivered for that country.
+  * **Legal notice:** when the visitor switches a camera category on for the first time, a dialog states that using
+    speed-camera warnings while driving is prohibited in several countries (in Germany also for passengers; in Switzerland even
+    hints are unlawful). It **informs, it does not ask**: one "Close" button, the category is already on behind it, no consent
+    wording. It is shown once (per notice version, which the node publishes as `cameraPolicy.notice.version`; changed wording
+    is shown again). The same text stands permanently on the **About** page (`/about#cameras`), linked from the filters.
+    The legal assessment — which countries to restrict, in particular Switzerland and France — is the operator's.
+  * **Reporting** works as for other categories, with the same limits. If the node only draws an area or nothing at that
+    spot (`202 {accepted:true}`), the dialog says so honestly instead of promising a marker, and tells the visitor when their
+    filter hides the new report.
 * **Connect** — three ways to use the network (own app with the client library, run your own node, call the API) with
   copyable `curl` examples containing this node's address, and the node's network status (node id, version, federation
   state, other known nodes). It points to the client library's integration guides (`client-lib/docs/`).
 * **About** — the project text, data sources, safety and privacy notice, and a prominent link to the project on GitHub.
 * **Online display** — a small "N online" at the bottom right of every page once the node offers the counter, see below.
-* German and English (browser language, switchable, remembered in `localStorage` — the only thing the page stores), mobile
+* German and English (browser language, switchable, remembered in `localStorage` together with the category selection), mobile
   friendly, keyboard operable, WCAG 2 A/AA checked automatically (light and dark mode).
 
 ## "N online" display (add-on O-B)
@@ -159,7 +178,9 @@ proxy). The proxy must forward the `Host` header (the CSP names this host for th
 
 ## Privacy
 
-No account, no cookies, nothing tracked. The page stores the chosen language in `localStorage`. Access logs contain no
+No account, no cookies, nothing tracked. The page stores in `localStorage` only: the chosen language (`tn-lang`), which categories
+the visitor switched on or off (`tn.filters.v1`), and which version of the camera notice they have seen (`tn.cameraNotice.v1`).
+None of it contains a position or a report, and none of it is sent to the node. Access logs contain no
 coordinates and no client addresses (`LOG_PRIVACY_MODE`; the About page tells visitors when an operator turned this off).
 The visitor's IP address is held in memory for the limits and never written to the database. A report stores only its spot,
 type and times. See [`docs/privacy.md`](../../docs/privacy.md) for the privacy notice draft (it is not legal advice; operators
@@ -202,13 +223,14 @@ Leaflet 1.9.4 (BSD-2-Clause) and `h3-js` are served from `node_modules` under `/
 
 | What | Command | Notes |
 |---|---|---|
-| Unit | `npm run test:unit` | i18n parity, guard/limits, CSP, static asset table, frontend helpers, the online display's reader and polling |
-| Integration | `npm run test:integration` | real PostGIS via Testcontainers: session, allowlist, limits, camera flag, WebSocket push, `WEB_UI_ENABLED=false` |
+| Unit | `npm run test:unit` | i18n parity, guard/limits, CSP, static asset table, frontend helpers, the online display's reader and polling, camera policy reader, remembered choices, areas, notice wording (`web-cameras.test.ts`) |
+| Integration | `npm run test:integration` | real PostGIS via Testcontainers: session, allowlist, limits, camera flag, camera levels as a browser sees them (`web-ui-cameras.test.ts`), WebSocket push, `WEB_UI_ENABLED=false` |
 | End-to-end | `npm run e2e` | real Chromium against real node processes and PostGIS (Testcontainers), `npx playwright install chromium` once |
 | Screenshots | `npm run e2e:screenshots` | regenerates `docs/web-ui/*` (needs internet: real map tiles) |
 
 The end-to-end suite checks, among others: nothing but the node and map tiles is requested, no CSP violation or console error,
 the map works without location permission and the position is requested only after a button press, report → marker → live
-update in a second browser → confirmation, speed limit on click, camera categories absent when the flag is off (and present
-when on), honest limit messages, `WEB_UI_ENABLED=false`, mobile width without horizontal scrolling, axe accessibility audits
+update in a second browser → confirmation, speed limit on click, camera categories absent when the brake is pulled or every country is off (`cameras.spec.ts`), present but **off on the first
+visit** otherwise, the notice shown once when one is ticked (and on the About page), the choice remembered, areas instead of
+spots at `zones`, nothing drawn at `off`, honest limit messages, `WEB_UI_ENABLED=false`, mobile width without horizontal scrolling, axe accessibility audits
 (light/dark), keyboard operation, and the loading/zooming behaviour described above. CI runs it as the `e2e` job.
