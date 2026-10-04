@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["core", "bindings/c-abi"]
+members = ["core", "bindings/c-abi", "bindings/wasm"]
 
 [workspace.package]
 version = "0.1.0"

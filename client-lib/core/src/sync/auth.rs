@@ -205,7 +205,8 @@ pub async fn device_token(
     parse_response(&response)
 }
 
-#[cfg(test)]
+// Native-only: uses `#[tokio::test]`, which needs a real tokio runtime.
+#[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests {
     use super::*;
     use crate::crypto::generate_ed25519_keypair;

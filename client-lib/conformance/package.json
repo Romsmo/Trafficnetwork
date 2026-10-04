@@ -1,0 +1,10 @@
+{
+  "name": "trafficnetwork-conformance",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Runners for conformance/scenarios.json that need npm packages (the browser run drives a real Chrome)",
+  "type": "module",
+  "devDependencies": {
+    "puppeteer-core": "^25.12.0"
+  }
+}

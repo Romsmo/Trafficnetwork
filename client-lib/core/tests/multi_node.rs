@@ -44,6 +44,11 @@
 //! fixing at the source, but this milestone makes no server changes
 //! (`docs/status.md`'s B2 note).
 
+// Native-only by nature (real HTTP against a harness on localhost, a tokio
+// runtime, `Platform::native`): `wasm-pack test` builds every integration
+// test target for wasm32 up front, where none of that exists.
+#![cfg(not(target_arch = "wasm32"))]
+
 use std::time::Duration;
 
 use serde_json::{json, Value};

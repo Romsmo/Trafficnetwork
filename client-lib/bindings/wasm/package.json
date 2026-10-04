@@ -1,0 +1,11 @@
+{
+  "name": "@trafficnetwork/client-web",
+  "version": "0.1.0",
+  "description": "Trafficnetwork client library for the browser — WebAssembly",
+  "license": "Apache-2.0",
+  "repository": "https://github.com/Romsmo/Trafficnetwork",
+  "type": "module",
+  "main": "js/index.js",
+  "types": "js/index.d.ts",
+  "private": true
+}
