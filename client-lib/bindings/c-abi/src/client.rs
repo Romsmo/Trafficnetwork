@@ -25,10 +25,9 @@ use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex, OnceLock};
 
-use serde_json::{json, Value};
 use tokio::runtime::Runtime;
 use trafficnetwork_core::api::{
-    code, ApiError, ClientOptions, Platform, SecureStore, TrafficNetworkClient,
+    code, error_envelope, panic_envelope, ApiError, SecureStore, TrafficNetworkClient,
 };
 
 fn runtime() -> &'static Runtime {
@@ -48,24 +47,6 @@ fn to_c_string(text: String) -> *mut c_char {
             CString::new(r#"{"error":{"code":"internal","message":"NUL byte in result"}}"#).unwrap()
         })
         .into_raw()
-}
-
-fn error_envelope(error: &ApiError) -> String {
-    json!({ "error": { "code": error.code, "message": error.message } }).to_string()
-}
-
-fn envelope(result: Result<Value, ApiError>) -> String {
-    match result {
-        Ok(value) => json!({ "ok": value }).to_string(),
-        Err(error) => error_envelope(&error),
-    }
-}
-
-fn panic_envelope() -> String {
-    error_envelope(&ApiError::new(
-        code::INTERNAL,
-        "the library hit an internal error (a panic)",
-    ))
 }
 
 /// Reads a C string argument; `None` for NULL or invalid UTF-8.
@@ -181,22 +162,9 @@ fn create(
     options_json: &str,
     secure_store: Option<Arc<dyn SecureStore>>,
 ) -> Result<Handle, ApiError> {
-    let value: Value = serde_json::from_str(options_json)
-        .map_err(|e| ApiError::new(code::INVALID_ARGUMENT, format!("options are not JSON: {e}")))?;
-    let storage_path = value
-        .get("storagePath")
-        .and_then(Value::as_str)
-        .ok_or_else(|| ApiError::new(code::INVALID_ARGUMENT, "options need a `storagePath`"))?
-        .to_string();
-    let options: ClientOptions = serde_json::from_value(value)
-        .map_err(|e| ApiError::new(code::INVALID_ARGUMENT, format!("options: {e}")))?;
-    let mut platform = Platform::native(&storage_path)?;
-    if let Some(store) = secure_store {
-        platform.secure_store = store;
-    }
     // reqwest needs a running runtime to build its client on some platforms.
     let _enter = runtime().enter();
-    let client = TrafficNetworkClient::new(options, platform)?;
+    let client = TrafficNetworkClient::open_native(options_json, secure_store)?;
     Ok(Handle {
         client: Arc::new(client),
         realtime_stop: Mutex::new(None),
@@ -302,26 +270,10 @@ pub unsafe extern "C" fn tn_client_free(client: *mut c_void) {
 // --------------------------------------------------------------------- calls
 
 fn run_call(client: &Arc<TrafficNetworkClient>, method: &str, args: &str) -> String {
-    let args: Value = if args.trim().is_empty() {
-        Value::Null
-    } else {
-        match serde_json::from_str(args) {
-            Ok(value) => value,
-            Err(e) => {
-                return error_envelope(&ApiError::new(
-                    code::INVALID_ARGUMENT,
-                    format!("arguments are not JSON: {e}"),
-                ))
-            }
-        }
-    };
     let result = catch_unwind(AssertUnwindSafe(|| {
-        runtime().block_on(client.call(method, args))
+        runtime().block_on(client.call_json(method, args))
     }));
-    match result {
-        Ok(result) => envelope(result),
-        Err(_) => panic_envelope(),
-    }
+    result.unwrap_or_else(|_| panic_envelope())
 }
 
 /// Runs one API method and returns its result — see the module documentation

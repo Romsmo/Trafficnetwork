@@ -1,0 +1,8 @@
+# Global UniFFI config for the plain-JVM generation (the conformance run); the
+# crate's own bindings/uniffi/uniffi.toml gives the package name. The Android
+# build (../android/uniffi.toml) differs in the one setting below.
+[crate-roots]
+trafficnetwork_uniffi = "../../uniffi"
+
+[defaults.bindings.kotlin]
+android = false

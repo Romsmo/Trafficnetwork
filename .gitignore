@@ -78,3 +78,20 @@ playwright-report/
 client-lib/bindings/c-abi/trafficnetwork.h
 # wasm-pack output (`wasm-pack build --out-dir pkg`) — a build artifact, rebuilt by CI.
 client-lib/bindings/wasm/pkg/
+client-lib/bindings/kotlin/*/generated/
+client-lib/bindings/kotlin/*/build/
+client-lib/bindings/kotlin/*/.gradle/
+client-lib/bindings/kotlin/android/src/main/jniLibs/
+client-lib/bindings/kotlin/*/.kotlin/
+client-lib/bindings/swift/TrafficNetworkFFI.xcframework/
+client-lib/bindings/swift/Sources/TrafficNetwork/*.swift
+client-lib/bindings/swift/build/
+client-lib/bindings/swift/.build/
+client-lib/bindings/swift/conformance/.build/
+client-lib/bindings/dart/.dart_tool/
+client-lib/bindings/dart/pubspec.lock
+client-lib/bindings/dart/rust/target/
+client-lib/bindings/swift/example/.build/
+client-lib/bindings/dart/example.out
+# Dart packages keep their executables in bin/ (ignored above for Go-style build output).
+!client-lib/bindings/dart/bin/

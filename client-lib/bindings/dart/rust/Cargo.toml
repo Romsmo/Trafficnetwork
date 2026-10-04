@@ -1,0 +1,33 @@
+[package]
+name = "trafficnetwork-dart"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+repository = "https://github.com/Romsmo/Trafficnetwork"
+publish = false
+
+# The native half of the Dart/Flutter package: the client API for
+# `flutter_rust_bridge`, which generates the Dart half (and this crate's
+# `src/frb_generated.rs`) from `src/api/`. `staticlib` is for iOS and macOS,
+# `cdylib` for Android, Linux and Windows.
+[lib]
+name = "trafficnetwork_dart"
+crate-type = ["cdylib", "staticlib"]
+
+[dependencies]
+trafficnetwork-core = { path = "../../../core" }
+# Exactly the version of `flutter_rust_bridge_codegen` that generated
+# `src/frb_generated.rs` (the generator and the runtime refuse to mix).
+flutter_rust_bridge = "=2.13.0"
+# The client API is async and reqwest needs a tokio runtime, so this crate
+# owns one, like the C ABI does — the core itself stays runtime-agnostic.
+tokio = { version = "1", features = ["rt-multi-thread", "sync"] }
+# Only to wait for the host's (asynchronous, Dart) secret store from inside
+# the core's synchronous secret-store seam.
+futures = { version = "0.3", default-features = false, features = ["std", "executor"] }
+serde_json = "1"
+
+# Its own workspace, apart from the library's: this crate's generated code
+# (`src/frb_generated.rs`) only exists once the generator has run, and
+# `cargo build --workspace` over the rest of the library must not depend on it.
+[workspace]

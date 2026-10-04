@@ -31,6 +31,12 @@ through the C ABI's `storagePath` option, `Platform::wasm` in the browser):
 | `ws` | `tokio-tungstenite` | the browser's own `WebSocket` | a custom socket stack (realtime push only) |
 | `sleep` | `tokio::time::sleep` | `setTimeout` | tests (a sleep that returns at once) |
 
+Native TLS (both `http` and `ws`) trusts the Mozilla root certificates bundled
+in the library, not the platform's own store — so the one library works the
+same on every platform, Android included (where the platform verifier would
+need extra setup in every app). A server whose certificate chains to a private
+authority is not trusted; a host app that needs that supplies its own `http`.
+
 What the browser can and cannot do differently is in `integration-web.md`.
 
 **`options`** (`ClientOptions`, all fields optional, `camelCase` JSON):
@@ -375,6 +381,38 @@ differs:
   see `integration-web.md`. The WebAssembly `Client` itself speaks the same
   `call(method, argsJson)` as the C ABI.
 
+### Kotlin, Swift
+
+`bindings/uniffi` — one UniFFI crate for both; the Kotlin and Swift that UniFFI
+generates from it is the whole binding (nothing is hand-written on top, so
+nothing can drift from this document). `TrafficNetworkClient(optionsJson,
+secureStore)` and:
+
+* `call(method, argsJson) -> resultJson` (blocks the calling thread; the call
+  itself runs on a library thread with an 8 MiB stack) and `callAsync(…)` (a
+  `suspend fun` in Kotlin, an `async` function in Swift);
+* `setEventListener(listener | null)` — `listener` implements `EventListener`;
+* `startRealtime()` / `stopRealtime()`;
+* releasing the last reference closes the client (Kotlin: `close()`, it is
+  `AutoCloseable`);
+* `SecureStore` — an interface the host implements (`get`, `set`, `delete`),
+  e.g. over the Android Keystore or the iOS Keychain;
+* `libraryVersion()`.
+
+Only the constructor throws (`ClientException.Failed` / `ClientError.Failed`,
+with `errorCode` and `detail`); every `call` reports its failures inside the
+result, as everywhere else. See `integration-android.md` and
+`integration-ios.md`.
+
+### Dart and Flutter
+
+`bindings/dart` — `flutter_rust_bridge` generates the Dart half from
+`rust/src/api/client.rs`; `lib/trafficnetwork.dart` adds typed methods over
+`call`. `TrafficNetworkClient.create(options, secureStore:)` is async,
+every method returns a `Future`, failures throw `TrafficNetworkException`,
+`client.events` is a `Stream`. The `SecureStore` the host implements is
+asynchronous (so `flutter_secure_storage` fits). See `integration-flutter.md`.
+
 ### Conformance
 
 `client-lib/conformance/scenarios.json` is the scenario set every binding is
@@ -386,9 +424,12 @@ three-way gate including a forged network configuration, a fully
 unreachable network, and the JSON-call error shapes. `run_python.py` was the
 first runner; `run_node.mjs` (Node.js over the C ABI) and `run_web.mjs` (the
 WebAssembly binding inside headless Chrome) share one environment-neutral
-scenario implementation, `scenario-runner.mjs`. A binding adds a runner
-alongside and the CI job that runs it (`.github/workflows/client-lib-ci.yml`'s
-`conformance-<language>` jobs).
+scenario implementation, `scenario-runner.mjs`. Kotlin, Swift and Dart run
+the same scenarios through `run_bridge.mjs`: each ships a small *bridge*
+program holding the real binding, which the one scenario implementation
+drives over stdin/stdout (`conformance/README.md`, "Bridges"), so the scenarios
+are not rewritten per language. A binding adds a runner alongside and the CI
+job that runs it (`.github/workflows/client-lib-ci.yml`).
 
 ## Network & privacy — what each server sees
 

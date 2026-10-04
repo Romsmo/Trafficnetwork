@@ -1,6 +1,12 @@
 [workspace]
 resolver = "2"
-members = ["core", "bindings/c-abi", "bindings/wasm"]
+members = [
+  "core",
+  "bindings/c-abi",
+  "bindings/wasm",
+  "bindings/uniffi",
+  "bindings/uniffi-bindgen",
+]
 
 [workspace.package]
 version = "0.1.0"

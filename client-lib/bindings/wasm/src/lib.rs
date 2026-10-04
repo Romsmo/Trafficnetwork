@@ -28,22 +28,12 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use futures_util::FutureExt;
-use serde_json::{json, Value};
+use serde_json::Value;
 use trafficnetwork_core::api::{
-    ApiError, ClientOptions, EventListener, Platform, SecureStore, TrafficNetworkClient,
+    error_envelope, panic_envelope, ApiError, ClientOptions, EventListener, Platform, SecureStore,
+    TrafficNetworkClient,
 };
 use wasm_bindgen::prelude::*;
-
-fn error_envelope(error: &ApiError) -> String {
-    json!({ "error": { "code": error.code, "message": error.message } }).to_string()
-}
-
-fn panic_envelope() -> String {
-    error_envelope(&ApiError::new(
-        trafficnetwork_core::api::code::INTERNAL,
-        "the library hit an internal error (a panic)",
-    ))
-}
 
 fn js_error(message: impl Into<String>) -> JsValue {
     JsValue::from_str(&error_envelope(&ApiError::new(
@@ -172,27 +162,10 @@ impl Client {
     /// rejected error for an ordinary API failure. `args_json` may be empty
     /// for a method that takes no arguments.
     pub async fn call(&self, method: String, args_json: String) -> String {
-        let args: Value = if args_json.trim().is_empty() {
-            Value::Null
-        } else {
-            match serde_json::from_str(&args_json) {
-                Ok(value) => value,
-                Err(e) => {
-                    return error_envelope(&ApiError::new(
-                        trafficnetwork_core::api::code::INVALID_ARGUMENT,
-                        format!("arguments are not JSON: {e}"),
-                    ))
-                }
-            }
-        };
-        let outcome = AssertUnwindSafe(self.inner.call(&method, args))
+        AssertUnwindSafe(self.inner.call_json(&method, &args_json))
             .catch_unwind()
-            .await;
-        match outcome {
-            Ok(Ok(value)) => json!({ "ok": value }).to_string(),
-            Ok(Err(error)) => error_envelope(&error),
-            Err(_) => panic_envelope(),
-        }
+            .await
+            .unwrap_or_else(|_| panic_envelope())
     }
 
     /// Keeps a WebSocket connection to the network open and applies pushed

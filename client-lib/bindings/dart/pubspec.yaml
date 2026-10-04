@@ -1,0 +1,15 @@
+name: trafficnetwork
+description: Client for the Trafficnetwork speed-limit and hazard network - local-first, with a native core (Rust) behind a typed Dart API. Works in Dart and Flutter.
+version: 0.1.0
+repository: https://github.com/Romsmo/Trafficnetwork
+publish_to: none
+
+environment:
+  sdk: ">=3.4.0 <4.0.0"
+
+dependencies:
+  flutter_rust_bridge: 2.13.0
+
+dev_dependencies:
+  lints: ^5.0.0
+  test: ^1.25.0
