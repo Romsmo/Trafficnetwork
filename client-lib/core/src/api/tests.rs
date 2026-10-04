@@ -1080,3 +1080,16 @@ async fn the_host_app_gets_the_levels_and_the_notice_through_the_api() {
     assert_eq!(policy["hostEnabled"], json!(false));
     assert_eq!(policy["active"], json!(false));
 }
+
+#[test]
+fn the_camera_display_is_off_unless_the_host_app_switches_it_on() {
+    assert!(!ClientOptions::default().camera_namespace_enabled);
+    let from_json: ClientOptions = serde_json::from_value(json!({ "nodes": [SERVER] })).unwrap();
+    assert!(!from_json.camera_namespace_enabled);
+    assert!(
+        !client(working_server(true))
+            .get_camera_policy()
+            .unwrap()
+            .host_enabled
+    );
+}

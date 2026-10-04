@@ -1,6 +1,6 @@
 name: trafficnetwork_flutter
 description: The Trafficnetwork client for Flutter apps on Android and iOS - the native library bundled, so adding the package is all an app does.
-version: 1.0.0
+version: 1.1.0
 repository: https://github.com/Romsmo/Trafficnetwork
 publish_to: none
 

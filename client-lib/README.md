@@ -4,7 +4,7 @@ Client-Sync-Bibliothek: einbettbarer, maximal portabler Adapter für beliebige A
 
 Zielplattformen: Android (Kotlin), iOS/macOS (Swift), Flutter (Dart), React Native, Desktop/Server über C-ABI (inkl. Python, Node.js), Web-Browser (WASM).
 
-**Status**: fertig, Version `1.0.0`. Der plattformunabhängige Kern (Kryptografie, Discovery/Failover, Sync-Engine mit echtem WebSocket-Push, Offline-Schreibpuffer, lokales Map-Matching, Tempolimit-Korrekturen, Online-Anzeige) ist gegen ein echtes Mehrknoten-Testnetz verifiziert, und **jede Zielplattform hat ihre Anbindung** — ein Kern, dünne Anbindungen, überall gleiches Verhalten, an einem gemeinsamen Szenariensatz über sechs Anbindungen gemessen (Python auf Linux/macOS/Windows, Node.js, WebAssembly, Kotlin, Swift, Dart):
+**Status**: fertig, Version `1.1.0` (`1.0.0` plus die Blitzer-Länderrichtlinie, siehe „Blitzer nach Land“ unten und `CHANGELOG.md`). Der plattformunabhängige Kern (Kryptografie, Discovery/Failover, Sync-Engine mit echtem WebSocket-Push, Offline-Schreibpuffer, lokales Map-Matching, Tempolimit-Korrekturen, Online-Anzeige) ist gegen ein echtes Mehrknoten-Testnetz verifiziert, und **jede Zielplattform hat ihre Anbindung** — ein Kern, dünne Anbindungen, überall gleiches Verhalten, an einem gemeinsamen Szenariensatz über sechs Anbindungen gemessen (Python auf Linux/macOS/Windows, Node.js, WebAssembly, Kotlin, Swift, Dart):
 
 | Plattform | Anbindung | Anleitung (mit nachbaubarem Minimalbeispiel) |
 |---|---|---|
@@ -170,11 +170,22 @@ Mit lokalem Rust: `cargo build --workspace` und `cargo test --workspace` in `cli
 - **Jede Zielplattform baut in CI:** Android (AAR), iOS/macOS (XCFramework, iOS Gerät/Simulator), Flutter (frisch erzeugte Apps für Android und iOS), React Native (Android und iOS), C-ABI auf Linux/macOS/Windows, Python, Node.js, WebAssembly.
 - **Paketierung als Build-Artefakte** (nichts veröffentlicht): C-ABI je Plattform, AAR, Swift-Paket + XCFramework, npm-Tarballs, Python-Wheel, Dart-Paket, Flutter-Plugin (Android + iOS), React-Native-Paket — der CI-Job `release-files` setzt sie mit Prüfsummen zusammen; `release.yml` hängt sie bei einem Tag `client-lib-v*` an ein GitHub-Release.
 
+## Blitzer nach Land
+
+Die Blitzer-Kategorien sind eine normale Kategorie — mit einer Länderrichtlinie darüber: je Land `full` (Einzelstandorte), `zones` (nur grobe Gefahrenbereiche) oder `off` (nichts), vom Betreiber signiert und vom Server je Kamera durchgesetzt (`server/docs/camera-country-policy.md`). Die Bibliothek (`core/src/sync/camera_policy.rs`):
+
+- liest `cameraPolicy` aus `GET /v1/config`, nimmt das Strengere aus dem Wort des Knotens und der **verifizierten** signierten Netzwerk-Konfiguration und liest alles Fehlende oder Unbekannte als `off`;
+- zeigt Zonen als Flächen (`NearbyItem` `cameraZone`), Einzelkameras nur, solange irgendein Land `full` ist, und gar nichts, solange die Notbremse an ist oder jede Stufe `off` ist — und nur, wenn die Host-App es eingeschaltet hat (`cameraNamespaceEnabled`, **standardmäßig aus**);
+- entfernt bei einer **Verschärfung** alles lokal Gespeicherte (Kameras, Zonen, Kamera-Meldungen), lädt die betroffenen Pakete neu und lernt die Live-Meldungen per Snapshot neu;
+- gibt der Host-App mit `getCameraPolicy()` die geltenden Stufen und den **Rechtshinweis** (Wortlaut des Knotens, sonst ein eingebauter deutscher und englischer Text), den sie beim ersten Einschalten einmal und sachlich zeigt.
+
+Grenzen: die Bibliothek kennt keine Landesgrenzen — welche Stufe eine Kamera hat, entscheidet der Server; das Land des Fahrers berücksichtigt keiner von beiden (`byCountry` steht der Host-App dafür zur Verfügung). Ob und wo ein Land eingeschränkt wird, ist eine rechtliche Entscheidung des Betreibers, keine der Bibliothek. Referenz: [`docs/api.md`](docs/api.md), „The camera namespace and the country policy“.
+
 ## Was noch fehlt
 
 Nichts, was der ursprüngliche Auftrag zugesagt hat. Was nie zugesagt war und bewusst nicht Teil dieser Version ist:
 
-- **Veröffentlichung in Paketregistern** (npm, Maven, pub.dev, CocoaPods): die Pakete sind `"private"` bzw. `publish_to: none`, bis das jemand ausdrücklich freigibt. Das GitHub-Release selbst wird erst mit dem Tag `client-lib-v1.0.0` ausgelöst — auch das ist eine eigene Freigabe.
+- **Veröffentlichung in Paketregistern** (npm, Maven, pub.dev, CocoaPods): die Pakete sind `"private"` bzw. `publish_to: none`, bis das jemand ausdrücklich freigibt. Das GitHub-Release selbst wird erst mit dem Tag `client-lib-v1.1.0` ausgelöst — auch das ist eine eigene Freigabe.
 - **Flutter-Plugin für Desktop:** gebündelt sind Android und iOS; auf Desktop gibt man `initialize(libraryPath: …)` den Pfad einer selbst gebauten Bibliothek.
 
 Offen benannt statt verschwiegen — nicht zugesagt, aber wichtig zu wissen (jeweils im Detail in der Anleitung der Plattform): *ausgeführt* wird nur die Flutter-App auf einem Android-Emulator; Kotlin/Android, Swift/iOS und React Native werden gebaut und gelinkt, aber nicht auf Gerät, Emulator oder iOS-Simulator ausgeführt (die Konformität läuft für Kotlin auf der JVM und für Swift auf macOS, mit derselben Rust-Bibliothek und demselben erzeugten Code); das React-Native-JSI-Zwischenstück läuft in keinem Test; alle Tests laufen gegen `http://`-Mocks, ein echter TLS-Handshake ist nirgends getestet.

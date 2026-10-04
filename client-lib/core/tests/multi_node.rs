@@ -641,18 +641,18 @@ async fn a_country_policy_reaches_the_client_and_a_tightening_removes_what_it_he
     let policy = germany.get_camera_policy().unwrap();
     assert!(policy.active && policy.enabled);
     assert_eq!(policy.max_level, CameraLevel::Full);
-    assert_eq!(policy.by_country.get("DE"), Some(&CameraLevel::Full));
-    assert_eq!(policy.by_country.get("FR"), Some(&CameraLevel::Zones));
     // A country the node does not list has the default level (a country at
-    // `off` is simply not listed).
-    assert_eq!(
+    // the default is simply not listed).
+    let level_of = |country: &str| {
         policy
             .by_country
-            .get("CH")
+            .get(country)
             .copied()
-            .unwrap_or(policy.default_level),
-        CameraLevel::Off
-    );
+            .unwrap_or(policy.default_level)
+    };
+    assert_eq!(level_of("DE"), CameraLevel::Full);
+    assert_eq!(level_of("FR"), CameraLevel::Zones);
+    assert_eq!(level_of("CH"), CameraLevel::Off);
     assert!(!policy.notice.text.is_empty());
 
     // The operator cuts Germany to zones. The node reloads its policy without
@@ -672,9 +672,14 @@ async fn a_country_policy_reaches_the_client_and_a_tightening_removes_what_it_he
         Duration::from_secs(30),
     )
     .await;
+    let tightened = germany.get_camera_policy().unwrap();
     assert_eq!(
-        germany.get_camera_policy().unwrap().by_country.get("DE"),
-        Some(&CameraLevel::Zones)
+        tightened
+            .by_country
+            .get("DE")
+            .copied()
+            .unwrap_or(tightened.default_level),
+        CameraLevel::Zones
     );
 
     harness.stop_node(&node).await;
