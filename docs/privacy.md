@@ -14,7 +14,7 @@ Stand / as of: 2026-09-24 · gilt für / applies to `server/web` (Weboberfläche
 ### Was die Seite technisch tut
 
 * **Kein Konto, keine Anmeldung, keine Cookies, kein Tracking, keine Analyse-Dienste, keine externen Schriftarten oder Skripte.**
-* Gespeichert wird im Browser nur die gewählte **Sprache** (`localStorage`, Schlüssel `tn-lang`).
+* Gespeichert wird im Browser nur die gewählte **Sprache** (`localStorage`, Schlüssel `tn-lang`), deine **Auswahl der Kategorien** (`tn.filters.v1`) und ob du den **Blitzer-Hinweis** schon gesehen hast (`tn.cameraNotice.v1`). Das enthält keine Position und keine Meldung und wird nicht an den Server gesendet.
 * Beim Öffnen der Karte erhält der Browser eine **anonyme, zufällige Sitzung** (ein Token, das nur im Arbeitsspeicher der Seite
   liegt und nach kurzer Zeit — standardmäßig 15 Minuten — verfällt). Sie ist nicht mit früheren Sitzungen oder mit dir
   verknüpft und wird nicht in der Datenbank gespeichert.
@@ -48,7 +48,7 @@ Abschnitt 8).
 ### What the page does technically
 
 * **No account, no sign-in, no cookies, no tracking, no analytics, no external fonts or scripts.**
-* The browser only stores the chosen **language** (`localStorage`, key `tn-lang`).
+* The browser only stores the chosen **language** (`localStorage`, key `tn-lang`), your **category selection** (`tn.filters.v1`) and whether you have already seen the **speed-camera notice** (`tn.cameraNotice.v1`). This contains no position and no report and is not sent to the server.
 * Opening the map gives your browser an **anonymous, random session** (a token held only in the page's memory that expires
   after a short time — 15 minutes by default). It is not linked to earlier sessions or to you and is not stored in the database.
 * **Location:** the page asks for your location **only** if you press a button for it ("My location", "Use my location"); the

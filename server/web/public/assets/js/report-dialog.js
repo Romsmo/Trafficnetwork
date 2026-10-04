@@ -60,7 +60,7 @@ export class ReportDialog {
     const s = this.#state;
     if (!s) return;
     const tr = currentTranslator();
-    const succeeded = s.result && (s.result.kind === "created" || s.result.kind === "merged");
+    const succeeded = s.result && (s.result.kind === "created" || s.result.kind === "merged" || s.result.kind === "accepted");
 
     const typeChoices = s.types.map((type, index) =>
       h(
@@ -116,6 +116,11 @@ export class ReportDialog {
         text = tr.t("reportDialog.result.merged");
         ok = true;
         break;
+      case "accepted":
+        // A speed-camera report the node does not show as a single spot (it shows areas, or nothing, for that country).
+        text = tr.t(result.zone ? "reportDialog.result.acceptedZone" : "reportDialog.result.acceptedHidden");
+        ok = true;
+        break;
       case "rateLimited":
         text = tr.t("reportDialog.result.rateLimited", { scope: tr.t(`scope.${result.scope}`), minutes: result.minutes });
         break;
@@ -128,6 +133,8 @@ export class ReportDialog {
       default:
         text = tr.t("reportDialog.result.error");
     }
+    // A report in a category the visitor has switched off would be invisible to them: say how to see it.
+    if (ok && result.filterOffType) text = `${text} ${tr.t("reportDialog.result.filterOff", { type: tr.t(`type.${result.filterOffType}`) })}`;
     return h("p", { class: `result ${ok ? "ok" : "bad"}`, role: "status", "aria-live": "polite" }, text);
   }
 

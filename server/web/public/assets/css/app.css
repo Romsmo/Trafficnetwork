@@ -185,6 +185,7 @@ dl.facts dd { margin: 0; overflow-wrap: anywhere; }
 .filters { display: flex; flex-wrap: wrap; gap: 6px 14px; margin: 0; padding: 0; border: 0; }
 .filters label { display: inline-flex; align-items: center; gap: 6px; min-height: 32px; }
 .filters legend { font-weight: 600; padding: 0; margin-bottom: 4px; }
+.filters .filter-note { flex-basis: 100%; margin: 0; }
 .layer-toggle { display: flex; align-items: center; gap: 8px; margin-top: 8px; min-height: 32px; }
 .hint { color: var(--muted); font-size: 0.9rem; }
 ul.report-list { list-style: none; margin: 0; padding: 0; }
@@ -241,6 +242,11 @@ dialog legend { font-weight: 600; padding: 0 6px; }
 .result { padding: 8px 10px; border-radius: var(--radius); border: 1px solid var(--line); }
 .result.ok { border-color: var(--ok); color: var(--ok); }
 .result.bad { border-color: var(--danger); color: var(--danger); }
+
+/* speed-camera notice (informs, does not ask for consent) and camera areas */
+dialog .notice-box { padding: 16px 18px; display: grid; gap: 12px; }
+dialog .notice-box p { margin: 0; }
+path.cam-zone:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
 
 .visually-hidden { position: absolute !important; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 

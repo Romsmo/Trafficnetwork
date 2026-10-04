@@ -6,7 +6,7 @@ import { nearCenter } from "./seed.js";
 const CAMERA_LABELS = ["Feste Blitzer", "Mobile Kontrolle", "Anhänger-Kontrolle", "Rotlicht-Kontrolle", "Abstandskontrolle"];
 
 test.describe("speed-camera categories follow the node's flag", () => {
-  test("flag off: no camera category anywhere in the UI, and the API refuses them for web visitors", async ({ page, request }) => {
+  test("brake pulled: no camera category anywhere in the UI, and the API refuses them for web visitors", async ({ page, request }) => {
     const node = instanceUrl("main");
     await watchTraffic(page, node);
     await openMap(page, node);
@@ -31,7 +31,7 @@ test.describe("speed-camera categories follow the node's flag", () => {
     expect(config.speedCameraNamespaceEnabled).toBe(false);
   });
 
-  test("flag on: the categories appear, can be reported, and show up as camera markers", async ({ page }) => {
+  test("brake released: the categories appear (switched off at first), can be reported, and show up as camera markers once ticked", async ({ page }) => {
     const node = instanceUrl("cameras");
     await watchTraffic(page, node);
     await openMap(page, node);
@@ -43,10 +43,16 @@ test.describe("speed-camera categories follow the node's flag", () => {
     await submitReportDialog(page, "Mobile Kontrolle");
     await expect(page.locator("#report-dialog .result.ok")).toBeVisible();
     await page.locator("#report-dialog").getByRole("button", { name: "Schließen" }).click();
-    await expect(page.locator(".hz-icon.camera")).toHaveCount(1);
+    // The filter is off on a first visit, so the new report is not on the map yet ...
+    await expect(page.locator(".hz-icon.camera")).toHaveCount(0);
+    // ... until the visitor switches the category on (which shows the legal notice once).
+    await filters.getByRole("checkbox", { name: "Mobile Kontrolle", exact: true }).check();
+    await expect(page.locator("#camera-notice")).toBeVisible();
+    await page.locator("#camera-notice").getByRole("button", { name: "Schließen", exact: true }).click();
+    await expect(page.locator(".hz-icon.camera.type-mobileSpeedCamera").first()).toBeVisible();
   });
 
-  test("flag off: a camera report made on a node where it is on stays invisible (REST and live)", async ({ page, request }) => {
+  test("brake pulled: a camera report made on a node where it is on stays invisible (REST and live)", async ({ page, request }) => {
     // Same database, two nodes: the operator of "main" did not release the camera namespace, so its UI must not learn about it.
     await reportViaApi(request, instanceUrl("cameras"), { type: "trailerCamera", ...nearCenter(0.001, 0.001) });
     const node = instanceUrl("main");
