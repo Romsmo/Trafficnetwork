@@ -171,7 +171,7 @@ Konformitätstests darüber stehen noch aus — Einzelheiten in
 
 ## Zusatz Blitzer-Funktion länderabhängig
 
-- [x] Teil A (Server, `feature/camera-country-policy`): Länder-Politik `cameraPolicyByCountry` (off/zones/full), zentrale Ausliefer-Schicht, Zonen, Richtlinienwechsel ohne Neustart, Doku, Tests — gepusht, PR wartet auf Freigabe
-- [ ] Teil B (Web, `feature/camera-ui`): Kategorie nur bei Freigabe, Flächen statt Punkte bei `zones`, Rechtshinweis (`cameraPolicy.notice`)
-- [ ] Teil C (Client-Bibliothek, `feature/camera-policy`): Politik aus `GET /v1/config`, lokale Daten bei Verschärfung entfernen, Stufe + Hinweis in der öffentlichen API
-- [ ] Betreiber: rechtliche Prüfung je Land, Grenzdatensatz laden, Politik signieren — ohne das bleibt die Auslieferung leer (`server/docs/operating.md`, „Camera policy“)
+- [x] Teil A (Server, `feature/camera-country-policy`): Blitzer freigeschaltet, Standard `full` je Land, Notbremse `SPEED_CAMERA_NAMESPACE_ENABLED` Standard `true`; Länder-Ausnahmen `cameraPolicyByCountry` (`zones`/`off`), zentrale Ausliefer-Schicht, Zonen, Richtlinienwechsel ohne Neustart, Doku, Tests — gepusht, PR wartet auf Freigabe
+- [ ] Teil B (Web, `feature/camera-ui`): Kategorien mit Filter, beim ersten Besuch aus; Fläche statt Nadel bei `zones`; Kategorie fehlt bei `off`; Rechtshinweis beim Anhaken (`cameraPolicy.notice`)
+- [ ] Teil C (Client-Bibliothek, `feature/camera-policy`): Politik aus `GET /v1/config`, lokale Daten bei Verschärfung entfernen, Stufe + Hinweis in der öffentlichen API, Host-Option „Blitzer anzeigen“ Standard aus
+- [ ] Betreiber: rechtliche Einschätzung je Land (Schweiz, Frankreich zuerst), ggf. Grenzdatensatz laden und Einschränkungen signieren (`server/docs/operating.md`, „Camera policy“); `docs/launch-checklist.md` Punkt 7 anpassen
