@@ -12,6 +12,7 @@ import {
   type DeviceCreateEventPayload,
 } from "./device-event.js";
 import type { appendEvent } from "../../db/append-event.js";
+import { isUniqueViolation } from "../../lib/pg-errors.js";
 
 /**
  * `invalid_signature` is singled out from the other rejection reasons
@@ -113,7 +114,7 @@ export async function ingestDeviceCreateEvent(
     // UNIQUE constraint on federation_event_id is the real guard; losing that
     // race aborts this transaction (Postgres SQLSTATE 23505), which we treat
     // as "someone else just inserted it" rather than a real failure.
-    if (err && typeof err === "object" && "code" in err && (err as { code?: string }).code === "23505") {
+    if (isUniqueViolation(err)) {
       return { status: "duplicate", federationEventId };
     }
     throw err;
