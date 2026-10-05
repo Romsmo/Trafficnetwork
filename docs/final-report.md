@@ -8,7 +8,7 @@ Stand: 2026-10-05. Der Bericht hat drei Teile: was fertig und benutzbar ist, was
 |---|---|---|
 | `server/` (mit eingebauter Weboberfläche) | **1.0.0** | Release `server-v1.0.0`, Image `ghcr.io/romsmo/trafficnetwork-server:1.0.0` (privat). `main` enthält danach die Länder-Politik für Blitzer, die Serialisierungs-Korrektur und die Weboberfläche dazu; ein neues Server-Release (Image mit diesen Änderungen) ist noch nicht geschnitten. |
 | `ingestion/` | **0.2.0** | Release `ingestion-v0.2.0`; bewusst kein 1.0 (Quellenkatalog in Bewegung, mehrere Quellen ohne geklärte Lizenz abgeschaltet). |
-| `client-lib/` | **1.1.0** im Code | Kern plus Anbindungen für C/C++, Python, Node.js, Browser (WebAssembly), Android, iOS/macOS, Flutter und React Native, derselbe Szenariensatz über alle. Release/Tag siehe Schlussmeldung. |
+| `client-lib/` | **1.1.0**, Release [`client-lib-v1.1.0`](https://github.com/Romsmo/Trafficnetwork/releases/tag/client-lib-v1.1.0) (13 Artefakte + `checksums.txt`, von mir nachgeprüft: `sha256sum -c` ok) | Kern plus Anbindungen für C/C++, Python, Node.js, Browser (WebAssembly), Android, iOS/macOS, Flutter und React Native, derselbe Szenariensatz über alle. |
 
 Benutzbar heißt: Ein Fremder kann den Server mit zwei Einträgen in `.env` und einem `docker compose up -d` starten, hat sofort Weboberfläche und API, kann Zugangsdaten anlegen (Anleitung in `server/docs/installation.md`) und mit einer der Bibliotheken Daten holen, melden, bestätigen und offline nachreichen. Föderation, Reputation, signierte Daten, Europa-Maßstab, Tempolimit-Korrekturen, dauerhafte Anlagen (Rotlicht/Abstand) und die „aktuell online"-Anzeige sind eingebaut und getestet.
 
