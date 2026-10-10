@@ -1,6 +1,8 @@
 import type { FastifyInstance } from "fastify";
 import { getStaticDataVersion } from "../../db/queries/sync-state.js";
-import { CAMERA_NAMESPACE_TYPES, hazardExpiryMs, PERSISTENT_CAMERA_TYPES, REPORTABLE_HAZARD_TYPES } from "../../config/constants.js";
+import { CAMERA_NAMESPACE_TYPES, PERSISTENT_CAMERA_TYPES, REPORTABLE_HAZARD_TYPES } from "../../config/constants.js";
+import { describeReportExpiry } from "../../config/report-expiry.js";
+import { currentReportExpiry } from "../expiry/rules.js";
 import { describePolicy } from "../cameras/policy/policy.js";
 
 /**
@@ -13,8 +15,11 @@ export async function registerConfigRoutes(app: FastifyInstance) {
   app.get("/v1/config", async () => {
     const env = app.deps.env;
     const cameraPolicy = app.cameraPolicy.current();
+    // One source: the rules in force on this node (signed network configuration applied), the same ones the report
+    // endpoints use. `hazardExpiryMsByType` keeps its shape for clients that predate `reportExpiry`.
+    const expiryRules = currentReportExpiry(app);
     const expiryByType = Object.fromEntries(
-      REPORTABLE_HAZARD_TYPES.map((type) => [type, hazardExpiryMs(type, env)]),
+      REPORTABLE_HAZARD_TYPES.map((type) => [type, expiryRules[type].defaultSeconds * 1000]),
     );
 
     return {
@@ -33,6 +38,11 @@ export async function registerConfigRoutes(app: FastifyInstance) {
       duplicateMergeRadiusMeters: env.DUPLICATE_MERGE_RADIUS_METERS,
       speedLimitLookupMaxDistanceMeters: env.SPEED_LIMIT_LOOKUP_MAX_DISTANCE_METERS,
       hazardExpiryMsByType: expiryByType,
+      // Per type: the duration a report gets by default and the bounds a reporter may ask for with `expiresInSeconds`.
+      // A server that predates the feature has no such key — that is how a client tells them apart (the default applies).
+      reportExpiry: describeReportExpiry(expiryRules),
+      // Distinct devices calling a temporary camera report "gone" that end it early (node-local, see report-expiry.md).
+      cameraReportGoneThreshold: env.HAZARD_GONE_THRESHOLD_CAMERA,
       reportRateLimitMax: env.REPORT_RATE_LIMIT_MAX,
       reportRateLimitWindowMinutes: env.REPORT_RATE_LIMIT_WINDOW_MINUTES,
       cameraRemovalThreshold: env.CAMERA_REMOVAL_THRESHOLD,

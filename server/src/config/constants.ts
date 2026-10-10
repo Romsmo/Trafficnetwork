@@ -1,5 +1,3 @@
-import type { Env } from "./env.js";
-
 /**
  * HazardType enum, fixed order per docs/concept.md section 3.2 ("Reihenfolge nicht
  * ändern, nur anhängen"). fixedSpeedCamera is accepted as an input classification on
@@ -51,41 +49,7 @@ export const NON_CAMERA_HAZARD_TYPES = REPORTABLE_HAZARD_TYPES.filter(
 /** The four camera-adjacent types actually stored as hazard_reports rows (excludes fixedSpeedCamera, which lives in its own table). */
 export const DYNAMIC_CAMERA_TYPES = CAMERA_NAMESPACE_TYPES.filter((t) => t !== "fixedSpeedCamera");
 
-type ExpiryBand = "short" | "medium" | "construction";
-
-const EXPIRY_BAND_BY_TYPE: Record<Exclude<HazardType, "fixedSpeedCamera">, ExpiryBand> = {
-  mobileSpeedCamera: "short",
-  trailerCamera: "short",
-  redLightCamera: "short",
-  distanceControl: "short",
-  traffic: "medium",
-  ice: "medium",
-  accident: "medium",
-  breakdown: "medium",
-  obstacle: "medium",
-  construction: "construction",
-};
-
-/**
- * Base time-to-live for a freshly created (or re-confirmed) hazard report, per
- * docs/concept.md section 3.2. A "stillThere" confirmation resets expiresAt to
- * now + this duration rather than adding a fixed increment — simplest rule that
- * satisfies "Verlängerung durch Bestätigung" without inventing a second constant.
- */
-export function hazardExpiryMs(type: Exclude<HazardType, "fixedSpeedCamera">, env: Env): number {
-  const band = EXPIRY_BAND_BY_TYPE[type];
-  switch (band) {
-    case "short":
-      return env.HAZARD_EXPIRY_SHORT_MINUTES * 60_000;
-    case "medium":
-      return env.HAZARD_EXPIRY_MEDIUM_MINUTES * 60_000;
-    case "construction":
-      return env.HAZARD_EXPIRY_CONSTRUCTION_DAYS * 24 * 60 * 60_000;
-  }
-}
-
-/** construction is the only band with no automatic-expiry test expectation beyond its long default. */
-export const AUTO_EXPIRING_BANDS: readonly ExpiryBand[] = ["short", "medium", "construction"];
+// How long each type lives and what a reporter may ask for (default, minimum, maximum): config/report-expiry.ts.
 
 /**
  * Device kinds stored in fixed_speed_cameras (add-on D, docs/persistent-enforcement-devices.md):

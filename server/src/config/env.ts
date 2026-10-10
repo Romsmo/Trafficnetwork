@@ -2,6 +2,10 @@ import { z } from "zod";
 import { isAcceptableFederationAddress } from "../modules/federation/address.js";
 import { DEFAULT_MAP_TILE_URL, isAcceptableTileUrl } from "../modules/web/tile.js";
 import { CameraPolicyError, parseLocalCaps } from "../modules/cameras/policy/levels.js";
+import { parseExpiryOverrides } from "./report-expiry.js";
+
+/** An integer > 0, or unset — an empty string (a blank line in an env file or compose file) counts as unset. */
+const optionalPositiveInt = z.preprocess((v) => (v === "" ? undefined : v), z.coerce.number().int().positive().optional());
 
 const envSchema = z.object({
   DATABASE_URL: z.string().min(1, "DATABASE_URL is required"),
@@ -41,12 +45,36 @@ const envSchema = z.object({
   SPEED_KMH_MIN: z.coerce.number().int().nonnegative().default(0),
   SPEED_KMH_MAX: z.coerce.number().int().positive().default(300),
 
-  // Base expiry durations per docs/concept.md section 3.2. Hazard types are grouped
-  // into the same three bands the concept doc's table uses, rather than one env var
-  // per type, to avoid an unwieldy number of knobs for what is fundamentally one table.
-  HAZARD_EXPIRY_SHORT_MINUTES: z.coerce.number().int().positive().default(12),
+  // Base expiry durations (docs/concept.md section 3.2, server/docs/report-expiry.md). The built-in table in
+  // config/report-expiry.ts is the default; the variables below are an isolated node's own override, and the signed
+  // network configuration (`reportExpiry`) beats all of them. There is one effective value per type and field.
+  //
+  // Legacy band variables, kept. SHORT now applies to redLightCamera and distanceControl only (default 12 min); the mobile
+  // check (default 3 h) and the trailer (default 14 d) have their own variables below, because every .env copied from the
+  // old .env.example sets SHORT to 12 and that must not shorten them.
+  HAZARD_EXPIRY_SHORT_MINUTES: optionalPositiveInt,
   HAZARD_EXPIRY_MEDIUM_MINUTES: z.coerce.number().int().positive().default(25),
   HAZARD_EXPIRY_CONSTRUCTION_DAYS: z.coerce.number().int().positive().default(7),
+  // Per-type defaults for the temporary speed enforcement.
+  HAZARD_EXPIRY_MOBILE_SPEED_CAMERA_MINUTES: optionalPositiveInt,
+  HAZARD_EXPIRY_TRAILER_CAMERA_DAYS: optionalPositiveInt,
+  // JSON, same shape as the signed network configuration's `reportExpiry`:
+  // { "<type>": { "defaultSeconds"?, "minSeconds"?, "maxSeconds"? } }. Validated at startup: an unreadable value stops
+  // the start instead of being half-applied.
+  REPORT_EXPIRY_OVERRIDES: z
+    .string()
+    .optional()
+    .superRefine((value, ctx) => {
+      if (value === undefined || value.trim() === "") return;
+      try {
+        parseExpiryOverrides(JSON.parse(value), "REPORT_EXPIRY_OVERRIDES");
+      } catch (err) {
+        ctx.addIssue({ code: "custom", message: err instanceof Error ? err.message : String(err) });
+      }
+    }),
+  // Distinct devices that must report a temporary camera (a mobile, trailer, red-light or distance *report*) as "gone",
+  // and at least as many as confirmed it, before the report ends early. Votes are node-local (not federated).
+  HAZARD_GONE_THRESHOLD_CAMERA: z.coerce.number().int().positive().default(2),
 
   // Distinct-reporter "this fixed camera is gone" votes needed before it's marked
   // removed (docs/concept.md section 8: "nur durch gehäufte 'nicht mehr da'-
