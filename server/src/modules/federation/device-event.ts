@@ -27,6 +27,12 @@ export interface DeviceCreateEventPayload {
   lat: number;
   lng: number;
   speedKmh?: number;
+  /**
+   * How long the device wants the report to live (optional, additive since server 1.1.0). Signed with the rest, so every
+   * node that accepts the report derives `expiresAt = timestamp + expiresInSeconds` — or the type's default without it.
+   * A node older than 1.1.0 ignores the field and applies its own default.
+   */
+  expiresInSeconds?: number;
   /** The signing device's own Ed25519 public key — self-certifying, so any receiving server can verify without prior knowledge of this device. */
   devicePublicKey: string;
   timestamp: string;

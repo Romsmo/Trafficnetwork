@@ -5,6 +5,7 @@ import { loadEnv } from "./config/env.js";
 import { createDb } from "./db/client.js";
 import { startExpiryWorker } from "./modules/expiry/worker.js";
 import { startRetentionWorker } from "./modules/expiry/retention.js";
+import { currentReportExpiry } from "./modules/expiry/rules.js";
 import { startFederationWorkers, type FederationWorkersHandle } from "./modules/federation/workers.js";
 import { startStaticPackageWorker } from "./modules/static-data/package-worker.js";
 
@@ -17,7 +18,7 @@ async function main() {
   const expiryWorker = startExpiryWorker(db, app.log, app.realtime);
   const retentionWorker = startRetentionWorker(db, env, app.log);
   const federationWorkers: FederationWorkersHandle | null = env.FEDERATION_ENABLED
-    ? startFederationWorkers({ db, env, nodeIdentity: app.nodeIdentity, realtime: app.realtime, log: app.log, online: app.online })
+    ? startFederationWorkers({ db, env, nodeIdentity: app.nodeIdentity, realtime: app.realtime, log: app.log, online: app.online, expiry: () => currentReportExpiry(app) })
     : null;
   // Pre-built static-data packages (add-on E-B): rebuilt in the background after static data changes.
   const packageWorker = env.STATIC_PACKAGES_WORKER_ENABLED ? startStaticPackageWorker(db, env, app.log, () => app.cameraPolicy.current()) : null;

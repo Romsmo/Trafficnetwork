@@ -38,11 +38,13 @@ Ausgeliefert ist: Kategorien freigeschaltet, Standard `full` in jedem Land, Filt
 
 Server und Weboberfläche:
 
-- [ ] `federationEventId` in Snapshot/Delta ausliefern (Voraussetzung für föderiertes Bestätigen/Widersprechen; heute sind Bestätigungen pro Knoten)
+- [ ] `federationEventId` in Snapshot/Delta ausliefern (Voraussetzung für föderiertes Bestätigen/Widersprechen; heute sind Bestätigungen pro Knoten — dazu gehört auch das vorzeitige Ende temporärer Kameras durch „nicht mehr da“, das deshalb nur knotenlokal wirkt)
 - [ ] Weboberfläche: „Stimmt nicht?"-Formular und Herkunftsanzeige für Tempolimit-Korrekturen (die Server-Pfade sind für Web-Sitzungen offen)
 - [ ] Weboberfläche: Startansicht Europa, nur den sichtbaren Ausschnitt laden, Cluster bei kleiner Zoomstufe
 - [ ] Weboberfläche: Quellen-Attribution aus `ingestion/docs/attribution.md` anzeigen (braucht `source_feed` in der Hazard-API)
 - [ ] Weboberfläche: in sehr großen Ausschnitten (Hinweis „Ausschnitt sehr groß") kommen neue Meldungen erst mit dem Minutentakt statt live, weil die Push-Abos begrenzt sind (`WEB_WS_MAX_TILES_PER_CONNECTION`) — in `server/docs/web-ui.md` vermerkt, nicht behoben
+- [ ] Eigene Ablaufzeit: Anbindung in der Client-Bibliothek (`ttlSeconds`, `getReportLimits`) und in der Weboberfläche (Auswahl der Dauer) — Server ab 1.1.0 fertig, Client 1.2.0 und Web folgen (Blöcke 4 und 5 des Oktober-Auftrags)
+- [ ] Eigene Ablaufzeit: ob Geräte mit geringer Reputation nur bis zum Standard dürfen — bewusst nicht gebaut (Reputation ist knotenlokal, ein Tor würde Knoten auseinanderlaufen lassen); nach echten Daten neu bewerten
 - [ ] Tempolimit-Korrekturen: temporäre Korrekturen (Baustelle) automatisch auslaufen lassen; `deviceAssertion` bei Meldungen an den gebundenen Schlüssel knüpfen; Stimmen nach Ruf des weiterleitenden Knotens gewichten
 - [ ] Dauerhafte Anlagen: Abschnittskontrolle (`enforcement=average_speed`) — erst entscheiden, dann bauen; ob Nutzer eine Meldung „dauerhaft" machen können (Schwelle) oder Nutzermeldungen immer verfallen; die acht Standardwerte aus `server/docs/persistent-enforcement-devices.md` §10 bestätigen oder ändern
 - [ ] Blitzer nach Land: `GET /v1/config` nennt `staticDataVersion` sofort, das Manifest aber erst nach dem Neubau der Pakete — bei einem Knoten ohne statische Daten bewegt sich die Manifest-Version bei einem Politikwechsel nie (die Bibliothek fragt deshalb zusätzlich in kurzem Takt)

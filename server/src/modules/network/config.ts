@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises";
 import type { Env } from "../../config/env.js";
 import { verifySignedEnvelope, type SignedEnvelope } from "../crypto/envelope.js";
 import { CameraPolicyError, parseCountryLevels, type CameraLevel } from "../cameras/policy/levels.js";
+import { parseExpiryOverrides, ReportExpiryConfigError } from "../../config/report-expiry.js";
 
 /**
  * The network-wide config a root-key holder signs offline (see
@@ -21,6 +22,12 @@ export interface NetworkConfigPayload {
    * (`zones`, `off`) is the operator's legal decision, signed offline; the code never fills it in.
    */
   cameraPolicyByCountry?: Record<string, CameraLevel>;
+  /**
+   * How long reports live and what a reporter may ask for, per hazard type (server/docs/report-expiry.md):
+   * `{ "<type>": { defaultSeconds?, minSeconds?, maxSeconds? } }`. Absent = the defaults that ship with the server version.
+   * Present, it replaces the named fields on every node, so all nodes derive the same `expiresAt` for a signed report.
+   */
+  reportExpiry?: Record<string, { defaultSeconds?: number; minSeconds?: number; maxSeconds?: number }>;
   eventLogRetentionDaysDynamic: number;
   eventLogRetentionDaysStatic: number;
   minVersion: string;
@@ -72,6 +79,12 @@ export async function loadSignedNetworkConfig(env: Env): Promise<SignedEnvelope<
     parseCountryLevels(envelope.payload.cameraPolicyByCountry);
   } catch (err) {
     if (err instanceof CameraPolicyError) throw new NetworkConfigError(`Signed network config: ${err.message}`);
+    throw err;
+  }
+  try {
+    parseExpiryOverrides(envelope.payload.reportExpiry, "reportExpiry");
+  } catch (err) {
+    if (err instanceof ReportExpiryConfigError) throw new NetworkConfigError(`Signed network config: ${err.message}`);
     throw err;
   }
 

@@ -154,6 +154,22 @@ the three levels or more than 300 entries make the **whole file invalid** (refus
 because a policy that cannot be understood completely must not be applied partly. Reload rule: `version` must not go down, and the
 same `version` with different content is refused. See [`camera-country-policy.md`](camera-country-policy.md).
 
+### 4.4b The signed network config can carry the report expiry rules (`reportExpiry`)
+
+One more optional, additive field of the root-signed network config (server 1.1.0):
+
+```
+reportExpiry?: { [hazard type]: { defaultSeconds?: int, minSeconds?: int, maxSeconds?: int } }
+```
+
+It states, per hazard type, how long a report lives by default and the bounds of the duration a reporter may sign into a
+report (§5, `expiresInSeconds`). Every field it names replaces the node's own setting; fields and types it does not name keep
+the node's own value, and a node without the field uses the defaults that ship with its version. It exists so that all
+nodes of a network derive the same `expiresAt` for the same signed report. Validation is all-or-nothing, like §4.4a: an unknown
+type (or `fixedSpeedCamera`), an unknown field, a value that is not a whole number of seconds in 1…31 536 000, or
+`minSeconds <= defaultSeconds <= maxSeconds` violated makes the whole file invalid. A node that predates it ignores the field.
+See [`report-expiry.md`](report-expiry.md).
+
 ### 4.5 Directory
 
 `GET /v1/network/directory` — always registered (unlike every other
@@ -177,10 +193,16 @@ isn't federated yet.
 ```
 DeviceCreateEvent = {
   kind: "create", type: <HazardType, not fixedSpeedCamera>,
-  lat, lng, speedKmh?, devicePublicKey, timestamp
+  lat, lng, speedKmh?, expiresInSeconds?, devicePublicKey, timestamp
 }
 federationEventId = sha256(canonical({ payload, signature }))   // hex, cross-server-stable
 ```
+
+`expiresInSeconds` (optional, additive, server 1.1.0) is the duration the device wants the report to live. It is part of the
+signed payload, so a relay cannot change it. The end of the report is **`timestamp + (expiresInSeconds ?? default of the type)`**
+— derived from what the device signed, not from the receiving node's clock, so every node reaches the same `expiresAt`
+however late the event arrives. A node older than 1.1.0 ignores the field and ends the report at its own default counted from
+arrival (update all nodes before relying on durations).
 
 `federationEventId` is derived *after* signing (hash of the whole envelope,
 not a field inside the signed payload) — a stable, forgery-resistant,
@@ -201,7 +223,9 @@ processed independently (`modules/federation/ingest.ts`):
    since anti-entropy is explicitly meant to catch a server up after being
    offline for a while).
 3. Not `fixedSpeedCamera` (out of scope, see §7).
-4. Ordinary plausibility checks (same ones a local submission gets).
+4. Ordinary plausibility checks (same ones a local submission gets), including `expiresInSeconds` inside the bounds of the
+   type (`implausible` otherwise) and the report's own lifetime (`timestamp` + duration) not already over
+   (`stale_timestamp` otherwise — it would be stored active and swept a minute later; the sender is not penalised).
 5. Not already known (`federationEventId` dedup — idempotent; a concurrent
    double-delivery loses a database-level race gracefully, treated as
    "already known" rather than an error).

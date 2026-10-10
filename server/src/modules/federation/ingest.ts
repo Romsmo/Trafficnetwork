@@ -4,6 +4,7 @@ import { federationEventExists } from "../../db/queries/event-log.js";
 import { createOrMergeReport } from "../hazard-reports/service.js";
 import { validatePlausibility } from "../moderation/plausibility.js";
 import { keyId } from "../crypto/keys.js";
+import { checkRequestedExpiry, resolveReportExpiry, type ReportExpiryRules } from "../../config/report-expiry.js";
 import type { SignedEnvelope } from "../crypto/envelope.js";
 import {
   computeFederationEventId,
@@ -46,6 +47,8 @@ export async function ingestDeviceCreateEvent(
   env: Env,
   envelope: SignedEnvelope<DeviceCreateEventPayload>,
   originNodeId: string | null,
+  /** The expiry rules in force on this node (signed network configuration applied); default: this node's own environment. */
+  expiry: ReportExpiryRules = resolveReportExpiry(env),
 ): Promise<IngestOutcome> {
   const federationEventId = computeFederationEventId(envelope);
 
@@ -85,6 +88,22 @@ export async function ingestDeviceCreateEvent(
     return { status: "rejected", federationEventId, reason: err instanceof Error ? err.message : "Implausible report", code: "implausible" };
   }
 
+  // The report's lifetime comes from what the device signed: its timestamp plus the duration it asked for (or the type's
+  // default). Every node derives the same end, however late the event reaches it.
+  const requested = checkRequestedExpiry(expiry, envelope.payload.type, envelope.payload.expiresInSeconds);
+  if (!requested.ok) {
+    return { status: "rejected", federationEventId, reason: requested.message, code: "implausible" };
+  }
+  const occurredAt = new Date(envelope.payload.timestamp);
+  if (occurredAt.getTime() + requested.seconds * 1000 <= Date.now()) {
+    return {
+      status: "rejected",
+      federationEventId,
+      reason: "The report's own lifetime (timestamp + duration) has already ended",
+      code: "stale_timestamp",
+    };
+  }
+
   if (await federationEventExists(db, federationEventId)) {
     return { status: "duplicate", federationEventId };
   }
@@ -99,10 +118,13 @@ export async function ingestDeviceCreateEvent(
         lat: envelope.payload.lat,
         lng: envelope.payload.lng,
         speedKmh: envelope.payload.speedKmh,
+        expiresInSeconds: envelope.payload.expiresInSeconds,
         reporterId,
       },
       {
         skipRateLimit: true,
+        expiry,
+        occurredAt,
         federation: { federationEventId, federationEnvelope: envelope, originNodeId },
       },
     );
