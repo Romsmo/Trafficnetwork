@@ -10,7 +10,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 use crate::sync::{
-    Correction, CorrectionReason, CorrectionTarget, SpeedLimitUnit, WrongSpeedLimitReport,
+    Correction, CorrectionReason, CorrectionTarget, MissingSpeedLimitReport, SpeedLimitUnit,
+    WrongSpeedLimitReport,
 };
 
 use super::client::{segment_ref, TrafficNetworkClient};
@@ -57,6 +58,15 @@ struct SubmitReportArgs {
     lat: f64,
     lng: f64,
     speed_kmh: Option<f64>,
+    /// How long the report should live, in seconds (optional; within `getReportLimits`).
+    ttl_seconds: Option<u32>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ReportLimitsArgs {
+    #[serde(rename = "type")]
+    hazard_type: String,
 }
 
 #[derive(Deserialize)]
@@ -85,12 +95,54 @@ struct WrongLimitArgs {
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
+struct MissingLimitArgs {
+    lat: f64,
+    lng: f64,
+    /// A heading along the road, either direction (0..360); the last heading given is used when absent.
+    bearing: Option<f64>,
+    value: u32,
+    unit: SpeedLimitUnit,
+    reason: Option<CorrectionReason>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct ConfirmCorrectionArgs {
     /// The segment whose current community correction is voted on…
     segment_id: Option<String>,
     /// …or a correction from `fetchCorrections`.
     correction: Option<Correction>,
     agrees: bool,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct StorageLimitsArgs {
+    /// A number sets the limit, `null` removes it, absent leaves it.
+    #[serde(default, deserialize_with = "double_option")]
+    max_bytes: Option<Option<u64>>,
+    wifi_only: Option<bool>,
+}
+
+fn double_option<'de, D, T>(deserializer: D) -> Result<Option<Option<T>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    Option::<T>::deserialize(deserializer).map(Some)
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct MeteredArgs {
+    metered: bool,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CoverageArgs {
+    lat: f64,
+    lng: f64,
 }
 
 fn local_id(id: String) -> Value {
@@ -107,6 +159,7 @@ impl TrafficNetworkClient {
             })),
             "getSpeedLimitAt" => {
                 let a: PositionArgs = parse(method, args)?;
+                self.set_last_heading(a.heading);
                 to_json(self.get_speed_limit_at(a.lat, a.lng, a.heading)?)
             }
             "getNearby" => {
@@ -116,8 +169,18 @@ impl TrafficNetworkClient {
             }
             "submitReport" => {
                 let a: SubmitReportArgs = parse(method, args)?;
-                let id = self.submit_report(&a.hazard_type, a.lat, a.lng, a.speed_kmh)?;
-                Ok(local_id(id))
+                let submitted = self.submit_report_with_duration(
+                    &a.hazard_type,
+                    a.lat,
+                    a.lng,
+                    a.speed_kmh,
+                    a.ttl_seconds,
+                )?;
+                to_json(submitted)
+            }
+            "getReportLimits" => {
+                let a: ReportLimitsArgs = parse(method, args)?;
+                to_json(self.get_report_limits(&a.hazard_type)?)
             }
             "confirmReport" => {
                 let a: ConfirmReportArgs = parse(method, args)?;
@@ -138,6 +201,21 @@ impl TrafficNetworkClient {
                 })?;
                 to_json(proposal)
             }
+            "reportMissingSpeedLimit" => {
+                let a: MissingLimitArgs = parse(method, args)?;
+                to_json(self.report_missing_speed_limit(&MissingSpeedLimitReport {
+                    lat: a.lat,
+                    lng: a.lng,
+                    bearing_degrees: a.bearing,
+                    value: a.value,
+                    unit: a.unit,
+                    reason: a.reason,
+                })?)
+            }
+            "lookupSpeedLimit" => {
+                let a: PositionArgs = parse(method, args)?;
+                to_json(self.lookup_speed_limit(a.lat, a.lng, a.heading).await?)
+            }
             "confirmSpeedLimitCorrection" => {
                 let a: ConfirmCorrectionArgs = parse(method, args)?;
                 let target = match (a.correction, a.segment_id) {
@@ -156,8 +234,36 @@ impl TrafficNetworkClient {
                 let corrections = self.fetch_corrections().await?;
                 Ok(json!({ "corrections": to_json(corrections)? }))
             }
+            "getOfflineSettings" => to_json(self.get_offline_settings()?),
+            "setOfflineRegions" => {
+                let patch: super::offline::OfflineSettingsPatch = parse(method, args)?;
+                to_json(self.set_offline_regions(&patch)?)
+            }
+            "setAutoRegionPolicy" => {
+                let patch: super::offline::AutoPolicyPatch = parse(method, args)?;
+                to_json(self.set_auto_region_policy(&patch)?)
+            }
+            "setStorageLimits" => {
+                let a: StorageLimitsArgs = parse(method, args)?;
+                to_json(self.set_storage_limits(a.max_bytes, a.wifi_only)?)
+            }
+            "setConnectionMetered" => {
+                let a: MeteredArgs = parse(method, args)?;
+                self.set_connection_metered(a.metered);
+                Ok(json!({}))
+            }
+            "listOfflineRegions" => {
+                Ok(json!({ "regions": to_json(self.list_offline_regions().await?)? }))
+            }
+            "getStoragePlan" => to_json(self.get_storage_plan().await?),
+            "getStorageUsage" => to_json(self.get_storage_usage()?),
+            "getCoverage" => {
+                let a: CoverageArgs = parse(method, args)?;
+                to_json(self.get_coverage(a.lat, a.lng)?)
+            }
             "updatePosition" => {
                 let a: PositionArgs = parse(method, args)?;
+                self.set_last_heading(a.heading);
                 to_json(self.update_position(a.lat, a.lng, a.speed_kmh)?)
             }
             "sync" => to_json(self.sync().await?),

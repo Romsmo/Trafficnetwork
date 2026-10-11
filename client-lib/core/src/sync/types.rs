@@ -136,6 +136,8 @@ pub enum CorrectionReason {
     LimitLifted,
     SignMissingOrNew,
     Other,
+    /// The road has no limit on record at all (server 1.1.0); the reason of a "no limit here" report.
+    Missing,
 }
 
 /// Set on a segment whose `speedLimit` is a community correction
@@ -511,6 +513,68 @@ pub struct ClientConfig {
     #[serde(rename = "cameraPolicy")]
     #[serde(default, deserialize_with = "lenient_option")]
     pub camera_policy: Option<CameraPolicyConfig>,
+    /// Per hazard type, the duration a report gets by default and the bounds of the duration a reporter may
+    /// ask for (server 1.1.0, `server/docs/report-expiry.md`). Empty on a server that predates it - then a
+    /// requested duration is not sent and the default applies. Entries of a type this build does not know
+    /// are dropped, a malformed section becomes empty: the config fetch every sync depends on never fails for it.
+    #[serde(
+        rename = "reportExpiry",
+        default,
+        deserialize_with = "lenient_expiry_rules"
+    )]
+    pub report_expiry: HashMap<HazardType, super::report_ttl::ExpiryRule>,
+}
+
+fn lenient_expiry_rules<'de, D>(
+    deserializer: D,
+) -> Result<HashMap<HazardType, super::report_ttl::ExpiryRule>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = serde_json::Value::deserialize(deserializer)?;
+    let Some(entries) = value.as_object() else {
+        return Ok(HashMap::new());
+    };
+    let mut rules = HashMap::new();
+    for (name, rule) in entries {
+        let Ok(hazard_type) =
+            serde_json::from_value::<HazardType>(serde_json::Value::String(name.clone()))
+        else {
+            continue;
+        };
+        if hazard_type == HazardType::Unknown {
+            continue;
+        }
+        if let Ok(rule) = serde_json::from_value::<super::report_ttl::ExpiryRule>(rule.clone()) {
+            rules.insert(hazard_type, rule);
+        }
+    }
+    Ok(rules)
+}
+
+#[cfg(test)]
+impl ClientConfig {
+    /// A complete configuration for tests that care about one field only.
+    pub(crate) fn for_tests() -> Self {
+        ClientConfig {
+            region_tile_h3_resolution: 7,
+            static_data_partition_h3_resolution: 4,
+            speed_camera_namespace_enabled: false,
+            camera_namespace_hazard_types: vec![],
+            duplicate_merge_radius_meters: 500.0,
+            speed_limit_lookup_max_distance_meters: 200.0,
+            hazard_expiry_ms_by_type: HashMap::new(),
+            report_rate_limit_max: 10,
+            report_rate_limit_window_minutes: 10,
+            camera_removal_threshold: 3,
+            static_data_version: 1,
+            federation_enabled: false,
+            network_config: None,
+            community_corrections: None,
+            camera_policy: None,
+            report_expiry: HashMap::new(),
+        }
+    }
 }
 
 fn lenient_option<'de, D, T>(deserializer: D) -> Result<Option<T>, D::Error>
@@ -828,6 +892,7 @@ mod tests {
             network_config: None,
             community_corrections: None,
             camera_policy: None,
+            report_expiry: HashMap::new(),
         }
     }
 

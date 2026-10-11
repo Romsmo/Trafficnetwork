@@ -318,6 +318,38 @@ impl Store for IndexedDbStore {
         Ok(())
     }
 
+    fn partition_records(&self) -> Result<Vec<super::PartitionRecord>, StoreError> {
+        self.inner.partition_records()
+    }
+
+    fn set_partition_size(&self, tile: &str, size_bytes: u64) -> Result<(), StoreError> {
+        self.inner.set_partition_size(tile, size_bytes)?;
+        self.mirror();
+        Ok(())
+    }
+
+    fn record_partition_use(&self, tiles: &[String], now_unix_ms: i64) -> Result<(), StoreError> {
+        self.inner.record_partition_use(tiles, now_unix_ms)?;
+        self.mirror();
+        Ok(())
+    }
+
+    fn remove_partition_record(&self, tile: &str) -> Result<(), StoreError> {
+        self.inner.remove_partition_record(tile)?;
+        self.mirror();
+        Ok(())
+    }
+
+    fn get_setting(&self, key: &str) -> Result<Option<String>, StoreError> {
+        self.inner.get_setting(key)
+    }
+
+    fn set_setting(&self, key: &str, value: &str) -> Result<(), StoreError> {
+        self.inner.set_setting(key, value)?;
+        self.mirror();
+        Ok(())
+    }
+
     fn clear_cursors(&self) -> Result<(), StoreError> {
         self.inner.clear_cursors()?;
         self.mirror();

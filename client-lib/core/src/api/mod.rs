@@ -10,6 +10,7 @@ mod dispatch;
 mod envelope;
 mod error;
 mod events;
+mod offline;
 mod options;
 mod secure_store;
 mod tiles;
@@ -20,6 +21,10 @@ pub use dispatch::API_VERSION;
 pub use envelope::{error_envelope, panic_envelope, parse_args, result_envelope};
 pub use error::{code, ApiError};
 pub use events::{ClientEvent, EventHub, Listener as EventListener};
+pub use offline::{
+    AutoPolicyPatch, CoverageView, OfflineSettingsPatch, RegionView, StoragePlanView,
+    StorageUsageView, TileUsageView,
+};
 pub use options::{ClientOptions, Credentials, DEFAULT_NETWORK_ROOT_KEY, DEFAULT_SEEDS};
 #[cfg(not(target_arch = "wasm32"))]
 pub use secure_store::FileSecureStore;

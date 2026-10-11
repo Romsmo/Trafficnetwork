@@ -53,10 +53,23 @@ use std::time::Duration;
 
 use serde_json::{json, Value};
 use trafficnetwork_core::api::{
-    ClientOptions, Credentials, MemorySecureStore, NearbyCategory, NearbyItem, Platform,
-    TrafficNetworkClient,
+    ClientOptions, Credentials, MemorySecureStore, NearbyCategory, NearbyItem,
+    OfflineSettingsPatch, Platform, TrafficNetworkClient,
 };
 use trafficnetwork_core::platform::{HttpRequest, HttpTransport, ReqwestHttpTransport};
+use trafficnetwork_core::sync::offline::OfflineMode;
+
+/// The default offline area follows the device's position and these tests never give one, so they ask for
+/// everything the server lists — what a client before 1.2.0 always did.
+fn everywhere(client: TrafficNetworkClient) -> TrafficNetworkClient {
+    client
+        .set_offline_regions(&OfflineSettingsPatch {
+            mode: Some(OfflineMode::All),
+            ..OfflineSettingsPatch::default()
+        })
+        .expect("offline area");
+    client
+}
 
 fn harness_url() -> String {
     std::env::var("TN_MULTI_NODE_HARNESS_URL")
@@ -179,22 +192,24 @@ fn client_for_address(
     client_secret: &str,
     storage: &std::path::Path,
 ) -> TrafficNetworkClient {
-    TrafficNetworkClient::new(
-        ClientOptions {
-            nodes: vec![address.to_string()],
-            discovery: false,
-            credentials: Some(Credentials::Client {
-                client_id: client_id.to_string(),
-                client_secret: client_secret.to_string(),
-            }),
-            ..ClientOptions::default()
-        },
-        Platform {
-            secure_store: std::sync::Arc::new(MemorySecureStore::new()),
-            ..Platform::native(storage).expect("native platform")
-        },
+    everywhere(
+        TrafficNetworkClient::new(
+            ClientOptions {
+                nodes: vec![address.to_string()],
+                discovery: false,
+                credentials: Some(Credentials::Client {
+                    client_id: client_id.to_string(),
+                    client_secret: client_secret.to_string(),
+                }),
+                ..ClientOptions::default()
+            },
+            Platform {
+                secure_store: std::sync::Arc::new(MemorySecureStore::new()),
+                ..Platform::native(storage).expect("native platform")
+            },
+        )
+        .expect("client construction"),
     )
-    .expect("client construction")
 }
 
 /// Retries `check` until it returns `Some`, or panics after `timeout` — for
@@ -234,22 +249,24 @@ async fn cold_start_finds_the_network_through_a_single_seed_and_can_sync() {
         .await;
 
     // Only the seed is configured; discovery has to find the peer on its own.
-    let client = TrafficNetworkClient::new(
-        ClientOptions {
-            discovery: true,
-            seeds: vec![seed.address.clone()],
-            credentials: Some(Credentials::Client {
-                client_id: seed.client_id.clone(),
-                client_secret: seed.client_secret.clone(),
-            }),
-            ..ClientOptions::default()
-        },
-        Platform {
-            secure_store: std::sync::Arc::new(MemorySecureStore::new()),
-            ..Platform::native(temp_storage("cold-start")).expect("native platform")
-        },
-    )
-    .unwrap();
+    let client = everywhere(
+        TrafficNetworkClient::new(
+            ClientOptions {
+                discovery: true,
+                seeds: vec![seed.address.clone()],
+                credentials: Some(Credentials::Client {
+                    client_id: seed.client_id.clone(),
+                    client_secret: seed.client_secret.clone(),
+                }),
+                ..ClientOptions::default()
+            },
+            Platform {
+                secure_store: std::sync::Arc::new(MemorySecureStore::new()),
+                ..Platform::native(temp_storage("cold-start")).expect("native platform")
+            },
+        )
+        .unwrap(),
+    );
 
     let report = client.sync().await.unwrap();
     assert!(report.ok, "{report:?}");
@@ -277,22 +294,24 @@ async fn a_node_failing_mid_session_does_not_stop_sync_when_another_is_available
 
     // One client, both real nodes in its pool from the start — same as a
     // host app configuring two known servers.
-    let client = TrafficNetworkClient::new(
-        ClientOptions {
-            nodes: vec![a.address.clone(), b.address.clone()],
-            discovery: false,
-            credentials: Some(Credentials::Client {
-                client_id: a.client_id.clone(),
-                client_secret: a.client_secret.clone(),
-            }),
-            ..ClientOptions::default()
-        },
-        Platform {
-            secure_store: std::sync::Arc::new(MemorySecureStore::new()),
-            ..Platform::native(temp_storage("failover")).expect("native platform")
-        },
-    )
-    .unwrap();
+    let client = everywhere(
+        TrafficNetworkClient::new(
+            ClientOptions {
+                nodes: vec![a.address.clone(), b.address.clone()],
+                discovery: false,
+                credentials: Some(Credentials::Client {
+                    client_id: a.client_id.clone(),
+                    client_secret: a.client_secret.clone(),
+                }),
+                ..ClientOptions::default()
+            },
+            Platform {
+                secure_store: std::sync::Arc::new(MemorySecureStore::new()),
+                ..Platform::native(temp_storage("failover")).expect("native platform")
+            },
+        )
+        .unwrap(),
+    );
     client.sync().await.unwrap();
     harness.stop_node(&a).await;
 
@@ -351,22 +370,24 @@ async fn the_same_report_seen_through_two_servers_is_shown_once() {
     // A client that syncs from *both* servers must not show the event twice
     // just because each server has its own row id for it.
     let storage = temp_storage("dedup");
-    let client = TrafficNetworkClient::new(
-        ClientOptions {
-            nodes: vec![a.address.clone(), b.address.clone()],
-            discovery: false,
-            credentials: Some(Credentials::Client {
-                client_id: a.client_id.clone(),
-                client_secret: a.client_secret.clone(),
-            }),
-            ..ClientOptions::default()
-        },
-        Platform {
-            secure_store: std::sync::Arc::new(MemorySecureStore::new()),
-            ..Platform::native(storage).expect("native platform")
-        },
-    )
-    .unwrap();
+    let client = everywhere(
+        TrafficNetworkClient::new(
+            ClientOptions {
+                nodes: vec![a.address.clone(), b.address.clone()],
+                discovery: false,
+                credentials: Some(Credentials::Client {
+                    client_id: a.client_id.clone(),
+                    client_secret: a.client_secret.clone(),
+                }),
+                ..ClientOptions::default()
+            },
+            Platform {
+                secure_store: std::sync::Arc::new(MemorySecureStore::new()),
+                ..Platform::native(storage).expect("native platform")
+            },
+        )
+        .unwrap(),
+    );
     client.update_position(48.5, 9.5, None).unwrap();
     client.sync().await.unwrap();
     let items = client
@@ -454,19 +475,21 @@ async fn an_offline_report_is_delivered_once_a_different_server_is_reachable() {
     // the other tests use) — persisted at `storage`, so the *second* client
     // instance below picks up the same device key and pending queue a real
     // app restart would, not a fresh identity.
-    let client = TrafficNetworkClient::new(
-        ClientOptions {
-            nodes: vec![a.address.clone()],
-            discovery: false,
-            credentials: Some(Credentials::Client {
-                client_id: a.client_id.clone(),
-                client_secret: a.client_secret.clone(),
-            }),
-            ..ClientOptions::default()
-        },
-        Platform::native(&storage).expect("native platform"),
-    )
-    .unwrap();
+    let client = everywhere(
+        TrafficNetworkClient::new(
+            ClientOptions {
+                nodes: vec![a.address.clone()],
+                discovery: false,
+                credentials: Some(Credentials::Client {
+                    client_id: a.client_id.clone(),
+                    client_secret: a.client_secret.clone(),
+                }),
+                ..ClientOptions::default()
+            },
+            Platform::native(&storage).expect("native platform"),
+        )
+        .unwrap(),
+    );
     client.submit_report("ice", 47.0, 11.0, None).unwrap();
     assert_eq!(client.get_sync_status().unwrap().pending_writes, 1);
 
@@ -475,19 +498,21 @@ async fn an_offline_report_is_delivered_once_a_different_server_is_reachable() {
 
     // A fresh client instance, same storage directory, now pointed at B
     // (which shares A's credential — see `start_node_sharing_credential`).
-    let client = TrafficNetworkClient::new(
-        ClientOptions {
-            nodes: vec![b.address.clone()],
-            discovery: false,
-            credentials: Some(Credentials::Client {
-                client_id: b.client_id.clone(),
-                client_secret: b.client_secret.clone(),
-            }),
-            ..ClientOptions::default()
-        },
-        Platform::native(&storage).expect("native platform"),
-    )
-    .unwrap();
+    let client = everywhere(
+        TrafficNetworkClient::new(
+            ClientOptions {
+                nodes: vec![b.address.clone()],
+                discovery: false,
+                credentials: Some(Credentials::Client {
+                    client_id: b.client_id.clone(),
+                    client_secret: b.client_secret.clone(),
+                }),
+                ..ClientOptions::default()
+            },
+            Platform::native(&storage).expect("native platform"),
+        )
+        .unwrap(),
+    );
     let report = client.sync().await.unwrap();
     assert_eq!(report.submitted, 1, "{report:?}");
     assert_eq!(client.get_sync_status().unwrap().pending_writes, 0);
@@ -539,26 +564,28 @@ async fn a_static_package_that_does_not_match_its_hash_is_rejected() {
 /// A client of `node` whose host app switched the camera display on (it is
 /// off by default).
 fn client_with_cameras_on(node: &Node, storage: &std::path::Path) -> TrafficNetworkClient {
-    TrafficNetworkClient::new(
-        ClientOptions {
-            nodes: vec![node.address.clone()],
-            discovery: false,
-            camera_namespace_enabled: true,
-            // So the client notices a change of the policy within a second
-            // instead of within two minutes.
-            config_refresh_seconds: 1,
-            credentials: Some(Credentials::Client {
-                client_id: node.client_id.clone(),
-                client_secret: node.client_secret.clone(),
-            }),
-            ..ClientOptions::default()
-        },
-        Platform {
-            secure_store: std::sync::Arc::new(MemorySecureStore::new()),
-            ..Platform::native(storage).expect("native platform")
-        },
+    everywhere(
+        TrafficNetworkClient::new(
+            ClientOptions {
+                nodes: vec![node.address.clone()],
+                discovery: false,
+                camera_namespace_enabled: true,
+                // So the client notices a change of the policy within a second
+                // instead of within two minutes.
+                config_refresh_seconds: 1,
+                credentials: Some(Credentials::Client {
+                    client_id: node.client_id.clone(),
+                    client_secret: node.client_secret.clone(),
+                }),
+                ..ClientOptions::default()
+            },
+            Platform {
+                secure_store: std::sync::Arc::new(MemorySecureStore::new()),
+                ..Platform::native(storage).expect("native platform")
+            },
+        )
+        .expect("client construction"),
     )
-    .expect("client construction")
 }
 
 /// What a client standing at `(lat, lng)` sees of cameras: whether the report

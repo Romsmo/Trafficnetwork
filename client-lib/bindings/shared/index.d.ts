@@ -134,6 +134,126 @@ export interface CameraPolicy {
   notice: { version: number; text: Record<string, string> };
 }
 
+/** What `submitReportWithDuration` tells about the duration of what it queued. */
+export interface SubmittedReport {
+  localId: string;
+  /** The duration that was queued (and will be signed), if one was asked for and the server takes it. */
+  expiresInSeconds: number | null;
+  /** `false`: a duration was asked for but this server does not take one; the server's default applies. */
+  durationHonoured: boolean;
+  /** How long the report lives when nothing is asked for, if known. */
+  defaultSeconds: number | null;
+}
+
+export interface ReportLimits {
+  /** `false`: the server takes no requested duration (an older server, or a type that never expires). */
+  supported: boolean;
+  defaultSeconds: number | null;
+  minSeconds: number | null;
+  maxSeconds: number | null;
+}
+
+export interface MissingSpeedLimitReport {
+  lat: number;
+  lng: number;
+  value: number;
+  unit: SpeedLimitUnit;
+  /** A heading along the road, either direction of travel (0..360); the last heading given is used when absent. */
+  bearing?: number;
+  reason?: string;
+}
+
+/** The answer of `lookupSpeedLimit`: always an answer, never a bare "nothing". */
+export type SpeedLimitLookup =
+  | ({ status: "found"; source: "offline" | "online" } & SpeedLimitAnswer)
+  | { status: "notRecorded"; source: "offline" | "online" }
+  /** The place is outside the offline area and there is no network. */
+  | { status: "outsideOfflineArea" };
+
+export type OfflineMode = "auto" | "regions" | "all";
+
+export interface AutoRegionPolicy {
+  homeRadiusTiles: number;
+  currentRadiusTiles: number;
+  recentPlaces: number;
+  recentRadiusTiles: number;
+}
+
+export interface OfflineSettings {
+  mode: OfflineMode;
+  regions: string[];
+  auto: AutoRegionPolicy;
+  /** `[lat, lng]`, once known. */
+  home: [number, number] | null;
+  maxBytes: number | null;
+  wifiOnly: boolean;
+}
+
+export interface AutoRegionPolicyPatch {
+  homeRadiusTiles?: number;
+  currentRadiusTiles?: number;
+  recentPlaces?: number;
+  recentRadiusTiles?: number;
+  homeLat?: number;
+  homeLng?: number;
+}
+
+export interface OfflineRegion {
+  id: string;
+  /** ISO 3166-1 alpha-2, or `null` for a coarse area. */
+  country: string | null;
+  tileCount: number;
+  /** What it takes on the wire (brotli), as JSON, and an estimate for the device. */
+  downloadBytes: number;
+  sizeBytes: number;
+  estimatedDeviceBytes: number;
+  /** `false`: the byte counts are lower bounds. */
+  complete: boolean;
+  /** `[west, south, east, north]`. */
+  bbox: [number, number, number, number];
+  selected: boolean;
+  storedTiles: number;
+  state: "none" | "partial" | "complete";
+}
+
+export interface StoragePlan {
+  mode: OfflineMode;
+  /** Automatic mode and neither a position nor a home is known: nothing is selected yet. */
+  needsLocation: boolean;
+  offeredTiles: number;
+  offeredBytes: number;
+  toFetchTiles: number;
+  toFetchBytes: number;
+  toFetchDeviceBytes: number;
+  toRemoveTiles: number;
+  cachedUnwantedTiles: number;
+  deferredTiles: number;
+  deferredForLimit: number;
+  deferredForMetered: number;
+  maxBytes: number | null;
+  fits: boolean;
+  storedTiles: number;
+  storedDeviceBytes: number | null;
+}
+
+export interface StorageUsage {
+  storedTiles: number;
+  storeBytes: number | null;
+  storedJsonBytes: number;
+  estimatedDeviceBytes: number;
+  maxBytes: number | null;
+  /** Least recently used first. */
+  tiles: { tile: string; sizeBytes: number; lastUsedUnixMs: number | null }[];
+}
+
+export interface Coverage {
+  covered: boolean;
+  tile: string | null;
+  state: "stored" | "wanted" | "outside";
+  /** A lookup here goes to the server (`lookupSpeedLimit` does it itself). */
+  usesNetwork: boolean;
+}
+
 export interface Proposal {
   segmentKey: string;
   segmentId: string;
@@ -168,6 +288,12 @@ export interface SyncReport {
   rejected: number;
   /** Still waiting to be sent. */
   pendingWrites: number;
+  /** Offline area: packages fetched this time, let go of, and wanted but held back. */
+  offlineFetchedTiles: number;
+  offlineRemovedTiles: number;
+  offlineDeferredTiles: number;
+  /** Automatic offline area and neither a position nor a home is known: nothing was selected. */
+  needsLocation: boolean;
 }
 
 export interface TickResult {
@@ -247,6 +373,10 @@ export type ErrorCode =
   | "auth"
   | "rejected"
   | "unavailable"
+  /** A duration asked for a report is outside the server's bounds for its type (`getReportLimits`). */
+  | "ttlOutOfRange"
+  /** "No limit here" was reported where a road with a limit is stored: correct that segment instead. */
+  | "roadAlreadyHasLimit"
   | "closed"
   | "internal";
 
@@ -294,10 +424,29 @@ export interface TrafficNetworkClient {
     radiusMeters: number,
     categories?: NearbyCategory[],
   ): Promise<NearbyItem[]>;
-  submitReport(type: HazardType, lat: number, lng: number, speedKmh?: number): Promise<string>;
+  submitReport(
+    type: HazardType,
+    lat: number,
+    lng: number,
+    speedKmh?: number,
+    ttlSeconds?: number,
+  ): Promise<string>;
+  /** As `submitReport`, resolving with what was queued: the local id and the duration that applies. */
+  submitReportWithDuration(
+    type: HazardType,
+    lat: number,
+    lng: number,
+    options?: { speedKmh?: number; ttlSeconds?: number },
+  ): Promise<SubmittedReport>;
+  /** The default, minimum and maximum duration of a report of this type, from the server's configuration. Local. */
+  getReportLimits(type: HazardType): Promise<ReportLimits>;
   confirmReport(reportId: string, stillThere: boolean): Promise<string>;
   reportCameraRemoved(cameraId: string): Promise<string>;
   reportWrongSpeedLimit(report: WrongSpeedLimitReport): Promise<Proposal>;
+  /** "There is no speed limit on record for this road" — a value for a road the import has none for. */
+  reportMissingSpeedLimit(report: MissingSpeedLimitReport): Promise<Proposal>;
+  /** The limit here: from the offline data, or from the server when the place is outside the offline area. */
+  lookupSpeedLimit(lat: number, lng: number, heading?: number): Promise<SpeedLimitLookup>;
   /** Resolves `null` when the vote only withdrew this device's own still-queued proposal. */
   confirmSpeedLimitCorrection(vote: SpeedLimitVote): Promise<string | null>;
   fetchCorrections(): Promise<Correction[]>;
@@ -311,6 +460,23 @@ export interface TrafficNetworkClient {
   getNetworkStatus(): Promise<NetworkStatus>;
   /** The levels the network allows per country, and the legal notice to show before cameras are switched on. Local. */
   getCameraPolicy(): Promise<CameraPolicy>;
+  /** What the offline area is set to (mode, chosen regions, home, limit). Local. */
+  getOfflineSettings(): Promise<OfflineSettings>;
+  /** Chooses what is kept: `auto` (default), `regions` (ids from `listOfflineRegions`) or `all`. Applied with the next sync. */
+  setOfflineRegions(settings: { mode?: OfflineMode; regions?: string[] }): Promise<OfflineSettings>;
+  /** How the automatic area is cut, and where home is. */
+  setAutoRegionPolicy(policy: AutoRegionPolicyPatch): Promise<OfflineSettings>;
+  /** `maxBytes: null` removes the limit, absent leaves it. */
+  setStorageLimits(limits: { maxBytes?: number | null; wifiOnly?: boolean }): Promise<OfflineSettings>;
+  /** The host app tells the library whether the connection is metered; the library cannot tell. */
+  setConnectionMetered(metered: boolean): Promise<unknown>;
+  /** The server's regions with their size, whether chosen, and how much of each is stored. */
+  listOfflineRegions(): Promise<OfflineRegion[]>;
+  /** What a sync would fetch, let go of, or hold back — and whether it fits. */
+  getStoragePlan(): Promise<StoragePlan>;
+  getStorageUsage(): Promise<StorageUsage>;
+  /** Whether the offline data answers for this position. Local. */
+  getCoverage(lat: number, lng: number): Promise<Coverage>;
   pollEvents(): Promise<ClientEvent[]>;
   /** Closes the client: every later call fails with `closed`. */
   close(): Promise<unknown>;
@@ -335,10 +501,25 @@ export class BaseClient {
     radiusMeters: number,
     categories?: NearbyCategory[],
   ): Promise<NearbyItem[]>;
-  submitReport(type: HazardType, lat: number, lng: number, speedKmh?: number): Promise<string>;
+  submitReport(
+    type: HazardType,
+    lat: number,
+    lng: number,
+    speedKmh?: number,
+    ttlSeconds?: number,
+  ): Promise<string>;
+  submitReportWithDuration(
+    type: HazardType,
+    lat: number,
+    lng: number,
+    options?: { speedKmh?: number; ttlSeconds?: number },
+  ): Promise<SubmittedReport>;
+  getReportLimits(type: HazardType): Promise<ReportLimits>;
   confirmReport(reportId: string, stillThere: boolean): Promise<string>;
   reportCameraRemoved(cameraId: string): Promise<string>;
   reportWrongSpeedLimit(report: WrongSpeedLimitReport): Promise<Proposal>;
+  reportMissingSpeedLimit(report: MissingSpeedLimitReport): Promise<Proposal>;
+  lookupSpeedLimit(lat: number, lng: number, heading?: number): Promise<SpeedLimitLookup>;
   confirmSpeedLimitCorrection(vote: SpeedLimitVote): Promise<string | null>;
   fetchCorrections(): Promise<Correction[]>;
   updatePosition(lat: number, lng: number, speedKmh?: number): Promise<PositionUpdate>;
@@ -348,6 +529,15 @@ export class BaseClient {
   getSyncStatus(): Promise<SyncStatus>;
   getNetworkStatus(): Promise<NetworkStatus>;
   getCameraPolicy(): Promise<CameraPolicy>;
+  getOfflineSettings(): Promise<OfflineSettings>;
+  setOfflineRegions(settings: { mode?: OfflineMode; regions?: string[] }): Promise<OfflineSettings>;
+  setAutoRegionPolicy(policy: AutoRegionPolicyPatch): Promise<OfflineSettings>;
+  setStorageLimits(limits: { maxBytes?: number | null; wifiOnly?: boolean }): Promise<OfflineSettings>;
+  setConnectionMetered(metered: boolean): Promise<unknown>;
+  listOfflineRegions(): Promise<OfflineRegion[]>;
+  getStoragePlan(): Promise<StoragePlan>;
+  getStorageUsage(): Promise<StorageUsage>;
+  getCoverage(lat: number, lng: number): Promise<Coverage>;
   pollEvents(): Promise<ClientEvent[]>;
   close(): Promise<unknown>;
 }

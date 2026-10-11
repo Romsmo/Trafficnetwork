@@ -11,6 +11,7 @@ import {
   type ClientEvent,
   type ClientOptions,
   type NearbyItem,
+  type OfflineSettings,
   type SecureStore,
   type TrafficNetworkClient,
 } from "../node/index.js";
@@ -61,6 +62,32 @@ async function useAnyBinding(client: TrafficNetworkClient): Promise<void> {
     if (item.kind === "cameraZone") console.log(item.outline.length, item.cameraTypes);
     if (item.kind === "camera") console.log(item.lat, item.lng);
   }
+
+  // 1.2.0: own duration, speed limit for a road without one, lookup with online fallback
+  const limits = await client.getReportLimits("accident");
+  const asked = limits.defaultSeconds ?? 3600;
+  const queued = await client.submitReportWithDuration("accident", 52.52, 13.405, { ttlSeconds: asked });
+  console.log(queued.localId, queued.expiresInSeconds, queued.durationHonoured);
+  await client.submitReport("accident", 52.52, 13.405, undefined, asked);
+  await client.reportMissingSpeedLimit({ lat: 52.52, lng: 13.405, value: 30, unit: "kmh", bearing: 90 });
+  const lookup = await client.lookupSpeedLimit(52.52, 13.405, 90);
+  if (lookup.status === "found") console.log(lookup.value, lookup.source);
+  else if (lookup.status === "outsideOfflineArea") console.log("outside the offline area");
+
+  // 1.2.0: the offline area
+  const regions = await client.listOfflineRegions();
+  await client.setOfflineRegions({ mode: "regions", regions: regions.slice(0, 1).map((r) => r.id) });
+  await client.setAutoRegionPolicy({ homeLat: 52.52, homeLng: 13.405, homeRadiusTiles: 2 });
+  await client.setStorageLimits({ maxBytes: 200 * 1024 * 1024, wifiOnly: true });
+  await client.setConnectionMetered(false);
+  const plan = await client.getStoragePlan();
+  console.log(plan.toFetchBytes, plan.fits, plan.needsLocation, plan.deferredForLimit);
+  const usage = await client.getStorageUsage();
+  console.log(usage.storedTiles, usage.tiles[0]?.lastUsedUnixMs);
+  const coverage = await client.getCoverage(52.52, 13.405);
+  console.log(coverage.covered, coverage.state, coverage.usesNetwork);
+  const offline: OfflineSettings = await client.getOfflineSettings();
+  console.log(offline.mode, offline.maxBytes);
 
   // @ts-expect-error: not one of the eleven hazard types
   await client.submitReport("tsunami", 1, 2);

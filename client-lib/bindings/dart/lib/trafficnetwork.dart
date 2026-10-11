@@ -202,18 +202,42 @@ class TrafficNetworkClient {
       }))['items'] as List<Object?>;
 
   /// Queues a report; returns its local id. Sent by the next [sync].
+  /// [ttlSeconds] is how long it should live (within [getReportLimits]).
   Future<Object?> submitReport(
     String type,
     double lat,
     double lng, {
     double? speedKmh,
+    int? ttlSeconds,
   }) async =>
-      (await _object('submitReport', {
+      (await submitReportWithDuration(
+        type,
+        lat,
+        lng,
+        speedKmh: speedKmh,
+        ttlSeconds: ttlSeconds,
+      ))['localId'];
+
+  /// As [submitReport], but returns what was queued: `localId`,
+  /// `expiresInSeconds`, `durationHonoured`, `defaultSeconds`.
+  Future<Map<String, Object?>> submitReportWithDuration(
+    String type,
+    double lat,
+    double lng, {
+    double? speedKmh,
+    int? ttlSeconds,
+  }) =>
+      _object('submitReport', {
         'type': type,
         'lat': lat,
         'lng': lng,
         if (speedKmh != null) 'speedKmh': speedKmh,
-      }))['localId'];
+        if (ttlSeconds != null) 'ttlSeconds': ttlSeconds,
+      });
+
+  /// Default, minimum and maximum duration of a report of this type. Local.
+  Future<Map<String, Object?>> getReportLimits(String type) =>
+      _object('getReportLimits', {'type': type});
 
   Future<Object?> confirmReport(String reportId, bool stillThere) async =>
       (await _object('confirmReport', {
@@ -238,6 +262,39 @@ class TrafficNetworkClient {
         if (segmentId != null) 'segmentId': segmentId,
         if (lat != null && lng != null) ...{'lat': lat, 'lng': lng},
         if (reason != null) 'reason': reason,
+      });
+
+  /// "There is no speed limit on record for this road": a value for a road
+  /// the import has none for.
+  Future<Map<String, Object?>> reportMissingSpeedLimit({
+    required double lat,
+    required double lng,
+    required int value,
+    required String unit,
+    double? bearing,
+    String? reason,
+  }) =>
+      _object('reportMissingSpeedLimit', {
+        'lat': lat,
+        'lng': lng,
+        'value': value,
+        'unit': unit,
+        if (bearing != null) 'bearing': bearing,
+        if (reason != null) 'reason': reason,
+      });
+
+  /// The limit here, from the offline data or (outside the offline area)
+  /// from the server. `status` is `found`, `notRecorded` or
+  /// `outsideOfflineArea`.
+  Future<Map<String, Object?>> lookupSpeedLimit(
+    double lat,
+    double lng, {
+    double? heading,
+  }) =>
+      _object('lookupSpeedLimit', {
+        'lat': lat,
+        'lng': lng,
+        if (heading != null) 'heading': heading,
       });
 
   Future<Object?> confirmSpeedLimitCorrection({
@@ -283,6 +340,71 @@ class TrafficNetworkClient {
   /// host switch (`cameraNamespaceEnabled`), the legal notice to show before
   /// cameras are switched on.
   Future<Map<String, Object?>> getCameraPolicy() => _object('getCameraPolicy');
+
+  // ------------------------------------------------- offline area
+
+  Future<Map<String, Object?>> getOfflineSettings() =>
+      _object('getOfflineSettings');
+
+  /// What is kept: `auto` (default), `regions` (ids from
+  /// [listOfflineRegions]) or `all`. Applied with the next sync.
+  Future<Map<String, Object?>> setOfflineRegions({
+    String? mode,
+    List<String>? regions,
+  }) =>
+      _object('setOfflineRegions', {
+        if (mode != null) 'mode': mode,
+        if (regions != null) 'regions': regions,
+      });
+
+  /// How the automatic area is cut, and where home is.
+  Future<Map<String, Object?>> setAutoRegionPolicy({
+    int? homeRadiusTiles,
+    int? currentRadiusTiles,
+    int? recentPlaces,
+    int? recentRadiusTiles,
+    double? homeLat,
+    double? homeLng,
+  }) =>
+      _object('setAutoRegionPolicy', {
+        if (homeRadiusTiles != null) 'homeRadiusTiles': homeRadiusTiles,
+        if (currentRadiusTiles != null) 'currentRadiusTiles': currentRadiusTiles,
+        if (recentPlaces != null) 'recentPlaces': recentPlaces,
+        if (recentRadiusTiles != null) 'recentRadiusTiles': recentRadiusTiles,
+        if (homeLat != null && homeLng != null) ...{
+          'homeLat': homeLat,
+          'homeLng': homeLng,
+        },
+      });
+
+  /// [maxBytes] is the most the offline data may take; pass
+  /// [removeLimit] to remove a limit. [wifiOnly]: no downloads over a
+  /// metered connection beyond the tile of the current position.
+  Future<Map<String, Object?>> setStorageLimits({
+    int? maxBytes,
+    bool removeLimit = false,
+    bool? wifiOnly,
+  }) =>
+      _object('setStorageLimits', {
+        if (removeLimit) 'maxBytes': null else if (maxBytes != null) 'maxBytes': maxBytes,
+        if (wifiOnly != null) 'wifiOnly': wifiOnly,
+      });
+
+  /// The host app tells the library whether the connection is metered.
+  Future<void> setConnectionMetered(bool metered) async {
+    await call('setConnectionMetered', {'metered': metered});
+  }
+
+  Future<List<Object?>> listOfflineRegions() async =>
+      (await _object('listOfflineRegions'))['regions'] as List<Object?>;
+
+  Future<Map<String, Object?>> getStoragePlan() => _object('getStoragePlan');
+
+  Future<Map<String, Object?>> getStorageUsage() => _object('getStorageUsage');
+
+  /// Whether the offline data answers for this position. Local.
+  Future<Map<String, Object?>> getCoverage(double lat, double lng) =>
+      _object('getCoverage', {'lat': lat, 'lng': lng});
 
   Future<List<Object?>> pollEvents() async =>
       (await _object('pollEvents'))['events'] as List<Object?>;

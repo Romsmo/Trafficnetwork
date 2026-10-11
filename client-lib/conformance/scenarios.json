@@ -10,6 +10,7 @@
         "credentials": { "type": "client", "clientId": "conformance", "clientSecret": "secret" }
       },
       "steps": [
+        { "call": "setOfflineRegions", "args": { "mode": "all" }, "expect": { "mode": "all" } },
         { "call": "version", "expect": { "apiVersion": 1 } },
         { "call": "getSyncStatus", "expect": { "connection": "never", "pendingWrites": 0 } },
         { "call": "getSpeedLimitAt", "args": { "lat": 52.0, "lng": 13.005 }, "expect": null },
@@ -85,6 +86,7 @@
         "credentials": { "type": "client", "clientId": "conformance", "clientSecret": "secret" }
       },
       "steps": [
+        { "call": "setOfflineRegions", "args": { "mode": "all" }, "expect": { "mode": "all" } },
         { "call": "sync", "expect": { "ok": true } },
         { "mockFail": { "server": "main", "route": "POST /v1/hazard-reports", "status": 503, "times": 1 } },
         { "call": "submitReport", "args": { "type": "traffic", "lat": 52.0, "lng": 13.0 }, "expectKeys": ["localId"] },
@@ -101,6 +103,7 @@
         "credentials": { "type": "client", "clientId": "conformance", "clientSecret": "secret" }
       },
       "steps": [
+        { "call": "setOfflineRegions", "args": { "mode": "all" }, "expect": { "mode": "all" } },
         { "call": "sync", "expect": { "ok": true } },
         {
           "call": "getSpeedLimitAt",
@@ -119,6 +122,7 @@
         "credentials": { "type": "client", "clientId": "conformance", "clientSecret": "secret" }
       },
       "steps": [
+        { "call": "setOfflineRegions", "args": { "mode": "all" }, "expect": { "mode": "all" } },
         { "call": "sync", "expect": { "ok": true } },
         {
           "call": "getNetworkStatus",
@@ -160,6 +164,7 @@
         "credentials": { "type": "client", "clientId": "conformance", "clientSecret": "secret" }
       },
       "steps": [
+        { "call": "setOfflineRegions", "args": { "mode": "all" }, "expect": { "mode": "all" } },
         { "call": "sync", "expect": { "ok": true } },
         { "call": "getNetworkStatus", "expect": { "cameraNamespaceEnabled": false, "configVersion": null } }
       ]
@@ -175,6 +180,7 @@
         "credentials": { "type": "client", "clientId": "conformance", "clientSecret": "secret" }
       },
       "steps": [
+        { "call": "setOfflineRegions", "args": { "mode": "all" }, "expect": { "mode": "all" } },
         { "call": "sync", "expect": { "ok": true } },
         { "call": "getNetworkStatus", "expect": { "cameraNamespaceEnabled": false, "configVersion": 3 } }
       ]
@@ -190,6 +196,7 @@
         "credentials": { "type": "client", "clientId": "conformance", "clientSecret": "secret" }
       },
       "steps": [
+        { "call": "setOfflineRegions", "args": { "mode": "all" }, "expect": { "mode": "all" } },
         { "call": "sync", "expect": { "ok": true } },
         { "call": "getNetworkStatus", "expect": { "cameraNamespaceEnabled": true, "configVersion": null } }
       ]
@@ -204,6 +211,7 @@
         "credentials": { "type": "client", "clientId": "conformance", "clientSecret": "secret" }
       },
       "steps": [
+        { "call": "setOfflineRegions", "args": { "mode": "all" }, "expect": { "mode": "all" } },
         { "call": "sync", "expect": { "ok": true } },
         { "call": "getNearby", "args": { "lat": 52.52, "lng": 13.405, "radiusMeters": 500, "categories": ["cameras"] }, "expect": { "items": [ { "kind": "cameraZone", "id": "zone-1", "cameraTypes": ["fixedSpeedCamera", "mobileSpeedCamera"], "distanceMeters": 0 } ] } },
         { "call": "getCameraPolicy", "expect": { "hostEnabled": true, "active": true, "maxLevel": "zones", "defaultLevel": "zones", "notice": { "version": 1 } } }
@@ -219,6 +227,7 @@
         "credentials": { "type": "client", "clientId": "conformance", "clientSecret": "secret" }
       },
       "steps": [
+        { "call": "setOfflineRegions", "args": { "mode": "all" }, "expect": { "mode": "all" } },
         { "call": "sync", "expect": { "ok": true } },
         { "call": "getNearby", "args": { "lat": 52.52, "lng": 13.405, "radiusMeters": 500, "categories": ["cameras"] }, "expectSome": { "path": "items", "match": { "kind": "camera", "id": "cam-1" } } },
         { "call": "getNearby", "args": { "lat": 52.52, "lng": 13.405, "radiusMeters": 500, "categories": ["cameras"] }, "expectSome": { "path": "items", "match": { "kind": "cameraZone", "id": "zone-1" } } },
@@ -234,6 +243,7 @@
         "credentials": { "type": "client", "clientId": "conformance", "clientSecret": "secret" }
       },
       "steps": [
+        { "call": "setOfflineRegions", "args": { "mode": "all" }, "expect": { "mode": "all" } },
         { "call": "sync", "expect": { "ok": true } },
         { "call": "getNearby", "args": { "lat": 52.52, "lng": 13.405, "radiusMeters": 500, "categories": ["cameras"] }, "expect": { "items": [] } },
         { "call": "getCameraPolicy", "expect": { "hostEnabled": false, "active": false, "maxLevel": "full", "notice": { "text": { "de": "Hinweis (Mock)" } } } }
@@ -250,6 +260,7 @@
         "credentials": { "type": "client", "clientId": "conformance", "clientSecret": "secret" }
       },
       "steps": [
+        { "call": "setOfflineRegions", "args": { "mode": "all" }, "expect": { "mode": "all" } },
         { "call": "sync", "expect": { "ok": true } },
         { "call": "getNetworkStatus", "expect": { "configVersion": 4 } },
         { "call": "getNearby", "args": { "lat": 52.52, "lng": 13.405, "radiusMeters": 500, "categories": ["cameras"] }, "expect": { "items": [] } },
@@ -266,6 +277,7 @@
         "credentials": { "type": "client", "clientId": "conformance", "clientSecret": "secret" }
       },
       "steps": [
+        { "call": "setOfflineRegions", "args": { "mode": "all" }, "expect": { "mode": "all" } },
         { "call": "sync", "expect": { "ok": true } },
         { "call": "getNearby", "args": { "lat": 52.52, "lng": 13.405, "radiusMeters": 500, "categories": ["cameras"] }, "expectSome": { "path": "items", "match": { "kind": "camera", "id": "cam-1" } } },
         { "mockSet": { "server": "main", "config": { "cameraPolicy": { "defaultLevel": "full", "byCountry": { "DE": "zones" }, "version": "p2" }, "cameraData": { "camera": false, "zone": true } } } },
@@ -284,12 +296,131 @@
         "credentials": { "type": "client", "clientId": "conformance", "clientSecret": "secret" }
       },
       "steps": [
+        { "call": "setOfflineRegions", "args": { "mode": "all" }, "expect": { "mode": "all" } },
         { "call": "sync", "expect": { "ok": true } },
         { "call": "getNearby", "args": { "lat": 52.52, "lng": 13.405, "radiusMeters": 500, "categories": ["cameras"] }, "expectSome": { "path": "items", "match": { "kind": "camera", "id": "cam-1" } } },
         { "mockSet": { "server": "main", "config": { "cameraNamespace": false, "cameraPolicy": { "namespaceEnabled": false, "defaultLevel": "full" }, "cameraData": { "camera": false, "zone": false } } } },
         { "call": "sync", "expect": { "ok": true } },
         { "call": "getNearby", "args": { "lat": 52.52, "lng": 13.405, "radiusMeters": 500, "categories": ["cameras"] }, "expect": { "items": [] } },
         { "call": "getCameraPolicy", "expect": { "enabled": false, "active": false, "maxLevel": "off" } }
+      ]
+    },
+    {
+      "name": "report duration: the server's bounds, an own duration, and a server that takes none",
+      "servers": {
+        "main": { "reportExpiry": { "accident": { "defaultSeconds": 1800, "minSeconds": 300, "maxSeconds": 7200 } } }
+      },
+      "options": { "nodes": ["${main}"], "discovery": false, "credentials": { "type": "client", "clientId": "conformance", "clientSecret": "secret" } },
+      "steps": [
+        { "call": "getReportLimits", "args": { "type": "accident" }, "expect": { "supported": false } },
+        { "call": "sync", "expect": { "ok": true } },
+        { "call": "getReportLimits", "args": { "type": "accident" }, "expect": { "supported": true, "defaultSeconds": 1800, "minSeconds": 300, "maxSeconds": 7200 } },
+        { "call": "getReportLimits", "args": { "type": "ice" }, "expect": { "supported": false, "defaultSeconds": 900 } },
+        { "call": "submitReport", "args": { "type": "accident", "lat": 52.0, "lng": 13.0, "ttlSeconds": 3600 }, "expect": { "expiresInSeconds": 3600, "durationHonoured": true, "defaultSeconds": 1800 } },
+        { "call": "submitReport", "args": { "type": "accident", "lat": 52.0, "lng": 13.0, "ttlSeconds": 60 }, "expectError": "ttlOutOfRange" },
+        { "call": "submitReport", "args": { "type": "accident", "lat": 52.0, "lng": 13.0, "ttlSeconds": 99999 }, "expectError": "ttlOutOfRange" },
+        { "call": "submitReport", "args": { "type": "ice", "lat": 52.0, "lng": 13.0, "ttlSeconds": 600 }, "expect": { "expiresInSeconds": null, "durationHonoured": false } },
+        { "call": "getSyncStatus", "expect": { "pendingWrites": 2 } },
+        { "call": "sync", "expect": { "submitted": 2, "pendingWrites": 0 } },
+        {
+          "mockLog": {
+            "server": "main",
+            "route": "POST /v1/hazard-reports",
+            "count": 2,
+            "bodyIncludes": { "type": "accident", "expiresInSeconds": 3600 },
+            "signatureValid": true
+          }
+        }
+      ]
+    },
+    {
+      "name": "no speed limit on record: a value for the road, queued offline, sent with a signature",
+      "servers": { "main": { "communityCorrections": true } },
+      "options": { "nodes": ["${main}"], "discovery": false, "credentials": { "type": "client", "clientId": "conformance", "clientSecret": "secret" } },
+      "steps": [
+        { "call": "setOfflineRegions", "args": { "mode": "all" } },
+        { "call": "sync", "expect": { "ok": true } },
+        { "call": "reportMissingSpeedLimit", "args": { "lat": 52.3, "lng": 13.2, "value": 30, "unit": "kmh" }, "expectError": "invalidArgument" },
+        { "call": "reportMissingSpeedLimit", "args": { "lat": 52.3, "lng": 13.2, "bearing": 90, "value": 33, "unit": "kmh" }, "expectError": "invalidArgument" },
+        { "call": "reportMissingSpeedLimit", "args": { "lat": 52.52, "lng": 13.405, "bearing": 90, "value": 50, "unit": "kmh" }, "expectError": "roadAlreadyHasLimit" },
+        { "call": "reportMissingSpeedLimit", "args": { "lat": 52.3, "lng": 13.2, "bearing": 90, "value": 30, "unit": "kmh" }, "expect": { "state": "queued", "value": 30, "unit": "kmh" }, "expectKeys": ["segmentKey"] },
+        { "call": "getSyncStatus", "expect": { "pendingWrites": 1 } },
+        { "call": "sync", "expect": { "submitted": 1, "pendingWrites": 0 } },
+        { "mockLog": { "server": "main", "route": "POST /v1/speed-limit-gaps", "count": 1, "bodyIncludes": { "value": 30, "unit": "kmh" } } }
+      ]
+    },
+    {
+      "name": "offline area, automatic: nothing without a position, then the surroundings; lookups fall back online outside",
+      "servers": { "main": { "secondTile": true } },
+      "options": { "nodes": ["${main}"], "discovery": false, "credentials": { "type": "client", "clientId": "conformance", "clientSecret": "secret" } },
+      "steps": [
+        { "call": "getOfflineSettings", "expect": { "mode": "auto", "wifiOnly": true, "maxBytes": null } },
+        { "call": "sync", "expect": { "ok": true, "needsLocation": true, "offlineFetchedTiles": 0 } },
+        { "call": "getStoragePlan", "expect": { "mode": "auto", "needsLocation": true, "storedTiles": 0 } },
+        { "call": "getCoverage", "args": { "lat": 52.52, "lng": 13.405 }, "expect": { "covered": false, "state": "outside" } },
+        { "call": "updatePosition", "args": { "lat": 52.52, "lng": 13.405 } },
+        { "call": "getCoverage", "args": { "lat": 52.52, "lng": 13.405 }, "expect": { "covered": false, "state": "wanted" } },
+        { "call": "sync", "expect": { "ok": true, "needsLocation": false, "offlineFetchedTiles": 2 } },
+        { "call": "getSpeedLimitAt", "args": { "lat": 52.52, "lng": 13.405 }, "expect": { "value": 30, "segmentId": "seg-berlin" } },
+        { "call": "getCoverage", "args": { "lat": 52.52, "lng": 13.405 }, "expect": { "covered": true, "state": "stored", "usesNetwork": false } },
+        { "call": "getStorageUsage", "expect": { "storedTiles": 2 } },
+        { "call": "listOfflineRegions", "expectSome": { "path": "regions", "match": { "id": "DE-berlin", "country": "DE", "state": "complete" } } },
+        { "call": "lookupSpeedLimit", "args": { "lat": 52.52, "lng": 13.405 }, "expect": { "status": "found", "source": "offline", "value": 30 } },
+        { "call": "lookupSpeedLimit", "args": { "lat": 52.6, "lng": 13.4 }, "expect": { "status": "notRecorded", "source": "offline" } },
+        { "call": "getCoverage", "args": { "lat": 48.137, "lng": 11.575 }, "expect": { "covered": false, "state": "outside", "usesNetwork": true } },
+        { "call": "lookupSpeedLimit", "args": { "lat": 48.137, "lng": 11.575 }, "expect": { "status": "found", "source": "online", "value": 80, "segmentId": "online-seg" } },
+        { "call": "lookupSpeedLimit", "args": { "lat": 53.55, "lng": 10.0 }, "expect": { "status": "notRecorded", "source": "online" } },
+        { "mockFail": { "server": "main", "route": "GET /v1/speed-limit", "status": 503, "times": 5 } },
+        { "call": "lookupSpeedLimit", "args": { "lat": 48.137, "lng": 11.575 }, "expect": { "status": "outsideOfflineArea" } }
+      ]
+    },
+    {
+      "name": "offline area: a metered connection holds back everything but the tile of the position",
+      "servers": { "main": { "secondTile": true } },
+      "options": { "nodes": ["${main}"], "discovery": false, "credentials": { "type": "client", "clientId": "conformance", "clientSecret": "secret" } },
+      "steps": [
+        { "call": "setConnectionMetered", "args": { "metered": true } },
+        { "call": "updatePosition", "args": { "lat": 52.52, "lng": 13.405 } },
+        { "call": "sync", "expect": { "ok": true, "offlineFetchedTiles": 1, "offlineDeferredTiles": 1 } },
+        { "call": "getStoragePlan", "expect": { "deferredForMetered": 1, "storedTiles": 1 } },
+        { "call": "getSpeedLimitAt", "args": { "lat": 52.52, "lng": 13.405 }, "expect": { "value": 30 } },
+        { "call": "setConnectionMetered", "args": { "metered": false } },
+        { "call": "sync", "expect": { "ok": true, "offlineFetchedTiles": 1, "offlineDeferredTiles": 0 } },
+        { "call": "getStorageUsage", "expect": { "storedTiles": 2 } }
+      ]
+    },
+    {
+      "name": "offline area: chosen regions, a storage limit, and letting go of what is no longer wanted",
+      "servers": { "main": { "secondTile": true } },
+      "options": { "nodes": ["${main}"], "discovery": false, "credentials": { "type": "client", "clientId": "conformance", "clientSecret": "secret" } },
+      "steps": [
+        { "call": "sync", "expect": { "ok": true } },
+        { "call": "listOfflineRegions", "expectSome": { "path": "regions", "match": { "id": "DE-north", "country": "DE" } } },
+        { "call": "setOfflineRegions", "args": { "regions": ["DE-north"] }, "expect": { "mode": "regions", "regions": ["DE-north"] } },
+        { "call": "sync", "expect": { "ok": true, "offlineFetchedTiles": 1 } },
+        { "call": "getSpeedLimitAt", "args": { "lat": 52.9, "lng": 13.005 }, "expect": { "value": 70 } },
+        { "call": "getSpeedLimitAt", "args": { "lat": 52.52, "lng": 13.405 }, "expect": null },
+        { "call": "setStorageLimits", "args": { "maxBytes": 700 }, "expect": { "maxBytes": 700 } },
+        { "call": "setOfflineRegions", "args": { "regions": ["DE-north", "DE-berlin"] } },
+        { "call": "getStoragePlan", "expect": { "deferredForLimit": 1, "maxBytes": 700 } },
+        { "call": "sync", "expect": { "ok": true, "offlineFetchedTiles": 0, "offlineDeferredTiles": 1 } },
+        { "call": "setStorageLimits", "args": { "maxBytes": null }, "expect": { "maxBytes": null } },
+        { "call": "sync", "expect": { "ok": true, "offlineFetchedTiles": 1 } },
+        { "call": "getSpeedLimitAt", "args": { "lat": 52.52, "lng": 13.405 }, "expect": { "value": 30 } },
+        { "call": "setOfflineRegions", "args": { "regions": ["DE-berlin"] } },
+        { "call": "sync", "expect": { "ok": true } },
+        { "call": "getStorageUsage", "expect": { "storedTiles": 2 } }
+      ]
+    },
+    {
+      "name": "offline area: a server without the regions endpoint still syncs in the automatic mode",
+      "servers": { "main": { "noRegions": true } },
+      "options": { "nodes": ["${main}"], "discovery": false, "credentials": { "type": "client", "clientId": "conformance", "clientSecret": "secret" } },
+      "steps": [
+        { "call": "updatePosition", "args": { "lat": 52.52, "lng": 13.405 } },
+        { "call": "sync", "expect": { "ok": true, "offlineFetchedTiles": 1 } },
+        { "call": "getSpeedLimitAt", "args": { "lat": 52.52, "lng": 13.405 }, "expect": { "value": 30 } },
+        { "call": "listOfflineRegions", "expectError": "notOffered" }
       ]
     }
   ]
