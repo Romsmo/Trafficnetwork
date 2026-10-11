@@ -65,6 +65,7 @@ mod tests {
             network_config: None,
             community_corrections: None,
             camera_policy: None,
+            report_expiry: HashMap::new(),
         }
     }
 

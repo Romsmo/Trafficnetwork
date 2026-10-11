@@ -13,8 +13,11 @@ pub mod camera_policy;
 pub mod corrections;
 pub mod engine;
 pub mod expiry;
+pub mod gaps;
 pub mod matching;
+pub mod offline;
 pub mod realtime;
+pub mod report_ttl;
 pub(crate) mod server_time;
 pub mod types;
 pub mod withholding;
@@ -29,10 +32,14 @@ pub use camera_policy::{
     CameraZone, EffectiveCameraPolicy, ZoneBoundary,
 };
 pub use corrections::{
-    confirm_speed_limit_correction, correction_id, fetch_corrections, report_wrong_speed_limit,
-    Correction, CorrectionError, CorrectionTarget, SegmentRef, WrongSpeedLimitReport,
+    confirm_speed_limit_correction, correction_id, fetch_corrections, report_missing_speed_limit,
+    report_wrong_speed_limit, Correction, CorrectionError, CorrectionTarget,
+    MissingSpeedLimitReport, SegmentRef, WrongSpeedLimitReport,
 };
-pub use engine::{BootstrapPlan, BootstrapProgress, SyncEngine, SyncError, SyncObserver};
+pub use engine::{
+    BootstrapPlan, BootstrapProgress, StaticPlanReport, StaticSyncOutcome, StaticSyncRequest,
+    SyncEngine, SyncError, SyncObserver,
+};
 pub use expiry::{expires_at_unix_ms, expiry_ms_for, is_expired};
 pub use matching::{
     distance_to_line_string_meters, haversine_distance_meters, nearby_hazard_reports,
@@ -40,6 +47,9 @@ pub use matching::{
     NearestSpeedLimit, SpeedLimitOrigin,
 };
 pub use realtime::run as run_realtime;
+pub use report_ttl::{
+    check_ttl, limits_for, remaining_seconds, ExpiryRule, ReportLimits, TtlDecision, TtlOutOfRange,
+};
 pub use types::{
     effective_camera_namespace_enabled, ClientConfig, CommunityCorrectionsConfig, CorrectionReason,
     DeltaPage, EventLogEntry, FixedSpeedCamera, Geometry, HazardReport, HazardType,

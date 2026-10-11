@@ -236,6 +236,17 @@ fn client_on(
     store: Arc<dyn Store>,
     options: ClientOptions,
 ) -> TrafficNetworkClient {
+    // These tests are about other things than the offline area: they keep everything, as before 1.2.
+    if store.get_setting("offline").unwrap().is_none() {
+        crate::sync::offline::save_settings(
+            &*store,
+            &crate::sync::offline::OfflineSettings {
+                mode: crate::sync::offline::OfflineMode::All,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    }
     TrafficNetworkClient::new(
         options,
         Platform {
@@ -1092,4 +1103,840 @@ fn the_camera_display_is_off_unless_the_host_app_switches_it_on() {
             .unwrap()
             .host_enabled
     );
+}
+
+// ------------------------------------------------------------ duration of a report (server 1.1.0)
+
+fn config_with_report_expiry() -> Value {
+    let mut config = config_json(false);
+    config["hazardExpiryMsByType"] =
+        json!({ "traffic": 1_500_000, "mobileSpeedCamera": 10_800_000 });
+    config["reportExpiry"] = json!({
+        "traffic": { "defaultSeconds": 1500, "minSeconds": 300, "maxSeconds": 21600 },
+        "mobileSpeedCamera": { "defaultSeconds": 10800, "minSeconds": 600, "maxSeconds": 43200 },
+        // a type this build does not know, and a malformed entry: neither may break the configuration
+        "hovercraft": { "defaultSeconds": 60, "minSeconds": 1, "maxSeconds": 120 },
+        "ice": { "defaultSeconds": "soon" }
+    });
+    config
+}
+
+#[tokio::test]
+async fn the_limits_of_a_report_type_come_from_the_servers_rules() {
+    let server = working_server(false);
+    server.route("GET", "/v1/config", 200, config_with_report_expiry());
+    let client = client(server);
+    client.sync().await.unwrap();
+
+    let limits = client
+        .call("getReportLimits", json!({ "type": "mobileSpeedCamera" }))
+        .await
+        .unwrap();
+    assert_eq!(
+        limits,
+        json!({ "supported": true, "defaultSeconds": 10800, "minSeconds": 600, "maxSeconds": 43200 })
+    );
+    // a type the server lists nothing for has no bounds to offer
+    let ice = client
+        .call("getReportLimits", json!({ "type": "ice" }))
+        .await
+        .unwrap();
+    assert_eq!(ice["supported"], json!(false));
+}
+
+#[tokio::test]
+async fn a_requested_duration_is_queued_signed_and_sent() {
+    let server = working_server(false);
+    server.route("GET", "/v1/config", 200, config_with_report_expiry());
+    let client = client(server.clone());
+    client.sync().await.unwrap();
+
+    let queued = client
+        .call(
+            "submitReport",
+            json!({ "type": "mobileSpeedCamera", "lat": 52.0, "lng": 13.0, "ttlSeconds": 7200 }),
+        )
+        .await
+        .unwrap();
+    assert_eq!(queued["expiresInSeconds"], json!(7200));
+    assert_eq!(queued["durationHonoured"], json!(true));
+    assert_eq!(queued["defaultSeconds"], json!(10800));
+    assert!(queued["localId"].is_string());
+
+    // the local view uses it at once: the pending report ends in two hours, not at the server's default
+    let nearby = client
+        .call(
+            "getNearby",
+            json!({ "lat": 52.0, "lng": 13.0, "radiusMeters": 500, "categories": ["hazards"] }),
+        )
+        .await
+        .unwrap();
+    let pending = &nearby["items"][0];
+    assert_eq!(pending["pending"], json!(true));
+    let ends = chrono::DateTime::parse_from_rfc3339(pending["expiresAt"].as_str().unwrap())
+        .unwrap()
+        .timestamp_millis();
+    assert_eq!(ends, NOW_MS + 7_200_000);
+
+    client.sync().await.unwrap();
+    let sent = server.bodies_to("POST", "/v1/hazard-reports");
+    assert_eq!(sent.len(), 1);
+    assert_eq!(sent[0]["expiresInSeconds"], json!(7200));
+}
+
+#[tokio::test]
+async fn a_duration_outside_the_bounds_is_refused_before_anything_is_queued() {
+    let server = working_server(false);
+    server.route("GET", "/v1/config", 200, config_with_report_expiry());
+    let store = Arc::new(InMemoryStore::new());
+    let client = client_on(server.clone(), store.clone(), options());
+    client.sync().await.unwrap();
+
+    for seconds in [30, 600_000] {
+        let error = client
+            .call(
+                "submitReport",
+                json!({ "type": "traffic", "lat": 52.0, "lng": 13.0, "ttlSeconds": seconds }),
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(error.code, "ttlOutOfRange");
+        assert!(error.message.contains("300") && error.message.contains("21600"));
+    }
+    assert!(store.pending_writes().unwrap().is_empty());
+    assert_eq!(server.count("POST", "/v1/hazard-reports"), 0);
+}
+
+#[tokio::test]
+async fn an_older_server_takes_no_duration_and_the_host_app_is_told() {
+    let server = working_server(false); // its configuration has no `reportExpiry`
+    let client = client(server.clone());
+    client.sync().await.unwrap();
+
+    let limits = client
+        .call("getReportLimits", json!({ "type": "traffic" }))
+        .await
+        .unwrap();
+    assert_eq!(limits["supported"], json!(false));
+    assert_eq!(limits["defaultSeconds"], json!(900));
+
+    let queued = client
+        .call(
+            "submitReport",
+            json!({ "type": "traffic", "lat": 52.0, "lng": 13.0, "ttlSeconds": 3600 }),
+        )
+        .await
+        .unwrap();
+    assert_eq!(queued["durationHonoured"], json!(false));
+    assert_eq!(queued["expiresInSeconds"], json!(null));
+
+    client.sync().await.unwrap();
+    let sent = server.bodies_to("POST", "/v1/hazard-reports");
+    assert!(
+        sent[0].get("expiresInSeconds").is_none(),
+        "an older server never sees the field"
+    );
+}
+
+#[tokio::test]
+async fn without_a_duration_nothing_changes_for_the_host_app() {
+    let server = working_server(false);
+    server.route("GET", "/v1/config", 200, config_with_report_expiry());
+    let client = client(server.clone());
+    client.sync().await.unwrap();
+    let queued = client
+        .call(
+            "submitReport",
+            json!({ "type": "traffic", "lat": 52.0, "lng": 13.0 }),
+        )
+        .await
+        .unwrap();
+    assert_eq!(queued["expiresInSeconds"], json!(null));
+    assert_eq!(queued["durationHonoured"], json!(true));
+    assert!(queued["localId"].is_string());
+    client.sync().await.unwrap();
+    assert!(server.bodies_to("POST", "/v1/hazard-reports")[0]
+        .get("expiresInSeconds")
+        .is_none());
+}
+
+// ------------------------------------------------ "no speed limit on record here" (server 1.1.0)
+
+fn config_with_corrections() -> Value {
+    let mut config = config_json(false);
+    config["communityCorrections"] = json!({
+        "enabled": true, "confirmationsRequired": 3,
+        "valueRange": { "kmh": { "min": 5, "max": 150 }, "mph": { "min": 5, "max": 85 } },
+        "valueStep": 5, "rateLimit": { "max": 5, "windowMinutes": 60 }
+    });
+    config
+}
+
+/// A server like `working_server`, but whose one package is stored under its real H3 tile, so the position lookup
+/// knows which places the offline data covers.
+fn covered_server() -> Arc<ScriptedServer> {
+    let server = working_server(false);
+    server.route("GET", "/v1/config", 200, config_with_corrections());
+    let tile = crate::api::tiles::tile_at(52.0, 13.0, 4).unwrap();
+    let package = json!({
+        "tile": tile, "speedLimitSegments": [segment_json("seg1")],
+        "staticSigns": [], "fixedSpeedCameras": []
+    });
+    let hash = hex::encode(Sha256::digest(serde_json::to_vec(&package).unwrap()));
+    server.route(
+        "GET",
+        "/v1/static-data/manifest",
+        200,
+        json!({
+            "staticDataVersion": 7, "generatedAt": "2027-01-01T00:00:00Z",
+            "partitionResolution": 4,
+            "partitions": [{ "tile": tile, "hash": hash, "sizeBytes": 100 }]
+        }),
+    );
+    server.route(
+        "GET",
+        &format!("/v1/static-data/partitions/{tile}"),
+        200,
+        package,
+    );
+    server
+}
+
+#[tokio::test]
+async fn a_road_without_a_limit_is_proposed_by_place_and_direction_and_shown_at_once() {
+    let server = covered_server();
+    let client = client(server.clone());
+    client.sync().await.unwrap();
+
+    // 52.01 / 13.005 is 1 km north of the stored road: nothing on record there
+    let proposal = client
+        .call(
+            "reportMissingSpeedLimit",
+            json!({ "lat": 52.01, "lng": 13.005, "bearing": 90, "value": 30, "unit": "kmh", "reason": "missing" }),
+        )
+        .await
+        .unwrap();
+    assert_eq!(proposal["value"], json!(30));
+    assert_eq!(proposal["state"], json!("queued"));
+
+    // the device's own proposal answers for that place, marked as its own
+    let here = client
+        .call("getSpeedLimitAt", json!({ "lat": 52.01, "lng": 13.005 }))
+        .await
+        .unwrap();
+    assert_eq!(here["value"], json!(30.0));
+    assert_eq!(here["origin"]["kind"], json!("locallyProposed"));
+    assert!(here["segmentKey"].as_str().unwrap().starts_with("gap:"));
+
+    client.sync().await.unwrap();
+    let sent = server.bodies_to("POST", "/v1/speed-limit-gaps");
+    assert_eq!(sent.len(), 1);
+    assert_eq!(sent[0]["bearingDegrees"], json!(90.0));
+    let place = crate::sync::gaps::place_of(52.01, 13.005, 90.0).unwrap();
+    let signed = &sent[0]["deviceAssertion"]["payload"];
+    assert_eq!(signed["segmentKey"], json!(place.reference()));
+    assert_eq!(signed["vote"], json!("support"));
+    assert_eq!(signed["value"], json!(30));
+}
+
+#[tokio::test]
+async fn a_gap_is_refused_where_a_road_with_a_limit_runs_the_same_way() {
+    let server = covered_server();
+    let client = client(server.clone());
+    client.sync().await.unwrap();
+    // on the stored road (east-west along latitude 52.0)
+    let error = client
+        .call(
+            "reportMissingSpeedLimit",
+            json!({ "lat": 52.0, "lng": 13.005, "bearing": 90, "value": 30, "unit": "kmh" }),
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(error.code, "roadAlreadyHasLimit");
+    assert!(error.message.contains("seg1"));
+    // a side street leaving it (north-south) is still missing
+    let side = client
+        .call(
+            "reportMissingSpeedLimit",
+            json!({ "lat": 52.0, "lng": 13.005, "bearing": 0, "value": 30, "unit": "kmh" }),
+        )
+        .await;
+    assert!(side.is_ok());
+}
+
+#[tokio::test]
+async fn the_direction_falls_back_to_the_last_heading_and_is_otherwise_required() {
+    let server = covered_server();
+    let client = client(server.clone());
+    client.sync().await.unwrap();
+
+    let error = client
+        .call(
+            "reportMissingSpeedLimit",
+            json!({ "lat": 52.01, "lng": 13.005, "value": 30, "unit": "kmh" }),
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(error.code, "invalidArgument");
+
+    client
+        .call(
+            "updatePosition",
+            json!({ "lat": 52.01, "lng": 13.005, "heading": 270 }),
+        )
+        .await
+        .unwrap();
+    client
+        .call(
+            "reportMissingSpeedLimit",
+            json!({ "lat": 52.01, "lng": 13.005, "value": 30, "unit": "kmh" }),
+        )
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+async fn implausible_values_are_refused_before_anything_is_queued() {
+    let server = covered_server();
+    let client = client(server.clone());
+    client.sync().await.unwrap();
+    for value in [33, 400] {
+        let error = client
+            .call(
+                "reportMissingSpeedLimit",
+                json!({ "lat": 52.01, "lng": 13.005, "bearing": 90, "value": value, "unit": "kmh" }),
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(error.code, "invalidArgument");
+    }
+    client.sync().await.unwrap();
+    assert_eq!(server.count("POST", "/v1/speed-limit-gaps"), 0);
+}
+
+#[tokio::test]
+async fn a_lookup_always_says_what_it_found_and_where_it_looked() {
+    let server = covered_server();
+    let client = client(server.clone());
+    client.sync().await.unwrap();
+
+    // a limit, from the local store
+    let found = client
+        .call("lookupSpeedLimit", json!({ "lat": 52.0, "lng": 13.005 }))
+        .await
+        .unwrap();
+    assert_eq!(found["status"], json!("found"));
+    assert_eq!(found["source"], json!("offline"));
+    assert_eq!(found["value"], json!(50.0));
+
+    // inside a stored tile but nothing close: the data was looked at and holds no limit - and that is said
+    let none = client
+        .call("lookupSpeedLimit", json!({ "lat": 52.2, "lng": 13.005 }))
+        .await
+        .unwrap();
+    assert_eq!(
+        none,
+        json!({ "status": "notRecorded", "source": "offline" })
+    );
+
+    // outside every stored tile: the server is asked ...
+    server.route(
+        "GET",
+        "/v1/speed-limit",
+        200,
+        json!({ "speedLimit": 70, "speedLimitUnit": "kmh", "distanceMeters": 3.5, "segmentId": "far1", "segmentKey": "abc" }),
+    );
+    let online = client
+        .call("lookupSpeedLimit", json!({ "lat": 10.0, "lng": 10.0 }))
+        .await
+        .unwrap();
+    assert_eq!(online["status"], json!("found"));
+    assert_eq!(online["source"], json!("online"));
+    assert_eq!(online["value"], json!(70.0));
+    assert_eq!(online["origin"]["kind"], json!("imported"));
+
+    // ... and when it knows nothing there, that is "not recorded", not an error
+    server.route(
+        "GET",
+        "/v1/speed-limit",
+        404,
+        json!({ "error": { "code": "NOT_FOUND", "message": "no" } }),
+    );
+    let empty = client
+        .call("lookupSpeedLimit", json!({ "lat": 10.0, "lng": 10.0 }))
+        .await
+        .unwrap();
+    assert_eq!(
+        empty,
+        json!({ "status": "notRecorded", "source": "online" })
+    );
+}
+
+#[tokio::test]
+async fn outside_the_offline_area_without_a_network_is_said_not_silently_no_limit() {
+    let server = covered_server();
+    let client = client(server.clone());
+    client.sync().await.unwrap();
+    // no route for GET /v1/speed-limit: the scripted server answers like a dead network
+    let unreachable = client
+        .call("lookupSpeedLimit", json!({ "lat": 10.0, "lng": 10.0 }))
+        .await
+        .unwrap();
+    assert_eq!(unreachable, json!({ "status": "outsideOfflineArea" }));
+    // and inside the area nothing needs the network
+    let covered = client
+        .call("lookupSpeedLimit", json!({ "lat": 52.2, "lng": 13.005 }))
+        .await
+        .unwrap();
+    assert_eq!(covered["status"], json!("notRecorded"));
+}
+
+// ------------------------------------------------------------ the offline area (docs/offline-storage.md)
+
+const BERLIN: (f64, f64) = (52.52, 13.405);
+const MUNICH: (f64, f64) = (48.137, 11.575);
+const HAMBURG: (f64, f64) = (53.55, 9.99);
+
+fn tile(place: (f64, f64)) -> String {
+    crate::api::tiles::tile_at(place.0, place.1, 4).unwrap()
+}
+
+/// A server with three packages (Berlin, Munich, Hamburg), a regions list, and a package per tile holding one road.
+fn three_tile_server() -> Arc<ScriptedServer> {
+    let server = working_server(false);
+    server.route("GET", "/v1/config", 200, config_with_corrections());
+    let mut partitions = Vec::new();
+    for (name, place, size) in [
+        ("berlin", BERLIN, 1_000_000u64),
+        ("munich", MUNICH, 2_000_000),
+        ("hamburg", HAMBURG, 500_000),
+    ] {
+        let t = tile(place);
+        let package = json!({
+            "tile": t,
+            "speedLimitSegments": [{
+                "id": format!("seg-{name}"),
+                "geometry": { "type": "LineString", "coordinates": [[place.1, place.0], [place.1 + 0.002, place.0]] },
+                "speedLimit": 50, "speedLimitUnit": "kmh", "source": "osm", "sourceLicense": "ODbL",
+                "importedAt": "2027-01-01T00:00:00Z", "lastConfirmedAt": null
+            }],
+            "staticSigns": [], "fixedSpeedCameras": []
+        });
+        let hash = hex::encode(Sha256::digest(serde_json::to_vec(&package).unwrap()));
+        server.route(
+            "GET",
+            &format!("/v1/static-data/partitions/{t}"),
+            200,
+            package,
+        );
+        partitions.push(json!({ "tile": t, "hash": hash, "sizeBytes": size }));
+    }
+    server.route(
+        "GET",
+        "/v1/static-data/manifest",
+        200,
+        json!({
+            "staticDataVersion": 7, "generatedAt": "2027-01-01T00:00:00Z",
+            "partitionResolution": 4, "partitions": partitions
+        }),
+    );
+    server.route(
+        "GET",
+        "/v1/static-data/regions",
+        200,
+        json!({
+            "staticDataVersion": 7, "partitionResolution": 4, "generatedAt": "2027-01-01T00:00:00Z",
+            "countryBoundaries": true,
+            "regions": [
+                { "id": "DE", "country": "DE", "tileCount": 3, "sizeBytes": 3_500_000, "gzipBytes": 900_000,
+                  "brotliBytes": 850_000, "complete": true, "bbox": [9.0, 47.0, 14.0, 54.0],
+                  "tiles": [tile(BERLIN), tile(MUNICH), tile(HAMBURG)] },
+                { "id": "DE-south", "country": null, "tileCount": 1, "sizeBytes": 2_000_000, "gzipBytes": 500_000,
+                  "brotliBytes": 470_000, "complete": true, "bbox": [11.0, 47.0, 12.0, 49.0],
+                  "tiles": [tile(MUNICH)] }
+            ],
+            "totals": { "tileCount": 3, "sizeBytes": 3_500_000, "gzipBytes": 900_000, "brotliBytes": 850_000, "complete": true }
+        }),
+    );
+    server
+}
+
+fn offline_client(server: Arc<ScriptedServer>) -> (TrafficNetworkClient, Arc<InMemoryStore>) {
+    let store = Arc::new(InMemoryStore::new());
+    // no preset: the default is the automatic area
+    let c = TrafficNetworkClient::new(
+        options(),
+        Platform {
+            store: store.clone(),
+            secure_store: Arc::new(MemorySecureStore::new()),
+            http: server,
+            clock: Arc::new(FixedClock(AtomicI64::new(NOW_MS))),
+            ws: Arc::new(NeverWs),
+            sleep: Arc::new(NoopSleep),
+        },
+    )
+    .unwrap();
+    (c, store)
+}
+
+fn stored_tiles(store: &InMemoryStore) -> Vec<String> {
+    let mut tiles: Vec<String> = store
+        .partition_records()
+        .unwrap()
+        .into_iter()
+        .map(|r| r.tile)
+        .collect();
+    tiles.sort();
+    tiles
+}
+
+#[tokio::test]
+async fn the_default_is_an_area_around_where_the_device_is_and_nothing_before_it_knows() {
+    let server = three_tile_server();
+    let (client, store) = offline_client(server.clone());
+
+    // no position, no home: nothing is selected - and the host is told, instead of downloading Europe
+    let report = client.sync().await.unwrap();
+    assert!(report.needs_location);
+    assert_eq!(report.offline_fetched_tiles, 0);
+    assert!(stored_tiles(&store).is_empty());
+    let plan = client.call("getStoragePlan", json!({})).await.unwrap();
+    assert_eq!(plan["needsLocation"], json!(true));
+    assert_eq!(plan["mode"], json!("auto"));
+
+    // the first position is home and the area around it: Berlin only
+    client
+        .call(
+            "updatePosition",
+            json!({ "lat": BERLIN.0, "lng": BERLIN.1 }),
+        )
+        .await
+        .unwrap();
+    let report = client.sync().await.unwrap();
+    assert!(!report.needs_location);
+    assert_eq!(report.offline_fetched_tiles, 1);
+    assert_eq!(stored_tiles(&store), vec![tile(BERLIN)]);
+    let settings = client.call("getOfflineSettings", json!({})).await.unwrap();
+    assert_eq!(settings["mode"], json!("auto"));
+    assert!((settings["home"][0].as_f64().unwrap() - BERLIN.0).abs() < 1e-9);
+
+    // Munich was never asked for, and the lookup there goes online, and says so
+    assert_eq!(
+        server.count(
+            "GET",
+            &format!("/v1/static-data/partitions/{}", tile(MUNICH))
+        ),
+        0
+    );
+    let coverage = client
+        .call("getCoverage", json!({ "lat": BERLIN.0, "lng": BERLIN.1 }))
+        .await
+        .unwrap();
+    assert_eq!(coverage["covered"], json!(true));
+    assert_eq!(coverage["state"], json!("stored"));
+    let away = client
+        .call("getCoverage", json!({ "lat": MUNICH.0, "lng": MUNICH.1 }))
+        .await
+        .unwrap();
+    assert_eq!(away["covered"], json!(false));
+    assert_eq!(away["usesNetwork"], json!(true));
+}
+
+#[tokio::test]
+async fn driving_on_brings_the_new_area_and_keeps_home_and_the_recent_one() {
+    let server = three_tile_server();
+    let (client, store) = offline_client(server.clone());
+    client
+        .call(
+            "updatePosition",
+            json!({ "lat": BERLIN.0, "lng": BERLIN.1 }),
+        )
+        .await
+        .unwrap();
+    client.sync().await.unwrap();
+
+    client
+        .call(
+            "updatePosition",
+            json!({ "lat": MUNICH.0, "lng": MUNICH.1 }),
+        )
+        .await
+        .unwrap();
+    let report = client.sync().await.unwrap();
+    assert_eq!(report.offline_fetched_tiles, 1);
+    assert_eq!(stored_tiles(&store), {
+        let mut v = vec![tile(BERLIN), tile(MUNICH)];
+        v.sort();
+        v
+    });
+    // Berlin is home: it is not let go of; nothing was removed
+    assert_eq!(report.offline_removed_tiles, 0);
+
+    // the lookup in Munich is local now
+    let found = client
+        .call(
+            "lookupSpeedLimit",
+            json!({ "lat": MUNICH.0, "lng": MUNICH.1 + 0.001 }),
+        )
+        .await
+        .unwrap();
+    assert_eq!(found["status"], json!("found"));
+    assert_eq!(found["source"], json!("offline"));
+
+    // the use of a package is remembered: what was looked at last is let go of last
+    let usage = client.call("getStorageUsage", json!({})).await.unwrap();
+    assert_eq!(usage["storedTiles"], json!(2));
+    let munich = usage["tiles"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|t| t["tile"] == json!(tile(MUNICH)))
+        .unwrap();
+    assert_eq!(munich["sizeBytes"], json!(2_000_000));
+    assert_eq!(munich["lastUsedUnixMs"], json!(NOW_MS));
+}
+
+#[tokio::test]
+async fn chosen_regions_are_exactly_what_is_kept_and_a_deselected_one_is_let_go_of() {
+    let server = three_tile_server();
+    let (client, store) = offline_client(server.clone());
+    client
+        .call(
+            "updatePosition",
+            json!({ "lat": BERLIN.0, "lng": BERLIN.1 }),
+        )
+        .await
+        .unwrap();
+
+    let regions = client.call("listOfflineRegions", json!({})).await.unwrap();
+    let de = regions["regions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|r| r["id"] == json!("DE"))
+        .unwrap();
+    assert_eq!(de["tileCount"], json!(3));
+    assert_eq!(de["downloadBytes"], json!(850_000));
+    assert_eq!(de["state"], json!("none"));
+    assert_eq!(de["selected"], json!(false));
+
+    client
+        .call(
+            "setOfflineRegions",
+            json!({ "mode": "regions", "regions": ["DE"] }),
+        )
+        .await
+        .unwrap();
+    let report = client.sync().await.unwrap();
+    assert_eq!(report.offline_fetched_tiles, 3);
+    assert_eq!(stored_tiles(&store).len(), 3);
+    let regions = client.call("listOfflineRegions", json!({})).await.unwrap();
+    let de = regions["regions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|r| r["id"] == json!("DE"))
+        .unwrap();
+    assert_eq!(
+        (
+            de["state"].as_str().unwrap(),
+            de["selected"].as_bool().unwrap()
+        ),
+        ("complete", true)
+    );
+
+    // only the south: the rest is let go of at once, including its data
+    client
+        .call(
+            "setOfflineRegions",
+            json!({ "mode": "regions", "regions": ["DE-south"] }),
+        )
+        .await
+        .unwrap();
+    let report = client.sync().await.unwrap();
+    // Berlin is the home area: kept; Hamburg is not
+    assert_eq!(report.offline_removed_tiles, 1);
+    assert_eq!(stored_tiles(&store), {
+        let mut v = vec![tile(BERLIN), tile(MUNICH)];
+        v.sort();
+        v
+    });
+    let ids: Vec<String> = store
+        .all_entities()
+        .unwrap()
+        .speed_limit_segments
+        .into_iter()
+        .map(|s| s.id)
+        .collect();
+    assert!(
+        !ids.contains(&"seg-hamburg".to_string()),
+        "its data went with it"
+    );
+    assert!(ids.contains(&"seg-munich".to_string()));
+}
+
+#[tokio::test]
+async fn the_limit_lets_go_of_the_longest_unused_and_never_of_home() {
+    let server = three_tile_server();
+    let (client, store) = offline_client(server.clone());
+    // Berlin 1 MB json (0.7 device), Munich 2 MB (1.4), Hamburg 0.5 MB (0.35)
+    client
+        .call(
+            "updatePosition",
+            json!({ "lat": BERLIN.0, "lng": BERLIN.1 }),
+        )
+        .await
+        .unwrap();
+    client.sync().await.unwrap();
+    client
+        .call(
+            "updatePosition",
+            json!({ "lat": HAMBURG.0, "lng": HAMBURG.1 }),
+        )
+        .await
+        .unwrap();
+    client.sync().await.unwrap();
+    assert_eq!(stored_tiles(&store).len(), 2);
+
+    // room for Munich needs 1.4 MB; limit 2.2 MB: home (Berlin 0.7) stays, Hamburg (0.35) goes - it is only
+    // kept as a recent place, and recent places are switched off here
+    client
+        .call("setAutoRegionPolicy", json!({ "recentPlaces": 0 }))
+        .await
+        .unwrap();
+    client
+        .call("setStorageLimits", json!({ "maxBytes": 2_200_000 }))
+        .await
+        .unwrap();
+    client
+        .call(
+            "updatePosition",
+            json!({ "lat": MUNICH.0, "lng": MUNICH.1 }),
+        )
+        .await
+        .unwrap();
+    let plan = client.call("getStoragePlan", json!({})).await.unwrap();
+    assert_eq!(plan["maxBytes"], json!(2_200_000));
+    assert_eq!(plan["toFetchTiles"], json!(1));
+    assert_eq!(plan["fits"], json!(true));
+
+    let report = client.sync().await.unwrap();
+    assert_eq!(report.offline_fetched_tiles, 1);
+    assert!(
+        stored_tiles(&store).contains(&tile(BERLIN)),
+        "home is never let go of"
+    );
+    assert!(stored_tiles(&store).contains(&tile(MUNICH)));
+    assert!(
+        !stored_tiles(&store).contains(&tile(HAMBURG)),
+        "the unwanted, unused one made room"
+    );
+}
+
+#[tokio::test]
+async fn a_package_that_cannot_fit_is_deferred_and_nothing_is_thrown_away_for_it() {
+    let server = three_tile_server();
+    let (client, store) = offline_client(server.clone());
+    client
+        .call(
+            "updatePosition",
+            json!({ "lat": BERLIN.0, "lng": BERLIN.1 }),
+        )
+        .await
+        .unwrap();
+    client.sync().await.unwrap();
+    // Munich needs 1.4 MB on the device: not even with every unprotected package gone
+    client
+        .call("setStorageLimits", json!({ "maxBytes": 1_000_000 }))
+        .await
+        .unwrap();
+    client
+        .call(
+            "updatePosition",
+            json!({ "lat": MUNICH.0, "lng": MUNICH.1 }),
+        )
+        .await
+        .unwrap();
+    let plan = client.call("getStoragePlan", json!({})).await.unwrap();
+    assert_eq!(plan["deferredForLimit"], json!(1));
+    assert_eq!(plan["fits"], json!(false));
+
+    let report = client.sync().await.unwrap();
+    assert_eq!(report.offline_deferred_tiles, 1);
+    assert_eq!(report.offline_fetched_tiles, 0);
+    assert_eq!(stored_tiles(&store), vec![tile(BERLIN)]);
+}
+
+#[tokio::test]
+async fn a_metered_connection_holds_back_everything_but_the_tile_of_the_current_position() {
+    let server = three_tile_server();
+    let (client, store) = offline_client(server.clone());
+    client
+        .call(
+            "setAutoRegionPolicy",
+            json!({ "homeLat": HAMBURG.0, "homeLng": HAMBURG.1 }),
+        )
+        .await
+        .unwrap();
+    client
+        .call("setConnectionMetered", json!({ "metered": true }))
+        .await
+        .unwrap();
+    client
+        .call(
+            "updatePosition",
+            json!({ "lat": BERLIN.0, "lng": BERLIN.1 }),
+        )
+        .await
+        .unwrap();
+
+    let report = client.sync().await.unwrap();
+    // Berlin (here) is let through, Hamburg (home) waits for an unmetered connection
+    assert_eq!(report.offline_fetched_tiles, 1);
+    assert_eq!(report.offline_deferred_tiles, 1);
+    assert_eq!(stored_tiles(&store), vec![tile(BERLIN)]);
+
+    client
+        .call("setConnectionMetered", json!({ "metered": false }))
+        .await
+        .unwrap();
+    let report = client.sync().await.unwrap();
+    assert_eq!(report.offline_fetched_tiles, 1);
+    assert_eq!(stored_tiles(&store).len(), 2);
+}
+
+#[tokio::test]
+async fn everything_remains_possible_and_the_settings_survive_a_restart() {
+    let server = three_tile_server();
+    let (client, store) = offline_client(server.clone());
+    client
+        .call("setOfflineRegions", json!({ "mode": "all" }))
+        .await
+        .unwrap();
+    let report = client.sync().await.unwrap();
+    assert_eq!(report.offline_fetched_tiles, 3);
+
+    // a second client on the same store reads the same settings
+    let again = client_on(server, store.clone() as Arc<dyn Store>, options());
+    let settings = again.call("getOfflineSettings", json!({})).await.unwrap();
+    assert_eq!(settings["mode"], json!("all"));
+}
+
+#[tokio::test]
+async fn an_older_server_without_a_regions_list_says_so() {
+    let server = working_server(false);
+    server.route("GET", "/v1/config", 200, config_with_corrections());
+    server.route(
+        "GET",
+        "/v1/static-data/regions",
+        404,
+        json!({ "error": { "code": "NOT_FOUND", "message": "no" } }),
+    );
+    let (client, _) = offline_client(server);
+    client.sync().await.unwrap();
+    let error = client
+        .call("listOfflineRegions", json!({}))
+        .await
+        .unwrap_err();
+    assert_eq!(error.code, "notOffered");
 }

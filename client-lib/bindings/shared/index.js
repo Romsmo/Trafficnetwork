@@ -69,10 +69,23 @@ export class BaseClient {
     return (await this.call("getNearby", args)).items;
   }
 
-  async submitReport(type, lat, lng, speedKmh) {
+  async submitReport(type, lat, lng, speedKmh, ttlSeconds) {
     const args = { type, lat, lng };
     if (speedKmh !== undefined) args.speedKmh = speedKmh;
+    if (ttlSeconds !== undefined) args.ttlSeconds = ttlSeconds;
     return (await this.call("submitReport", args)).localId;
+  }
+
+  /** As `submitReport`, but resolves with what was queued: the local id and the duration that applies. */
+  submitReportWithDuration(type, lat, lng, { speedKmh, ttlSeconds } = {}) {
+    const args = { type, lat, lng };
+    if (speedKmh !== undefined) args.speedKmh = speedKmh;
+    if (ttlSeconds !== undefined) args.ttlSeconds = ttlSeconds;
+    return this.call("submitReport", args);
+  }
+
+  getReportLimits(type) {
+    return this.call("getReportLimits", { type });
   }
 
   async confirmReport(reportId, stillThere) {
@@ -92,6 +105,19 @@ export class BaseClient {
     }
     if (reason !== undefined) args.reason = reason;
     return this.call("reportWrongSpeedLimit", args);
+  }
+
+  reportMissingSpeedLimit({ lat, lng, value, unit, bearing, reason }) {
+    const args = { lat, lng, value, unit };
+    if (bearing !== undefined) args.bearing = bearing;
+    if (reason !== undefined) args.reason = reason;
+    return this.call("reportMissingSpeedLimit", args);
+  }
+
+  lookupSpeedLimit(lat, lng, heading) {
+    const args = { lat, lng };
+    if (heading !== undefined) args.heading = heading;
+    return this.call("lookupSpeedLimit", args);
   }
 
   async confirmSpeedLimitCorrection({ agrees, segmentId, correction }) {
@@ -133,6 +159,46 @@ export class BaseClient {
 
   getCameraPolicy() {
     return this.call("getCameraPolicy");
+  }
+
+  // ------------------------------------------------------- offline area
+
+  getOfflineSettings() {
+    return this.call("getOfflineSettings");
+  }
+
+  /** `{ mode?: "auto"|"regions"|"all", regions?: string[] }` — regions are ids from `listOfflineRegions`. */
+  setOfflineRegions(settings) {
+    return this.call("setOfflineRegions", settings ?? {});
+  }
+
+  setAutoRegionPolicy(policy) {
+    return this.call("setAutoRegionPolicy", policy ?? {});
+  }
+
+  /** `{ maxBytes?: number | null, wifiOnly?: boolean }` — `null` removes the limit, absent leaves it. */
+  setStorageLimits(limits) {
+    return this.call("setStorageLimits", limits ?? {});
+  }
+
+  setConnectionMetered(metered) {
+    return this.call("setConnectionMetered", { metered });
+  }
+
+  async listOfflineRegions() {
+    return (await this.call("listOfflineRegions")).regions;
+  }
+
+  getStoragePlan() {
+    return this.call("getStoragePlan");
+  }
+
+  getStorageUsage() {
+    return this.call("getStorageUsage");
+  }
+
+  getCoverage(lat, lng) {
+    return this.call("getCoverage", { lat, lng });
   }
 
   async pollEvents() {

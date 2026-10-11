@@ -305,11 +305,26 @@ class Client:
             args["categories"] = categories
         return self.call("getNearby", args)["items"]
 
-    def submit_report(self, hazard_type: str, lat: float, lng: float, speed_kmh: Optional[float] = None) -> str:
+    def submit_report(self, hazard_type: str, lat: float, lng: float, speed_kmh: Optional[float] = None,
+                      ttl_seconds: Optional[int] = None) -> str:
+        """Queues a report and returns its local id. ``ttl_seconds`` is how long it should live
+        (within ``get_report_limits``); a server that does not take one uses its default."""
+        return self.submit_report_with_duration(hazard_type, lat, lng, speed_kmh, ttl_seconds)["localId"]
+
+    def submit_report_with_duration(self, hazard_type: str, lat: float, lng: float,
+                                    speed_kmh: Optional[float] = None, ttl_seconds: Optional[int] = None):
+        """As ``submit_report``, but returns what was queued: ``localId``, ``expiresInSeconds``,
+        ``durationHonoured``, ``defaultSeconds``."""
         args: Dict[str, Any] = {"type": hazard_type, "lat": lat, "lng": lng}
         if speed_kmh is not None:
             args["speedKmh"] = speed_kmh
-        return self.call("submitReport", args)["localId"]
+        if ttl_seconds is not None:
+            args["ttlSeconds"] = ttl_seconds
+        return self.call("submitReport", args)
+
+    def get_report_limits(self, hazard_type: str):
+        """Default, minimum and maximum duration of a report of this type. Local."""
+        return self.call("getReportLimits", {"type": hazard_type})
 
     def confirm_report(self, report_id: str, still_there: bool) -> str:
         return self.call("confirmReport", {"reportId": report_id, "stillThere": still_there})["localId"]
@@ -328,6 +343,24 @@ class Client:
         if reason is not None:
             args["reason"] = reason
         return self.call("reportWrongSpeedLimit", args)
+
+    def report_missing_speed_limit(self, lat: float, lng: float, value: int, unit: str,
+                                   bearing: Optional[float] = None, reason: Optional[str] = None):
+        """"There is no speed limit on record for this road": a value for a road the import has none for."""
+        args: Dict[str, Any] = {"lat": lat, "lng": lng, "value": value, "unit": unit}
+        if bearing is not None:
+            args["bearing"] = bearing
+        if reason is not None:
+            args["reason"] = reason
+        return self.call("reportMissingSpeedLimit", args)
+
+    def lookup_speed_limit(self, lat: float, lng: float, heading: Optional[float] = None):
+        """The limit here, from the offline data or (outside the offline area) from the server.
+        ``status`` is ``found``, ``notRecorded`` or ``outsideOfflineArea``."""
+        args: Dict[str, Any] = {"lat": lat, "lng": lng}
+        if heading is not None:
+            args["heading"] = heading
+        return self.call("lookupSpeedLimit", args)
 
     def confirm_speed_limit_correction(self, agrees: bool, segment_id: Optional[str] = None,
                                        correction: Optional[Dict[str, Any]] = None):
@@ -369,6 +402,53 @@ class Client:
         """What the network's camera policy allows right now (levels per country, the
         host switch, the legal notice to show before cameras are switched on)."""
         return self.call("getCameraPolicy")
+
+    # ------------------------------------------------------- offline area
+
+    def get_offline_settings(self):
+        return self.call("getOfflineSettings")
+
+    def set_offline_regions(self, mode: Optional[str] = None, regions: Optional[List[str]] = None):
+        """What is kept: ``auto`` (default), ``regions`` (ids from ``list_offline_regions``) or ``all``."""
+        args: Dict[str, Any] = {}
+        if mode is not None:
+            args["mode"] = mode
+        if regions is not None:
+            args["regions"] = regions
+        return self.call("setOfflineRegions", args)
+
+    def set_auto_region_policy(self, **policy: Any):
+        """``home_radius_tiles``, ``current_radius_tiles``, ``recent_places``, ``recent_radius_tiles``,
+        ``home_lat`` + ``home_lng`` (camelCase names are taken as they are)."""
+        camel = {}
+        for key, value in policy.items():
+            parts = key.split("_")
+            camel[parts[0] + "".join(p.title() for p in parts[1:])] = value
+        return self.call("setAutoRegionPolicy", camel)
+
+    def set_storage_limits(self, **limits: Any):
+        """``max_bytes`` (``None`` removes the limit; leave it out to keep it) and ``wifi_only``."""
+        args: Dict[str, Any] = {}
+        if "max_bytes" in limits:
+            args["maxBytes"] = limits["max_bytes"]
+        if "wifi_only" in limits:
+            args["wifiOnly"] = limits["wifi_only"]
+        return self.call("setStorageLimits", args)
+
+    def set_connection_metered(self, metered: bool) -> None:
+        self.call("setConnectionMetered", {"metered": metered})
+
+    def list_offline_regions(self) -> List[Dict[str, Any]]:
+        return self.call("listOfflineRegions")["regions"]
+
+    def get_storage_plan(self):
+        return self.call("getStoragePlan")
+
+    def get_storage_usage(self):
+        return self.call("getStorageUsage")
+
+    def get_coverage(self, lat: float, lng: float):
+        return self.call("getCoverage", {"lat": lat, "lng": lng})
 
     def poll_events(self) -> List[Dict[str, Any]]:
         return self.call("pollEvents")["events"]

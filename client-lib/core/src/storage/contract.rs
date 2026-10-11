@@ -130,6 +130,8 @@ pub(crate) fn run(make: &dyn Fn() -> Box<dyn Store>) {
     the_partition_resolution_is_remembered_until_static_data_is_cleared(make().as_ref());
     signs_are_found_by_position_and_can_be_removed(make().as_ref());
     camera_zones_are_stored_by_id_and_the_policy_stamp_is_remembered(make().as_ref());
+    partitions_know_their_size_and_last_use_and_can_be_forgotten(make().as_ref());
+    settings_are_kept_by_name(make().as_ref());
 }
 
 fn cursors_are_kept_per_node(store: &dyn Store) {
@@ -428,4 +430,106 @@ fn camera_zones_are_stored_by_id_and_the_policy_stamp_is_remembered(store: &dyn 
         store.camera_policy_stamp().unwrap().as_deref(),
         Some("second")
     );
+}
+
+fn partitions_know_their_size_and_last_use_and_can_be_forgotten(store: &dyn Store) {
+    assert!(store.partition_records().unwrap().is_empty());
+    store
+        .upsert_static_partition("tileA", "hashA", &sample_static_data())
+        .unwrap();
+    store.set_partition_size("tileA", 1_234).unwrap();
+    store
+        .upsert_static_partition("tileB", "hashB", &StoredEntities::default())
+        .unwrap();
+
+    let records = store.partition_records().unwrap();
+    assert_eq!(records.len(), 2);
+    let a = records.iter().find(|r| r.tile == "tileA").unwrap();
+    assert_eq!(
+        (a.hash.as_str(), a.size_bytes, a.last_used_unix_ms),
+        ("hashA", 1_234, 0)
+    );
+    let b = records.iter().find(|r| r.tile == "tileB").unwrap();
+    assert_eq!(
+        (b.size_bytes, b.last_used_unix_ms),
+        (0, 0),
+        "size unknown until it is recorded"
+    );
+
+    // use is only noted for packages that are stored
+    store
+        .record_partition_use(&["tileA".to_string(), "nowhere".to_string()], 5_000)
+        .unwrap();
+    let records = store.partition_records().unwrap();
+    assert_eq!(
+        records.len(),
+        2,
+        "a lookup in an unstored tile creates nothing"
+    );
+    assert_eq!(
+        records
+            .iter()
+            .find(|r| r.tile == "tileA")
+            .unwrap()
+            .last_used_unix_ms,
+        5_000
+    );
+    assert_eq!(
+        records
+            .iter()
+            .find(|r| r.tile == "tileB")
+            .unwrap()
+            .last_used_unix_ms,
+        0
+    );
+
+    // a package stored again (a new hash) keeps what is known about it
+    store
+        .upsert_static_partition("tileA", "hashA2", &sample_static_data())
+        .unwrap();
+    let a = store
+        .partition_records()
+        .unwrap()
+        .into_iter()
+        .find(|r| r.tile == "tileA")
+        .unwrap();
+    assert_eq!(
+        (a.hash.as_str(), a.size_bytes, a.last_used_unix_ms),
+        ("hashA2", 1_234, 5_000)
+    );
+
+    // forgetting a package forgets its hash, size and use - and only that
+    store.remove_partition_record("tileA").unwrap();
+    assert_eq!(store.get_partition_hash("tileA").unwrap(), None);
+    assert_eq!(store.partition_records().unwrap().len(), 1);
+    assert_eq!(store.partition_records().unwrap()[0].tile, "tileB");
+    store
+        .upsert_static_partition("tileA", "hashA3", &StoredEntities::default())
+        .unwrap();
+    let again = store
+        .partition_records()
+        .unwrap()
+        .into_iter()
+        .find(|r| r.tile == "tileA")
+        .unwrap();
+    assert_eq!((again.size_bytes, again.last_used_unix_ms), (0, 0));
+
+    store.clear_static_data().unwrap();
+    assert!(store.partition_records().unwrap().is_empty());
+}
+
+fn settings_are_kept_by_name(store: &dyn Store) {
+    assert_eq!(store.get_setting("offline").unwrap(), None);
+    store.set_setting("offline", "{\"mode\":\"auto\"}").unwrap();
+    store.set_setting("other", "x").unwrap();
+    assert_eq!(
+        store.get_setting("offline").unwrap().as_deref(),
+        Some("{\"mode\":\"auto\"}")
+    );
+    store.set_setting("offline", "{\"mode\":\"all\"}").unwrap();
+    assert_eq!(
+        store.get_setting("offline").unwrap().as_deref(),
+        Some("{\"mode\":\"all\"}")
+    );
+    assert_eq!(store.get_setting("other").unwrap().as_deref(), Some("x"));
 }
