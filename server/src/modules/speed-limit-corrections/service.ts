@@ -20,6 +20,16 @@ import {
   type NewVote,
 } from "../../db/queries/speed-limit-corrections.js";
 import { findSpeedLimitSegmentById, findSpeedLimitSegmentsByKey, type SpeedLimitSegmentApi } from "../../db/queries/speed-limit-segments.js";
+import {
+  deleteCommunitySegment,
+  findCommunitySegments,
+  findGap,
+  insertCommunitySegment,
+  setCommunitySegmentValue,
+  upsertGap,
+  type GapRow,
+} from "../../db/queries/speed-limit-gaps.js";
+import type { GapGeometry } from "./gap.js";
 import { conflict, forbidden, notFound, tooManyRequests, unprocessable } from "../../lib/errors.js";
 import { validateCorrectionValue } from "./plausibility.js";
 import { markTilesDirty } from "../../db/queries/static-packages.js";
@@ -125,6 +135,24 @@ export async function announceChanges(
   const events: AppendedEvent[] = [];
   const tiles = new Set<string>();
   for (const change of changes) {
+    // A road the import has no limit for exists as a segment only while a value is applied (docs D13): put it there, move
+    // it or take it away first, so the read below — and every reader afterwards — sees the effective state.
+    const gap = await findGap(tx, change.segmentKey);
+    if (gap) {
+      for (const removed of await syncGapSegment(tx, gap, change.unit, overlay)) {
+        events.push(
+          await appendEvent(tx, {
+            type: "StaticDataRemoved",
+            entityType: "speedLimitSegment",
+            entityId: removed.id,
+            payload: removed,
+            regionTile: null,
+            source: "community",
+          }),
+        );
+        for (const tile of segmentTilesOf(removed.geometry, partitionResolution)) tiles.add(tile);
+      }
+    }
     for (const segment of await findSpeedLimitSegmentsByKey(tx, change.segmentKey, change.unit, overlay)) {
       events.push(
         await appendEvent(tx, {
@@ -143,6 +171,36 @@ export async function announceChanges(
   // after the event above, in the same transaction, so the mark carries the bumped version.
   await markTilesDirty(tx, [...tiles]);
   return events;
+}
+
+/**
+ * Makes the community segment of one gap and unit match the applied correction: written when a value is applied, moved
+ * when the winner changes, removed when none is left — and not served at all while the feature is off. Returns the
+ * segments that stopped being delivered (as served, for the removal event).
+ */
+async function syncGapSegment(tx: Transaction, gap: GapRow, unit: SpeedLimitUnit, overlay: boolean): Promise<SpeedLimitSegmentApi[]> {
+  const existing = (await findCommunitySegments(tx, gap.segmentKey)).filter((s) => s.unit === unit);
+  const asServed = async (id: string) => (await findSpeedLimitSegmentById(tx, id, true)) as SpeedLimitSegmentApi;
+
+  if (!overlay) {
+    // Switched off: the rows stay (so switching on restores them) but no read returns them any more - tell the clients.
+    return Promise.all(existing.map((s) => asServed(s.id)));
+  }
+
+  const applied = (await listCorrectionRowsForKey(tx, gap.segmentKey)).find((row) => row.unit === unit && row.status === "applied");
+  if (!applied) {
+    const removed: SpeedLimitSegmentApi[] = [];
+    for (const row of existing) {
+      removed.push(await asServed(row.id));
+      await deleteCommunitySegment(tx, row.id);
+    }
+    return removed;
+  }
+
+  const [first] = existing;
+  if (!first) await insertCommunitySegment(tx, gap.segmentKey, unit, applied.value);
+  else if (first.speedLimit !== applied.value) await setCommunitySegmentValue(tx, first.id, applied.value);
+  return [];
 }
 
 export interface ApplyVoteOptions {
@@ -186,6 +244,7 @@ export async function applyVote(db: Database["db"], env: Env, vote: NewVote, opt
       }
     }
 
+    if (vote.gap) await upsertGap(tx, vote.gap);
     const seq = await insertVote(tx, vote);
     if (seq === null) return { recorded: false, noop: "duplicate", changes: [], events: [] };
 
@@ -202,8 +261,33 @@ export interface LocalCaller {
   reporterId: string;
 }
 
+/**
+ * What a vote is about: an existing segment, or a gap — a road the import has no limit for (docs D13). A gap that is not
+ * in effect has no segment; the key and the unit are all a vote needs.
+ */
+export interface VoteTarget {
+  segmentKey: string;
+  /** The unit votes must use (a segment's own); null for a gap proposal, which chooses its unit. */
+  unit: SpeedLimitUnit | null;
+  /** What a proposal must differ from; null where nothing is imported. */
+  importedValue: number | null;
+  /** The segment as served now, if there is one. */
+  segment: SpeedLimitSegmentApi | null;
+  /** Set when the vote creates or addresses a gap by place — remembered before the vote is stored. */
+  gap?: GapGeometry;
+}
+
+export function targetOfSegment(segment: SpeedLimitSegmentApi): VoteTarget {
+  return {
+    segmentKey: segment.segmentKey,
+    unit: segment.speedLimitUnit,
+    importedValue: segment.importedSpeedLimit ?? segment.speedLimit,
+    segment,
+  };
+}
+
 export interface CastVoteInput {
-  segment: SpeedLimitSegmentApi;
+  target: VoteTarget;
   kind: CorrectionVoteKind;
   value: number;
   unit: SpeedLimitUnit;
@@ -217,7 +301,8 @@ export interface CastVoteResult extends ApplyVoteResult {
   correction: CorrectionApi | null;
   /** The correction record for this value already existed before this vote — the vote merged into it. */
   merged: boolean;
-  segment: SpeedLimitSegmentApi;
+  /** The segment as it is served after the vote; null while a gap has none (below its threshold). */
+  segment: SpeedLimitSegmentApi | null;
 }
 
 /**
@@ -226,29 +311,28 @@ export interface CastVoteResult extends ApplyVoteResult {
  * import" — all before anything is written.
  */
 export async function castLocalVote(db: Database["db"], env: Env, input: CastVoteInput): Promise<CastVoteResult> {
-  const { segment } = input;
-  if (input.unit !== segment.speedLimitUnit) {
+  const { target } = input;
+  if (target.unit !== null && input.unit !== target.unit) {
     throw unprocessable(
       "CORRECTION_UNIT_MISMATCH",
-      `This segment's limit is in ${segment.speedLimitUnit}; a correction must use the unit of the source`,
-      { segmentUnit: segment.speedLimitUnit },
+      `This segment's limit is in ${target.unit}; a correction must use the unit of the source`,
+      { segmentUnit: target.unit },
     );
   }
   if (input.kind === "support") {
     validateCorrectionValue(input.value, input.unit, env);
-    const importedValue = segment.importedSpeedLimit ?? segment.speedLimit;
-    if (input.value === importedValue) {
+    if (target.importedValue !== null && input.value === target.importedValue) {
       throw unprocessable("CORRECTION_NO_CHANGE", "The proposed value equals the imported one — nothing to correct; use a denial to object to a correction instead");
     }
   }
 
-  const id = correctionId(segment.segmentKey, input.unit, input.value);
+  const id = correctionId(target.segmentKey, input.unit, input.value);
   const existedBefore = (await findCorrectionRowById(db, id)) !== null;
 
   const now = new Date();
   const vote: NewVote = {
     id: input.signed?.voteId ?? `local:${randomUUID()}`,
-    segmentKey: segment.segmentKey,
+    segmentKey: target.segmentKey,
     reporterId: input.caller.reporterId,
     submittedBy: input.caller.sub,
     kind: input.kind,
@@ -258,6 +342,7 @@ export async function castLocalVote(db: Database["db"], env: Env, input: CastVot
     voteTimestamp: input.signed?.voteTimestamp ?? now,
     envelope: input.signed?.envelope ?? null,
     originNodeId: null,
+    ...(target.gap ? { gap: target.gap } : {}),
   };
   const result = await applyVote(db, env, vote, { local: true });
   if (result.noop === "duplicate") {
@@ -265,16 +350,22 @@ export async function castLocalVote(db: Database["db"], env: Env, input: CastVot
   }
 
   const correction = await findCorrectionApiById(db, id);
-  const effective = (await findSpeedLimitSegmentById(db, segment.id, true)) ?? segment;
+  const effective = (await findSpeedLimitSegmentsByKey(db, target.segmentKey, input.unit, true))[0] ?? null;
   return { ...result, correction, merged: existedBefore, segment: effective };
 }
 
-/** 404 unless the correction exists *and* this server has a segment it applies to. Returns that segment (first local row). */
-export async function loadCorrectionTarget(db: Queryable, env: Env, correctionIdParam: string) {
+/**
+ * 404 unless the correction exists *and* this server has something it applies to: a segment (first local row) or the place
+ * of a gap awaiting its threshold (docs D13). Returns what to vote on.
+ */
+export async function loadCorrectionTarget(db: Queryable, env: Env, correctionIdParam: string): Promise<{ row: NonNullable<Awaited<ReturnType<typeof findCorrectionRowById>>>; target: VoteTarget }> {
   const row = await findCorrectionRowById(db, correctionIdParam);
   if (!row) throw notFound(`No speed-limit correction with id ${correctionIdParam}`);
   const segments = await findSpeedLimitSegmentsByKey(db, row.segmentKey, row.unit, env.COMMUNITY_CORRECTIONS_ENABLED);
   const segment = segments[0];
-  if (!segment) throw notFound("This server has no segment for that correction (it was proposed on another server)");
-  return { row, segment };
+  if (segment) return { row, target: targetOfSegment(segment) };
+  if (await findGap(db, row.segmentKey)) {
+    return { row, target: { segmentKey: row.segmentKey, unit: row.unit, importedValue: null, segment: null } };
+  }
+  throw notFound("This server has no segment for that correction (it was proposed on another server)");
 }
