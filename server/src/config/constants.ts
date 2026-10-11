@@ -108,8 +108,12 @@ export type CorrectionStatus = (typeof CORRECTION_STATUSES)[number];
 export const CORRECTION_VOTE_KINDS = ["support", "deny"] as const;
 export type CorrectionVoteKind = (typeof CORRECTION_VOTE_KINDS)[number];
 
-/** Optional, informational: why the reporter thinks the imported value is wrong (prompt: falscher Wert, Limit aufgehoben, Schild fehlt/neu). */
-export const CORRECTION_REASONS = ["wrong_value", "limit_lifted", "sign_missing_or_new", "other"] as const;
+/**
+ * Optional, informational: why the reporter proposes this value. `wrong_value` = the imported value is wrong, `limit_lifted` =
+ * the limit was removed (the value is then the general statutory limit), `sign_missing_or_new` = a new sign, `missing` = the
+ * road has no limit on record at all (server 1.1.0, see docs/speed-limit-corrections.md D13).
+ */
+export const CORRECTION_REASONS = ["wrong_value", "limit_lifted", "sign_missing_or_new", "other", "missing"] as const;
 export type CorrectionReason = (typeof CORRECTION_REASONS)[number];
 
 export const CLIENT_SCOPES = ["client", "bulk-import", "device-registration"] as const;

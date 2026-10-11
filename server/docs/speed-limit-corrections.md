@@ -232,6 +232,34 @@ with an applied correction, so delta *and* package clients converge.
   open proposals: `GET /v1/speed-limit-corrections?tiles=…`.
 * To sign: take `segmentKey` from the segment.
 
+### D13. A road with no speed limit on record (server 1.1.0)
+
+The import only holds roads that carry a limit, so "this road has none" has no segment to vote on. The proposal names a
+**place and a direction** instead, and the server derives a short, fixed stretch of road from it.
+
+| Question | Decision | Why |
+|---|---|---|
+| How does a proposal reference a road that has no segment? | `{ lat, lng, bearingDegrees }` → **H3 cell (resolution 10, edge ≈ 66 m) + one of 8 direction buckets of 22.5°** (an axis: 90° and 270° are the same road). Signed as the reference `gap:<cell>:<axis>`. | A device can compute it (no road geometry is needed on the device), and every node derives the same geometry and key from it. The geometry key itself cannot be computed by a device that has no geometry. |
+| How do equal proposals from different devices merge? | Same cell and bucket = same `segmentKey` = the same candidate, merged by the existing tally (D3, D4). | One mechanism for both cases; "merged" falls out of the model. |
+| Can a point colour a long road? | **No.** The stretch is `GAP_LENGTH_M` = 120 m, centred on the cell centre, along the axis. A longer road needs one proposal per stretch (three devices each). | The blast radius of one successful proposal is bounded by construction; a point cannot be turned into a road. |
+| When does it exist? | Only while a value is **applied** (net confirmations ≥ threshold, D4): then a row with `source = 'community'` is written to `speed_limit_segments`, moved when the winner changes, and removed when none is left. Below the threshold nothing is served. | Every read path (lookup, nearby, snapshot, packages, events) already reads that table, so none needed a second source. Corrections for existing roads never touch the table (D1); only this derived row is written by the application. |
+| What does a tie mean? | As D4: no winner — and since nothing is imported, no road. | A tie is genuine disagreement about a safety-relevant number. |
+| Origin | Served with `source: "community"`, `correctedBy: "community"`, the counts, and **no `importedSpeedLimit`**. | "Always shown with its origin". |
+| An import later has a road of its own there | After each import batch, a community segment with an imported road within 20 m running the same way (±25°) is marked `needsReview: true`. **Nothing is replaced or removed.** | The import must not silently overwrite a community-confirmed value (D7) and must not silently be shadowed by it either; the doubt is made visible and left to the operator (`reset`) or the community. |
+| Is it really missing? | A proposal is refused with `422 ROAD_ALREADY_HAS_LIMIT` (naming the segment) when an imported road with a limit lies within 15 m and runs the same way (±25°). | Keeps the proposal on the segment that exists (the correction flow) and stops gap spam over roads that have a value. Local only: another node's import is not consulted. |
+| Switching the feature off | The rows stay in the table but no read returns them (`overlay = false` hides `community` rows); clients are told with `StaticDataRemoved`, and switching on announces them again. | Same promise as D11: nothing is lost by turning it off. |
+| Reasons | `wrong_value`, `limit_lifted` (= "Limit aufgehoben"), `sign_missing_or_new` (= "neues Schild"), `other`, and new `missing`. | The existing enum already had the others; `missing` is additive. |
+
+**Tables.** `speed_limit_gaps(segment_key, cell, axis, geometry, needs_review, created_at)` — where a gap is (written with its first
+vote, on every node that sees a vote for it). Votes and corrections reuse the existing tables under the derived key.
+
+**Federation.** A signed vote may carry `segmentKey: "gap:<cell>:<axis>"`. The receiving node derives the same geometry and key
+and stores the vote under that key; a vote that names the key before the place has arrived is kept and counts when the place is
+known. Votes of a gap that never reaches the threshold on a node have no segment there.
+
+**Not built:** merging proposals across cell borders (two devices that report one road from two cells are two candidates);
+roads longer than 120 m need one proposal per stretch; geometry other than a straight stretch.
+
 ## Tests
 
 | Rule | Where |
@@ -247,6 +275,7 @@ with an applied correction, so delta *and* package clients converge.
 | Replication (3 servers, different row ids), denial flips everywhere, competing/tie, partition healing in different pull orders, tampered vote, implausible/future/ancient votes, unsigned stays local, feature-off peer, old push format | `tests/integration/federation-speed-limit-corrections.test.ts` |
 | Feature switch: reads, endpoints, config, flip announced, threshold from env | integration |
 | Operator: show, reset (+ runner-up), restore, reset --all, ban/unban | integration |
+| Gap (D13): derivation of cell/axis/geometry/key (and equality with the database function), threshold, merge across devices and directions, denial removes it and is announced, tie, overtaking value, operator reset, `ROAD_ALREADY_HAS_LIMIT`, plausibility, signed place reference, replication by place and by key, import brings its own road (`needsReview`), feature switch | `tests/unit/speed-limit-gap.test.ts`, `tests/integration/speed-limit-gaps.test.ts` |
 
 Mutation checks done by hand while writing them (each made a test fail, then
 reverted): threshold off by one, key-binding check removed, unit dropped from

@@ -284,8 +284,9 @@ merged — with two differences that follow from being *durable state* instead o
 ```
 SpeedLimitVote = {
   kind: "speedLimitVote", vote: "support" | "deny",
-  segmentKey,                       // 32 hex, content-derived from the geometry (schema.md) — never a server-local id
-  value, unit: "kmh" | "mph", reason?: "wrong_value" | "limit_lifted" | "sign_missing_or_new" | "other",
+  segmentKey,                       // 32 hex, content-derived from the geometry (schema.md) — never a server-local id;
+                                    // or "gap:<h3 cell, resolution 10>:<axis 0..7>" for a road with no limit on record (D13)
+  value, unit: "kmh" | "mph", reason?: "wrong_value" | "limit_lifted" | "sign_missing_or_new" | "other" | "missing",
   devicePublicKey, timestamp
 }
 voteId   = sha256(canonical({ payload, signature }))       // same scheme as federationEventId

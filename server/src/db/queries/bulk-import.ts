@@ -5,6 +5,7 @@ import type { PersistentCameraType } from "../../config/constants.js";
 import { pgArray } from "../pg-array.js";
 import { bumpStaticDataVersion } from "./sync-state.js";
 import { fillMissingBaseValues } from "./speed-limit-corrections.js";
+import { flagGapsNeedingReview } from "../../modules/speed-limit-corrections/gap-review.js";
 import { markTilesDirty } from "./static-packages.js";
 import { cameraPackageTiles } from "../../modules/cameras/policy/cells.js";
 
@@ -66,6 +67,7 @@ export async function bulkInsertSpeedLimitSegments(db: Queryable, rows: SpeedLim
     // overlaid at read time). The one bookkeeping step: a correction that was
     // voted on before its segment existed learns the value it now sits on.
     await fillMissingBaseValues(tx);
+    await flagGapsNeedingReview(tx);
     await bumpStaticDataVersion(tx);
     await markTilesDirty(tx, [...tiles]);
     return rows.length;
