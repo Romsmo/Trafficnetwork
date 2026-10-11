@@ -1,45 +1,41 @@
 import { describe, expect, it } from "vitest";
 import { loadEnv, resetEnvCache } from "../../src/config/env.js";
-import { hazardExpiryMs } from "../../src/config/constants.js";
+import { resolveReportExpiry } from "../../src/config/report-expiry.js";
 
-const env = () => {
+const env = (extra: Record<string, string> = {}) => {
   resetEnvCache();
   return loadEnv({
     DATABASE_URL: "postgres://user:pass@localhost:5432/db",
     JWT_SECRET: "a".repeat(32),
+    ...extra,
   });
 };
 
-describe("hazardExpiryMs", () => {
-  it("bands mobileSpeedCamera/trailerCamera/redLightCamera/distanceControl as short", () => {
+// The rules themselves (built-in table, precedence, bounds) are tested in report-expiry.test.ts; this file keeps the
+// environment-variable contract that existed before the table: the band variables still mean what they meant.
+describe("report expiry from the legacy band environment variables", () => {
+  it("medium band (traffic/ice/accident/breakdown/obstacle) follows HAZARD_EXPIRY_MEDIUM_MINUTES", () => {
     const e = env();
-    const short = e.HAZARD_EXPIRY_SHORT_MINUTES * 60_000;
-    expect(hazardExpiryMs("mobileSpeedCamera", e)).toBe(short);
-    expect(hazardExpiryMs("trailerCamera", e)).toBe(short);
-    expect(hazardExpiryMs("redLightCamera", e)).toBe(short);
-    expect(hazardExpiryMs("distanceControl", e)).toBe(short);
-  });
-
-  it("bands traffic/ice/accident/breakdown/obstacle as medium", () => {
-    const e = env();
-    const medium = e.HAZARD_EXPIRY_MEDIUM_MINUTES * 60_000;
+    const rules = resolveReportExpiry(e);
     for (const type of ["traffic", "ice", "accident", "breakdown", "obstacle"] as const) {
-      expect(hazardExpiryMs(type, e)).toBe(medium);
+      expect(rules[type].defaultSeconds).toBe(e.HAZARD_EXPIRY_MEDIUM_MINUTES * 60);
     }
   });
 
-  it("bands construction as a multi-day duration", () => {
+  it("construction follows HAZARD_EXPIRY_CONSTRUCTION_DAYS", () => {
     const e = env();
-    expect(hazardExpiryMs("construction", e)).toBe(e.HAZARD_EXPIRY_CONSTRUCTION_DAYS * 24 * 60 * 60_000);
+    expect(resolveReportExpiry(e).construction.defaultSeconds).toBe(e.HAZARD_EXPIRY_CONSTRUCTION_DAYS * 24 * 60 * 60);
   });
 
-  it("respects overridden env values rather than hardcoded minutes", () => {
-    resetEnvCache();
-    const e = loadEnv({
-      DATABASE_URL: "postgres://user:pass@localhost:5432/db",
-      JWT_SECRET: "a".repeat(32),
-      HAZARD_EXPIRY_SHORT_MINUTES: "1",
-    });
-    expect(hazardExpiryMs("mobileSpeedCamera", e)).toBe(60_000);
+  it("HAZARD_EXPIRY_SHORT_MINUTES applies to the red-light and distance reports", () => {
+    const rules = resolveReportExpiry(env({ HAZARD_EXPIRY_SHORT_MINUTES: "1" }));
+    expect(rules.redLightCamera.defaultSeconds).toBe(60);
+    expect(rules.distanceControl.defaultSeconds).toBe(60);
+  });
+
+  it("an empty value counts as unset", () => {
+    const rules = resolveReportExpiry(env({ HAZARD_EXPIRY_SHORT_MINUTES: "", HAZARD_EXPIRY_MOBILE_SPEED_CAMERA_MINUTES: "" }));
+    expect(rules.mobileSpeedCamera.defaultSeconds).toBe(3 * 3600);
+    expect(rules.redLightCamera.defaultSeconds).toBe(12 * 60);
   });
 });

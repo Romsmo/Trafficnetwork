@@ -435,6 +435,29 @@ matters only once a country is restricted. Clients that relied on delta events o
 **Federation.** A camera report is forwarded to other nodes (pull and gossip) only from a node whose level for that camera's country is `full`;
 the policy file itself is not distributed by federation (federation-protocol.md, 4.4a and 5.2a).
 
+## Report expiry (server 1.1.0)
+
+How long reports live, what a reporter may ask for, and the early end through "gone" votes: [`report-expiry.md`](report-expiry.md).
+What an operator has to know:
+
+- **New defaults:** a mobile speed camera report lives **3 h** (was 12 min), a trailer **14 d** (was 12 min). Red-light,
+  distance, traffic, ice, accident, breakdown, obstacle and construction are unchanged.
+- **Check your `.env`.** `HAZARD_EXPIRY_SHORT_MINUTES` now covers red-light and distance reports only, so an old `.env.example`
+  copy (`=12`) does not shorten the mobile and trailer camera. If you *want* other values for those two, set
+  `HAZARD_EXPIRY_MOBILE_SPEED_CAMERA_MINUTES` / `HAZARD_EXPIRY_TRAILER_CAMERA_DAYS`. `GET /v1/config` → `reportExpiry` shows what
+  is in force; the node logs a warning if the signed network configuration replaced a value you set.
+- **Existing reports keep their end.** Nothing is rewritten on upgrade and there is no migration; only reports made (or
+  confirmed) afterwards use the new values. Rollback is the previous image: reports written by 1.1.0 keep the `expires_at`
+  they were given.
+- **Update every node of a network first.** A node older than 1.1.0 ignores a requested duration and ends signed reports at its
+  own default counted from arrival; the nodes then disagree about a report until it ends.
+- **Network-wide values** (a different default or different bounds on every node) are a signed field, `reportExpiry` of the
+  network configuration — `npm run network:sign-config -- --root-key … --report-expiry '{"mobileSpeedCamera":{"defaultSeconds":7200}}'`.
+  Signing again without the option lifts them. An invalid value stops the node at start (see the camera policy above for
+  the same rule).
+- **"Gone" votes:** `HAZARD_GONE_THRESHOLD_CAMERA` (default 2) distinct devices end a temporary camera report early. The
+  votes are local to a node.
+
 ## Restarting, upgrading, backing up
 
 An upgrade that includes a migration with a heavy lock (0007, above) needs a maintenance window on a big node;

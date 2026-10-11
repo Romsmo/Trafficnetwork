@@ -2,6 +2,19 @@
 
 Versionierung je Paket, kein gemeinsames Release-Datum oder gemeinsame Versionsnummer: `server/` (inklusive der eingebauten Weboberfläche), `ingestion/` und `client-lib/` folgen SemVer eigenständig.
 
+## server — Unreleased (1.1.0)
+
+Rein additiv: `apiVersion`, bestehende Endpunkte und Ergebnisformate ändern sich nicht; ältere Clients und Knoten funktionieren weiter. Keine Datenbankmigration.
+
+- **Verfallszeiten:** mobiler Blitzer **3 Stunden** (vorher 12 Minuten), Anhänger (`trailerCamera`) **14 Tage** mit eigenem Wert statt des kurzen Bands. Alle anderen Typen unverändert. Bereits aktive Meldungen behalten ihr Ende; nur neue oder bestätigte Meldungen nutzen die neuen Werte.
+- **Eigene Ablaufzeit:** `POST /v1/hazard-reports` nimmt optional `expiresInSeconds`. Grenzen je Typ stehen in `GET /v1/config` → `reportExpiry`; außerhalb wird **abgelehnt** (`400 EXPIRY_OUT_OF_RANGE` mit Standard, Minimum, Maximum), nicht still gekappt. Das Feld ist Teil des gerätesignierten Inhalts (`DeviceCreateEvent.expiresInSeconds`), nicht für feste Blitzer.
+- **Gleiches Ende auf jedem Knoten:** `expiresAt = signierter Zeitstempel + Dauer`. Bisher zählte bei föderierten Meldungen die Ankunftszeit am jeweiligen Knoten und die lokale Env — Knoten wichen ab. Eine föderierte Meldung, deren eigene Laufzeit schon vorbei ist, wird abgelehnt (`stale_timestamp`, ohne Reputationsstrafe), statt mit frischer Laufzeit aufzuleben.
+- **Eine Quelle der Wahrheit:** signierte Netzwerk-Konfiguration (neues optionales Feld `reportExpiry`) → `REPORT_EXPIRY_OVERRIDES` → `HAZARD_EXPIRY_*` → eingebaute Tabelle. Neu: `npm run network:sign-config -- … --report-expiry '<json>'`. Eine unlesbare Angabe stoppt den Knoten. Ohne signierte Konfiguration muss **nichts** neu signiert werden.
+- **Bestätigung verkürzt nie:** „noch da" setzt auf `max(bisher, jetzt + Standard)`; ein Zusammenführen in 500 m nimmt das spätere Ende.
+- **„Nicht mehr da" beendet temporäre Kameras vorzeitig:** mobil, Anhänger, Rotlicht- und Abstandsmeldung enden, sobald `HAZARD_GONE_THRESHOLD_CAMERA` (Standard 2) verschiedene Geräte „gone" melden und es mindestens so viele sind wie die, die „noch da" sagten (Melder eingerechnet). Status `expired`, Ereignis `ReportExpired` — nichts Neues für Clients. Stimmen bleiben knotenlokal.
+- **Achtung beim Update:** `.env`-Dateien, die aus der alten `.env.example` kopiert wurden, enthalten `HAZARD_EXPIRY_SHORT_MINUTES=12`. Das gilt jetzt nur noch für Rotlicht-/Abstandsmeldungen (und lässt die 3 h/14 d unberührt); die Vorlage hat die Zeile auskommentiert. Alle Knoten eines Netzes aktualisieren, bevor man sich auf Dauern verlässt: ein Knoten < 1.1.0 ignoriert das Feld.
+- Doku: [`server/docs/report-expiry.md`](server/docs/report-expiry.md), `api.md`, `federation-protocol.md` (4.4b, 5), `operating.md`, `docs/concept.md` 3.2.
+
 ## client-lib v1.1.0 — 2026-10-04
 
 **Blitzer nach Land** (Teil C des Zusatzauftrags „Blitzer-Funktion aktivierbar machen — länderabhängig“; Teil A ist der Server, Teil B die Weboberfläche). Rein additiv: `apiVersion` bleibt `1`, bestehende Aufrufe und Ergebnisse ändern sich nicht.

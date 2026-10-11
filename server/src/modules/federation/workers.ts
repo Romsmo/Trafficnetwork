@@ -18,6 +18,7 @@ import {
 } from "../../db/queries/network-peers.js";
 import { requestJoin, sendHeartbeat, pullEvents, pullSpeedLimitVotes } from "./http-client.js";
 import { ingestDeviceCreateEvent } from "./ingest.js";
+import type { ReportExpiryRules } from "../../config/report-expiry.js";
 import { ingestSpeedLimitVote } from "../speed-limit-corrections/ingest.js";
 import { getCapacityHint } from "./load.js";
 import { FEDERATION_PROTOCOL_VERSION, type HeartbeatPayload, type JoinRequestPayload } from "./protocol.js";
@@ -44,6 +45,8 @@ export interface FederationWorkerDeps {
   log: FastifyBaseLogger;
   /** Source of the head count carried in outgoing heartbeats (modules/online/); without it no figure is sent. */
   online?: OnlineTracker;
+  /** The report expiry rules in force now (signed network configuration applied); without it this node's own environment applies. */
+  expiry?: () => ReportExpiryRules;
 }
 type Deps = FederationWorkerDeps;
 
@@ -126,7 +129,7 @@ export async function pullFromPeers(deps: Deps): Promise<void> {
     try {
       const page = await pullEvents(peer.address, peer.lastPulledSequence ?? 0, deps.env.FEDERATION_ANTI_ENTROPY_PAGE_SIZE, deps.env.FEDERATION_PEER_TIMEOUT_MS);
       for (const item of page.events) {
-        const outcome = await ingestDeviceCreateEvent(deps.db, deps.env, item.envelope, peer.nodeId);
+        const outcome = await ingestDeviceCreateEvent(deps.db, deps.env, item.envelope, peer.nodeId, deps.expiry?.());
         if (outcome.status === "created" || outcome.status === "merged") {
           publishEvent(deps.realtime, outcome.event);
         }

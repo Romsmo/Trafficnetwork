@@ -15,6 +15,7 @@ import { isFreshTimestamp, type SignedEnvelope } from "../crypto/envelope.js";
 import { computeFederationEventId, verifyDeviceCreateEnvelope, type DeviceCreateEventPayload } from "../federation/device-event.js";
 import { broadcastFederationEvents } from "../federation/broadcast.js";
 import { federationEventExists } from "../../db/queries/event-log.js";
+import { currentReportExpiry } from "../expiry/rules.js";
 
 const DEVICE_ASSERTION_FRESHNESS_SECONDS = 60;
 
@@ -78,6 +79,9 @@ export async function registerHazardReportRoutes(app: FastifyInstance) {
     lat: z.number().min(-90).max(90),
     lng: z.number().min(-180).max(180),
     speedKmh: z.number().optional(),
+    // Optional: how long the report should live, in seconds. Out of the bounds published as `reportExpiry` in
+    // GET /v1/config -> 400 EXPIRY_OUT_OF_RANGE (never clamped). Absent -> the type's default. Not valid for fixedSpeedCamera.
+    expiresInSeconds: z.number().optional(),
     // Optional (F-S3): a client whose device has bound a key (POST
     // /v1/devices/bind-key) can additionally sign the report content itself,
     // not just the transport/auth. This is what makes the resulting event
@@ -102,6 +106,9 @@ export async function registerHazardReportRoutes(app: FastifyInstance) {
     // Also out of scope for device-content-signing/federation this milestone
     // (see modules/federation/device-event.ts) — deviceAssertion is ignored here.
     if (input.type === "fixedSpeedCamera") {
+      if (input.expiresInSeconds !== undefined) {
+        throw badRequest("expiresInSeconds is not applicable to fixedSpeedCamera: a fixed camera does not expire");
+      }
       const cameraResult = await createOrMergeFixedCamera(app.deps.db, app.deps.env, {
         lat: input.lat,
         lng: input.lng,
@@ -116,7 +123,13 @@ export async function registerHazardReportRoutes(app: FastifyInstance) {
     if (input.deviceAssertion) {
       const envelope = input.deviceAssertion as SignedEnvelope<DeviceCreateEventPayload>;
       const p = envelope.payload;
-      if (p.type !== input.type || p.lat !== input.lat || p.lng !== input.lng || (p.speedKmh ?? null) !== (input.speedKmh ?? null)) {
+      if (
+        p.type !== input.type ||
+        p.lat !== input.lat ||
+        p.lng !== input.lng ||
+        (p.speedKmh ?? null) !== (input.speedKmh ?? null) ||
+        (p.expiresInSeconds ?? null) !== (input.expiresInSeconds ?? null)
+      ) {
         throw badRequest("deviceAssertion.payload does not match the submitted report fields");
       }
       if (!verifyDeviceCreateEnvelope(envelope)) {
@@ -140,8 +153,13 @@ export async function registerHazardReportRoutes(app: FastifyInstance) {
     const result = await createOrMergeReport(
       app.deps.db,
       app.deps.env,
-      { type: input.type, lat: input.lat, lng: input.lng, speedKmh: input.speedKmh, reporterId },
-      federation ? { federation } : undefined,
+      { type: input.type, lat: input.lat, lng: input.lng, speedKmh: input.speedKmh, expiresInSeconds: input.expiresInSeconds, reporterId },
+      {
+        expiry: currentReportExpiry(app),
+        // The signed timestamp (checked fresh above) is the anchor, so this node derives what a peer will derive.
+        ...(broadcastEnvelope ? { occurredAt: new Date(broadcastEnvelope.payload.timestamp) } : {}),
+        ...(federation ? { federation } : {}),
+      },
     );
     publishEvent(app.realtime, result.event);
     // Peers get the signed report with its exact coordinates: a camera report goes out only where the camera may be delivered individually.
@@ -163,12 +181,14 @@ export async function registerHazardReportRoutes(app: FastifyInstance) {
     if (!parsed.success) {
       throw badRequest("Invalid request body", parsed.error.issues);
     }
-    const result = await confirmReport(app.deps.db, app.deps.env, {
-      reportId: params.id,
-      reporterId: req.auth!.sub,
-      kind: parsed.data.kind,
-    });
+    const result = await confirmReport(
+      app.deps.db,
+      app.deps.env,
+      { reportId: params.id, reporterId: req.auth!.sub, kind: parsed.data.kind },
+      currentReportExpiry(app),
+    );
     if (result.event) publishEvent(app.realtime, result.event);
+    if (result.endedEvent) publishEvent(app.realtime, result.endedEvent);
     // A camera report is shown back only where cameras are delivered individually (modules/cameras/write-response.ts).
     if (isCameraType(result.report.item.type) && !mayShowCamera(app, result.report)) return { recorded: result.recorded };
     return { report: result.report.item, recorded: result.recorded };

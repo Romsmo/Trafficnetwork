@@ -92,10 +92,14 @@ HazardType-Enum:
 
 | Typ | Grundverfallszeit | Verlängerung durch Bestätigung |
 |---|---|---|
-| Mobiler Blitzer / Rotlicht / Abstand | ~10–15 min | Ja |
-| Stau, Unfall, Panne, Hindernis | ~20–30 min | Ja |
+| Mobiler Blitzer | 3 Stunden (Server 1.1.0; vorher ~12 min) | Ja |
+| Anhänger (`trailerCamera`) | 14 Tage (Server 1.1.0; vorher ~12 min) | Ja |
+| Rotlicht / Abstand (Meldungen) | ~12 min | Ja |
+| Stau, Unfall, Panne, Hindernis | ~25 min | Ja |
 | Baustelle | Tage/Wochen (Enddatum falls bekannt) | Community kann „beendet" melden |
 | Fester Blitzer | Kein automatischer Verfall | Nur durch gehäufte „nicht mehr da"-Meldungen entfernt |
+
+**Eigene Ablaufzeit (Server 1.1.0):** Beim Melden kann das Gerät eine eigene Dauer mitgeben (`expiresInSeconds`, Teil des signierten Inhalts) innerhalb von Grenzen je Typ (`GET /v1/config` → `reportExpiry`); außerhalb wird abgelehnt, nicht gekappt. Das Ende ist `signierter Zeitstempel + Dauer` und auf jedem Knoten gleich. Bestätigungen setzen auf „jetzt + Standard", verkürzen aber nie. Temporäre Kamera-Meldungen enden vorzeitig, wenn zwei verschiedene Geräte „nicht mehr da" melden (Details: `server/docs/report-expiry.md`).
 
 **Provenienz-Metadaten sind Pflicht auf jedem Datensatz** (`source`, `sourceLicense`, `importedAt`) — unabhängig von der Ingestion-Strategie aus Abschnitt 4. Kostet beim Bauen nichts, erlaubt aber eine spätere gezielte Bereinigung nach Quelle in einer einzigen Query.
 

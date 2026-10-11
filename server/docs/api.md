@@ -446,9 +446,18 @@ hazard-report response at all; it lives in its own table (see `schema.md`).
 
 ```
 Request:  { "type": "<hazard type>", "lat": number, "lng": number, "speedKmh"?: number,
+             "expiresInSeconds"?: number,
              "deviceAssertion"?: SignedEnvelope<DeviceCreateEvent> }
 Response: { "report": {...}, "merged": boolean }   — 201 if new, 200 if merged
 ```
+
+`expiresInSeconds` (optional, server 1.1.0) is how long the reporter wants the report to live. Without it the type's
+default applies (`GET /v1/config` → `reportExpiry.<type>.defaultSeconds`). A value outside `minSeconds`…`maxSeconds` of the
+type, or not a whole number, is refused with **`400 EXPIRY_OUT_OF_RANGE`**, `details`: `{ type, requestedSeconds,
+defaultSeconds, minSeconds, maxSeconds }` — it is never clamped. `400` too for `type: "fixedSpeedCamera"` (never expires).
+The answer's `report.expiresAt` is when it ends. With a `deviceAssertion` the field must equal the signed one, and
+`expiresAt` is the signed `timestamp` plus the duration, which is what every other node derives. A client that does not know
+the field behaves exactly as before. See [`report-expiry.md`](report-expiry.md).
 
 `deviceAssertion` is optional (F-S3) — see "Federation" above for the
 `DeviceCreateEvent` shape. When a client's device has bound a key (`POST
@@ -503,10 +512,15 @@ For a camera report whose country is not delivered at level `full` the answer is
 
 One vote per reporter per report — a second call with the same or a
 different `kind` is a no-op (`recorded: false`) rather than an error.
-`stillThere` extends `expiresAt`; `gone` does not. There is no automatic
-`active → removed` transition from accumulated `gone` votes on ordinary
-hazard reports (unlike fixed cameras, below) — they only ever leave `active`
-via expiry.
+`stillThere` renews `expiresAt` to now plus the type's default — never shortening a
+report that was made to live longer; `gone` does not extend. Ordinary hazard
+reports have no `active → removed` transition from `gone` votes (fixed cameras,
+below, do); they leave `active` via expiry. **Exception (server 1.1.0):** a temporary
+camera report (`mobileSpeedCamera`, `trailerCamera`, `redLightCamera`,
+`distanceControl`) ends early — status `expired`, event `ReportExpired` — once
+`cameraReportGoneThreshold` (`GET /v1/config`, default 2) distinct devices said `gone`
+and the denials are at least the number of people who said it is there, the reporter
+included. Votes are node-local. See [`report-expiry.md`](report-expiry.md).
 
 ### `POST /v1/speed-cameras/:id/removal-reports`
 
@@ -983,6 +997,13 @@ policy (`payload.cameraPolicyByCountry`; a country it does not list is `full`); 
 of the verified network policy and the node's `cameraPolicy` (the node's claim, which can only be stricter). `speedCameraNamespaceEnabled`
 keeps its meaning for old clients — "this node delivers camera data" — and is now true exactly when some level is above `off` (by default: always). A server without `cameraPolicy` is one
 that predates the country policy: a client treats it as "all countries at the level of `speedCameraNamespaceEnabled`".
+
+**Report expiry addition (server 1.1.0):** `reportExpiry` — per reportable type `{ defaultSeconds, minSeconds,
+maxSeconds }`: what a report gets without a request, and the bounds of `expiresInSeconds` on `POST /v1/hazard-reports`
+(outside: `400 EXPIRY_OUT_OF_RANGE`). Values already reflect the signed network configuration (`networkConfig.payload.reportExpiry`)
+where it sets them. `hazardExpiryMsByType` keeps its shape and carries the defaults (now 3 h for `mobileSpeedCamera`, 14 d
+for `trailerCamera`). `cameraReportGoneThreshold` is the number of distinct "gone" votes that end a temporary camera report
+early. A server without `reportExpiry` predates the feature: a client sends no duration and tells its user that the default applies.
 
 **D addition:** `persistentCameraTypes` — the kinds of permanent enforcement device this server
 knows (`["fixedSpeedCamera","redLightCamera","distanceControl"]`); see "Persistent enforcement

@@ -9,6 +9,7 @@ import { publishEvent } from "../realtime/publisher.js";
 import { badRequest, forbidden, notFound } from "../../lib/errors.js";
 import { joinRequestPayloadSchema, heartbeatPayloadSchema, type JoinRequestPayload, type HeartbeatPayload } from "./protocol.js";
 import { ingestDeviceCreateEvent } from "./ingest.js";
+import { currentReportExpiry } from "../expiry/rules.js";
 import { computeFederationEventId, type DeviceCreateEventPayload } from "./device-event.js";
 import { broadcastFederationEvents } from "./broadcast.js";
 import { beginPush, endPush, getConcurrentPushes } from "./load.js";
@@ -192,7 +193,7 @@ export async function registerFederationRoutes(app: FastifyInstance) {
         const toGossip: SignedEnvelope<DeviceCreateEventPayload>[] = [];
 
         for (const envelope of events as SignedEnvelope<DeviceCreateEventPayload>[]) {
-          const outcome = await ingestDeviceCreateEvent(app.deps.db, app.deps.env, envelope, senderNodeId);
+          const outcome = await ingestDeviceCreateEvent(app.deps.db, app.deps.env, envelope, senderNodeId, currentReportExpiry(app));
           if (outcome.status === "rejected") {
             results.push({ federationEventId: outcome.federationEventId, status: outcome.status, reason: outcome.reason, code: outcome.code });
             if (outcome.code === "invalid_signature") {
