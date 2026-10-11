@@ -112,7 +112,7 @@ export class ReportDialog {
         h("p", { id: "report-position", role: "status" }, positionText),
         h("div", { class: "dialog-actions" }, positionButtons),
       ),
-      h("p", { class: "hint" }, tr.t("reportDialog.privacy")),
+      h("p", { class: "hint" }, `${tr.t("reportDialog.privacy")} `, h("a", { href: "/privacy", target: "_blank", rel: "noopener" }, tr.t("reportDialog.privacy.link"))),
       s.result ? this.#resultBox(s.result, tr) : null,
       h(
         "div",

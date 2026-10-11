@@ -122,7 +122,7 @@ export default {
   "reportDialog.position.selected": "Selected spot: {lat}, {lng}",
   "reportDialog.position.none": "No spot selected yet.",
   "reportDialog.pick.hint": "Tap the map to set the spot.",
-  "reportDialog.privacy": "The report is anonymous and stays on this node. Your location is only used if you explicitly allow it here, and it is not stored.",
+  "reportDialog.privacy": "What is sent: the chosen spot, the category and the chosen duration – and, as the connection requires, your IP address to this node. The node adds the time and a random, anonymous session identifier. The report is visible to everyone. Your location is used only if you release it here explicitly, and is not stored.",
   "reportDialog.safety": "Please only report when you are not driving.",
   "reportDialog.submit": "Report",
   "reportDialog.cancel": "Cancel",
@@ -180,7 +180,7 @@ export default {
   "about.github.button": "Go to the GitHub project",
   "about.github.note": "Note: as long as the repository is not public, the link only works for contributors.",
   "about.data.title": "Data sources",
-  "about.data.body": "Speed limits and signs come from OpenStreetMap data (Open Database License, © OpenStreetMap contributors); hazard reports come from users. The information is a hint, not official signage – the signs on the road and traffic law always take precedence.",
+  "about.data.body": "Speed limits and signs come mostly from OpenStreetMap data (Open Database License, © OpenStreetMap contributors), hazard reports from users. Roadworks may come from official open data: France – Bison Futé / DIR via transport.data.gouv.fr (Licence Ouverte 2.0), Luxembourg – Administration des Ponts et Chaussées (CC0), Netherlands – NDW. Which sources this node has actually loaded is the operator's decision. The information is guidance, not official signage – the signs on the spot and the road traffic regulations always prevail.",
   "about.safety.title": "Safety notice",
   "about.safety.body": "Do not use this page while driving. Only report when you are not behind the wheel.",
   "about.cameras.title": "Speed-camera reports: legal notice",
@@ -189,14 +189,14 @@ export default {
   "about.privacy.title": "Privacy in short",
   "about.privacy.noAccount": "No account, no sign-in, no cookies. Your browser (localStorage) remembers only your language choice, which categories you switched on, and whether you have already seen the speed-camera notice.",
   "about.privacy.session": "When you open the map your browser receives an anonymous, random session that expires after a short time and is not linked to earlier sessions.",
-  "about.privacy.location": "Your location is only used if you allow it with a button press – never in the background – and it is not stored. Only the spot of a report is stored, for as long as the report is valid; reports are visible to everyone but not linked to you.",
+  "about.privacy.location": "Your location is used only when you release it with a button – never in the background – and is not stored. Only the spot of a report is stored: while it applies and for a short time afterwards (by default up to 3 days), then it is deleted. Reports are visible to everyone and carry only a random session identifier, which is not delivered with them.",
   "about.privacy.ip": "Your IP address is briefly counted in memory for abuse limiting and is not stored in the database.",
   "about.privacy.logs.on": "This node's access logs contain neither coordinates nor IP addresses.",
   "about.privacy.logs.off": "Note: this node's operator has switched privacy logging off – access logs may contain IP addresses and coordinates.",
   "about.privacy.tiles": "Your browser loads the map tiles directly from {host}; that provider sees your IP address and the map area you view.",
   "about.privacy.tiles.none": "This page loads no maps from third parties.",
   "about.privacy.more": "In full:",
-  "about.privacy.link": "Privacy notice",
+  "about.privacy.link": "Privacy notice (draft)",
   "about.license": "License: Apache License 2.0",
 
   // Mobile map, duration of a report, speed-limit proposals (October 2026)
@@ -316,5 +316,15 @@ export default {
   "limit.result.merged": "Your entry was merged into an existing proposal ({confirmations} of {required} confirmations).",
   "limit.result.new": "Your proposal {value} {unit} was received ({confirmations} of {required} confirmations).",
   "limit.result.applied": "The value {value} {unit} applies now.",
-  "limit.result.back": "Back"
+  "limit.result.back": "Back",
+
+  // Legal pages (privacy notice, terms of use, imprint)
+  "footer.terms": "Terms of use",
+  "footer.imprint": "Imprint",
+  "page.privacy.title": "Privacy – Trafficnetwork",
+  "page.terms.title": "Terms of use – Trafficnetwork",
+  "page.imprint.title": "Imprint – Trafficnetwork",
+  "reportDialog.privacy.link": "Privacy notice",
+  "about.privacy.following": "While the map follows your location, the map view the page asks the node for is your approximate location.",
+  "about.terms.link": "Terms of use (draft) and imprint"
 };

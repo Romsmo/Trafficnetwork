@@ -83,6 +83,14 @@ services:
       # empty and the server substitutes its default (OpenStreetMap); "none" switches the map background off.
       WEB_UI_ENABLED: ${WEB_UI_ENABLED:-true}
       PROJECT_REPO_URL: ${PROJECT_REPO_URL:-https://github.com/Romsmo/Trafficnetwork}
+      # Who runs this node (imprint and privacy notice; docs/web-ui.md). Empty = "not entered yet", with a warning at start.
+      OPERATOR_NAME: ${OPERATOR_NAME:-}
+      OPERATOR_ADDRESS: ${OPERATOR_ADDRESS:-}
+      OPERATOR_EMAIL: ${OPERATOR_EMAIL:-}
+      OPERATOR_PHONE: ${OPERATOR_PHONE:-}
+      OPERATOR_REPRESENTATIVE: ${OPERATOR_REPRESENTATIVE:-}
+      OPERATOR_REGISTER: ${OPERATOR_REGISTER:-}
+      OPERATOR_VAT_ID: ${OPERATOR_VAT_ID:-}
       MAP_TILE_URL: ${MAP_TILE_URL:-}
       MAP_TILE_ATTRIBUTION_TEXT: ${MAP_TILE_ATTRIBUTION_TEXT:-© OpenStreetMap contributors}
       MAP_TILE_ATTRIBUTION_URL: ${MAP_TILE_ATTRIBUTION_URL:-https://www.openstreetmap.org/copyright}

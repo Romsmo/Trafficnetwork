@@ -4,6 +4,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { buildCsp, securityHeaders } from "./csp.js";
+import { operatorInfo, operatorWarning } from "./operator.js";
 import { createRegionHint } from "./region.js";
 import { registerWebSessionRoute } from "./session.js";
 import { IMMUTABLE_CACHE, loadAssets, pickEncoding, type Asset, type AssetTable } from "./static.js";
@@ -44,6 +45,9 @@ export async function registerWebModule(app: FastifyInstance): Promise<void> {
   });
 
   const version = readPackageVersion(root);
+  const operator = operatorInfo(env);
+  const warning = operatorWarning(operator);
+  if (warning) app.log.warn(warning);
   const regionHint = createRegionHint(app.deps.db);
 
   const send = (req: FastifyRequest, reply: FastifyReply, asset: Asset, cacheControl = asset.cacheControl) => {
@@ -79,12 +83,15 @@ export async function registerWebModule(app: FastifyInstance): Promise<void> {
       version,
       license: "Apache-2.0",
       repoUrl: env.PROJECT_REPO_URL,
+      operator,
       tiles: env.MAP_TILE_URL === ""
         ? null
         : { url: env.MAP_TILE_URL, attributionText: env.MAP_TILE_ATTRIBUTION_TEXT, attributionUrl: env.MAP_TILE_ATTRIBUTION_URL, maxZoom: env.MAP_TILE_MAX_ZOOM },
       region: bounds ? { bounds } : null,
       privacyLogging: env.LOG_PRIVACY_MODE,
       sessionTtlSeconds: env.WEB_SESSION_TTL_SECONDS,
+      // How long a report is kept after it ended (matching, moderation), then deleted: shown in the privacy notice.
+      retentionDays: env.EVENT_LOG_RETENTION_DAYS_DYNAMIC,
       limits: { maxSegmentRadiusM: env.WEB_MAX_SEGMENT_RADIUS_M, maxHazardRadiusM: env.WEB_MAX_HAZARD_RADIUS_M },
     };
   });
