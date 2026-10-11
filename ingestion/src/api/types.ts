@@ -92,6 +92,8 @@ export interface SeedReportsResponse {
   refreshed: number;
   skippedEnded: number;
   duplicatesInRequest: number;
+  /** Server 1.1.0 and later only: rows whose source end date lay beyond SEED_REPORT_MAX_END_DAYS and was held to it. Absent on older servers. */
+  endCapped?: number;
 }
 
 export interface SeedReportPoster {

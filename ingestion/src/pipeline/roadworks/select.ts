@@ -15,8 +15,13 @@ export type Selection = { active: ActiveRoadwork } | { skip: string };
 
 export function selectActive(candidate: RoadworkCandidate, now: Date, lookaheadMs: number): Selection {
   const horizon = now.getTime() + lookaheadMs;
-  const { start, end, windows } = candidate.validity;
+  const { start, end, windows, exceptions } = candidate.validity;
   const base = { externalId: candidate.externalId, lat: candidate.lat, lng: candidate.lng, caveat: candidate.caveat };
+
+  // An exception period that is running right now (the works pause, e.g. over a bank-holiday weekend): not active at this pass. Exceptions
+  // still ahead are NOT applied to the end date — cutting the roadwork at the next pause would drop weeks of valid data from a one-off
+  // import; the record's caveat says so.
+  if (exceptions?.some((x) => x.start.getTime() <= now.getTime() && x.end.getTime() > now.getTime())) return { skip: "an exception period (works paused) is running now" };
 
   if (windows && windows.length > 0) {
     const running = windows

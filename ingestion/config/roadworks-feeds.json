@@ -9,20 +9,32 @@
       "sourceLicense": "Licence Ouverte 2.0",
       "attribution": "Source: Bison Futé / directions interdépartementales des routes (DIR), via transport.data.gouv.fr, Licence Ouverte 2.0 (Etalab)",
       "minIntervalMinutes": 60,
-      "ttlHours": 72,
-      "notes": "License checked 2026-09-26 at https://transport.data.gouv.fr/datasets/evenements-routiers-sur-le-reseau-routier-national-non-concede (Licence Ouverte 2.0, no registration). Resource 79174 is the hourly aggregate (one file); 79173 is a directory of per-event files."
+      "ttlHours": 168,
+      "notes": "License checked 2026-09-26 and again 2026-10-11 at https://transport.data.gouv.fr/datasets/evenements-routiers-sur-le-reseau-routier-national-non-concede (Licence Ouverte 2.0, no registration). Resource 79174 is the hourly aggregate (one file); 79173 is a directory of per-event files. ttlHours 168 = a manual weekly pass keeps an open-ended roadwork alive."
+    },
+    "lu-cita": {
+      "enabled": true,
+      "kind": "datex2",
+      "country": "LU",
+      "name": "Luxembourg - traffic events (works included), Administration des Ponts et Chaussées / CITA, DATEX II 2.0",
+      "url": "https://www.cita.lu/info_trafic/datex/situationrecord",
+      "sourceLicense": "CC0 1.0 (Administration des Ponts et Chaussées, data.public.lu)",
+      "attribution": "Source: Administration des Ponts et Chaussées du Grand-Duché de Luxembourg (CITA), data.public.lu, CC0",
+      "minIntervalMinutes": 60,
+      "ttlHours": 168,
+      "notes": "License checked 2026-10-11: dataset 'Cita : Événements trafic en DATEX II' at https://data.public.lu/en/datasets/5bb707fff176a135ced3b287/ is labelled Creative Commons Zero (CC0) by the publisher (API field license=cc-zero). No registration, no key. Live document, 4.5 kB gzip. Records without an end date live ttlHours and are renewed on every sighting."
     },
     "nl-ndw": {
-      "enabled": false,
+      "enabled": true,
       "kind": "datex2",
       "country": "NL",
       "name": "Netherlands - NDW roadworks and events planning feed (DATEX II v3)",
       "url": "https://opendata.ndw.nu/planningsfeed_wegwerkzaamheden_en_evenementen.xml.gz",
-      "sourceLicense": "NDW open data (license text not confirmed)",
+      "sourceLicense": "NDW open data (free reuse by third-party applications per NDW; no named license)",
       "attribution": "Source: NDW (Nationaal Dataportaal Wegverkeer), opendata.ndw.nu",
       "minIntervalMinutes": 60,
-      "ttlHours": 72,
-      "notes": "OFF until the license is settled: file access needs no login, but NDW's own license text was not found on opendata.ndw.nu or docs.ndw.nu on 2026-09-26 (only the parent agency's general 'open, tenzij' policy). Ask mail@servicedeskndw.nu, then set enabled to true. ~18 MB gzip per fetch."
+      "ttlHours": 168,
+      "notes": "Re-checked 2026-10-11 (Ampel auflagen): NDW's own factsheet 'Open data' (https://www.ndw.nu/site/binaries/site-content/collections/documents/2022/6/10/factsheet-open-data/Factsheet+Open+Data.pdf) says 'NDW-gegevens zijn beschikbaar als open data. Daarmee zijn de gegevens vrij beschikbaar voor hergebruik in toepassingen van derden.' and disclaims availability/accuracy ('eigen risico'); https://www.ndw.nu/copyright, linked from the footer of opendata.ndw.nu, applies CC0 to the website's content. No named license for the data files themselves was found (opendata.ndw.nu and docs.ndw.nu carry none): keep the attribution as a courtesy and do not suggest NDW endorses the result. ~18 MB gzip per fetch."
     },
     "de-autobahn": {
       "enabled": false,
@@ -34,9 +46,9 @@
       "sourceLicense": "ungeklärt",
       "attribution": "Source: Die Autobahn GmbH des Bundes (verkehr.autobahn.de) - terms of reuse not stated by the publisher",
       "minIntervalMinutes": 30,
-      "ttlHours": 48,
+      "ttlHours": 168,
       "requestDelayMs": 250,
-      "notes": "OFF by default: the API publishes no license or terms of use (docs/sources.md, checked 2026-09-26). Chosen by the operator as the German source; rows are marked sourceLicense=ungeklärt. Turn on deliberately with AUTOBAHN_API_ENABLED=true or ROADWORKS_FEEDS_ON=de-autobahn. ~110 requests per pass (one for the road list, one per road; 108 roads on 2026-09-26)."
+      "notes": "OFF by default: the API publishes no license or terms of use. Re-checked 2026-10-11: OpenAPI info block (https://autobahn.api.bund.dev/openapi.yaml) has contact but no license/termsOfService; GitHub bundesAPI/autobahn-api license=null; autobahn.de pages (Baustellenkarte, Datenschutz) state none. The same MIA data is offered on the Mobilithek only as 'restricted use, free of charge' with provider approval, and BASt republishes motorway roadworks there under CC BY 4.0 (offer 608447464874934272) - see docs/sources.md. Rows are marked sourceLicense=ungeklärt. Turn on deliberately with AUTOBAHN_API_ENABLED=true or ROADWORKS_FEEDS_ON=de-autobahn. ~110 requests per pass (one for the road list, one per road; 108 roads on 2026-09-26)."
     }
   }
 }

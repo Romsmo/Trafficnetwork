@@ -9,7 +9,7 @@ import { nvdbNoWorker } from "../../src/pipeline/nvdb/worker.js";
 import type { FeedConfig } from "../../src/pipeline/roadworks/feeds.js";
 import { runRoadworks } from "../../src/pipeline/roadworks/run-roadworks.js";
 import type { ParseResult } from "../../src/pipeline/roadworks/types.js";
-import { collectSourceQuality, renderQualityMarkdown } from "../../src/report/quality.js";
+import { collectSourceQuality, groupRoadworksReasons, renderQualityMarkdown } from "../../src/report/quality.js";
 import { StateStore } from "../../src/state/store.js";
 import { startFakeNvdb, type FakeNvdb } from "../helpers/nvdb-fake-server.js";
 
@@ -121,5 +121,52 @@ describe("source quality report — built only from what the importers recorded"
     expect(md).toContain("- 3 × starts later");
     expect(md).toContain("- 1 left out because another source already describes the same roadwork");
     expect(md).toContain("- a note");
+  });
+});
+
+describe("roadworks quality report — reasons grouped the way an operator reads them", () => {
+  it("separates other record types from roadworks that are not in force now and from roadworks that are not usable", () => {
+    expect(
+      groupRoadworksReasons({
+        "record type SpeedManagement is not roadworks": 7,
+        "record type ReroutingManagement is not roadworks": 3,
+        "starts later": 5,
+        "already ended": 2,
+        "no validity window is running now": 4,
+        "an exception period (works paused) is running now": 1,
+        "no coordinates": 6,
+        "validity time without a zone offset (not guessed)": 1,
+        "validity status suspended": 2,
+      }),
+    ).toEqual({ otherRecordTypes: 10, notInForceNow: 12, notUsable: 9 });
+  });
+
+  it("adds a one-line breakdown to the feed's notes, and the server's end-date cap when the server reports it", async () => {
+    const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "tn-quality-grp-"));
+    try {
+      const dir = path.join(stateDir, "roadworks");
+      fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(
+        path.join(dir, "x.report.json"),
+        JSON.stringify({
+          feedId: "x",
+          status: "ok",
+          startedAt: "2026-10-11T10:00:00Z",
+          finishedAt: "2026-10-11T10:00:05Z",
+          fetched: 100,
+          notImported: { "record type SpeedManagement is not roadworks": 60, "starts later": 15, "no coordinates": 5 },
+          mergedIntoOtherFeed: 2,
+          sentWithCaveat: {},
+          sent: 18,
+          server: { created: 10, reactivated: 0, updated: 1, refreshed: 7, skippedEnded: 0, duplicatesInRequest: 0, endCapped: 3 },
+        }),
+      );
+      const [item] = await collectSourceQuality(stateDir);
+      const notes = item!.notes.join("\n");
+      expect(notes).toContain("of 100 records in the document: 18 sent, 2 merged into another feed, 60 are not roadworks (accompanying measures, events, faults), 15 roadworks not in force at this pass, 5 roadworks not usable");
+      expect(notes).toContain("3 with an end date held to the server's cap");
+    } finally {
+      fs.rmSync(stateDir, { recursive: true, force: true });
+    }
   });
 });

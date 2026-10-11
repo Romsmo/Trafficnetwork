@@ -1,0 +1,311 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<d2LogicalModel modelBaseVersion="2" xmlns="http://datex2.eu/schema/2/2_0">
+    <exchange>
+        <supplierIdentification>
+            <country>lu</country>
+            <nationalIdentifier>PCH</nationalIdentifier>
+        </supplierIdentification>
+    </exchange>
+    <payloadPublication xsi:type="SituationPublication" lang="en" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+        <publicationTime>2026-10-11T12:20:04.276663097+02:00</publicationTime>
+        <publicationCreator>
+            <country>lu</country>
+            <nationalIdentifier>PCH</nationalIdentifier>
+        </publicationCreator>
+        <situation id="237687" version="3">
+            <situationVersionTime>2026-10-10T09:00:32+02:00</situationVersionTime>
+            <headerInformation>
+                <confidentiality>noRestriction</confidentiality>
+                <informationStatus>real</informationStatus>
+            </headerInformation>
+            <situationRecord xsi:type="MaintenanceWorks" id="237687-1" version="1">
+                <situationRecordCreationTime>2026-10-10T09:00:32+02:00</situationRecordCreationTime>
+                <situationRecordVersionTime>2026-10-10T09:00:32+02:00</situationRecordVersionTime>
+                <probabilityOfOccurrence>certain</probabilityOfOccurrence>
+                <validity>
+                    <validityStatus>active</validityStatus>
+                    <validityTimeSpecification>
+                        <overallStartTime>2026-10-10T09:00:32+02:00</overallStartTime>
+                    </validityTimeSpecification>
+                </validity>
+                <groupOfLocations xsi:type="Linear">
+                    <locationForDisplay>
+                        <latitude>49.534996</latitude>
+                        <longitude>6.021889</longitude>
+                    </locationForDisplay>
+                    <supplementaryPositionalDescription>
+                        <affectedCarriagewayAndLanes>
+                            <carriageway>mainCarriageway</carriageway>
+                        </affectedCarriagewayAndLanes>
+                    </supplementaryPositionalDescription>
+                    <alertCLinear xsi:type="AlertCMethod4Linear">
+                        <alertCLocationCountryCode>7</alertCLocationCountryCode>
+                        <alertCLocationTableNumber>1</alertCLocationTableNumber>
+                        <alertCLocationTableVersion>3.0</alertCLocationTableVersion>
+                        <alertCDirection>
+                            <alertCDirectionCoded>positive</alertCDirectionCoded>
+                            <alertCDirectionSense>true</alertCDirectionSense>
+                        </alertCDirection>
+                        <alertCMethod4PrimaryPointLocation>
+                            <alertCLocation>
+                                <specificLocation>2207</specificLocation>
+                            </alertCLocation>
+                            <offsetDistance>
+                                <offsetDistance>1671</offsetDistance>
+                            </offsetDistance>
+                        </alertCMethod4PrimaryPointLocation>
+                        <alertCMethod4SecondaryPointLocation>
+                            <alertCLocation>
+                                <specificLocation>2206</specificLocation>
+                            </alertCLocation>
+                            <offsetDistance>
+                                <offsetDistance>354</offsetDistance>
+                            </offsetDistance>
+                        </alertCMethod4SecondaryPointLocation>
+                    </alertCLinear>
+                    <linearWithinLinearElement>
+                        <linearElement>
+                            <roadNumber>A4</roadNumber>
+                        </linearElement>
+                        <fromPoint xsi:type="DistanceFromLinearElementStart">
+                            <distanceAlong>10450.0</distanceAlong>
+                        </fromPoint>
+                        <toPoint xsi:type="DistanceFromLinearElementStart">
+                            <distanceAlong>10450.0</distanceAlong>
+                        </toPoint>
+                    </linearWithinLinearElement>
+                </groupOfLocations>
+                <roadMaintenanceType>roadworks</roadMaintenanceType>
+            </situationRecord>
+            <situationRecord xsi:type="MaintenanceWorks" id="237687-2" version="1">
+                <situationRecordCreationTime>2026-10-10T09:00:32+02:00</situationRecordCreationTime>
+                <situationRecordVersionTime>2026-10-10T09:00:32+02:00</situationRecordVersionTime>
+                <probabilityOfOccurrence>certain</probabilityOfOccurrence>
+                <validity>
+                    <validityStatus>active</validityStatus>
+                    <validityTimeSpecification>
+                        <overallStartTime>2026-10-10T09:00:32+02:00</overallStartTime>
+                    </validityTimeSpecification>
+                </validity>
+                <groupOfLocations xsi:type="Linear">
+                    <locationForDisplay>
+                        <latitude>49.534836</latitude>
+                        <longitude>6.021822</longitude>
+                    </locationForDisplay>
+                    <supplementaryPositionalDescription>
+                        <affectedCarriagewayAndLanes>
+                            <carriageway>mainCarriageway</carriageway>
+                        </affectedCarriagewayAndLanes>
+                    </supplementaryPositionalDescription>
+                    <alertCLinear xsi:type="AlertCMethod4Linear">
+                        <alertCLocationCountryCode>7</alertCLocationCountryCode>
+                        <alertCLocationTableNumber>1</alertCLocationTableNumber>
+                        <alertCLocationTableVersion>3.0</alertCLocationTableVersion>
+                        <alertCDirection>
+                            <alertCDirectionCoded>negative</alertCDirectionCoded>
+                            <alertCDirectionSense>false</alertCDirectionSense>
+                        </alertCDirection>
+                        <alertCMethod4PrimaryPointLocation>
+                            <alertCLocation>
+                                <specificLocation>2206</specificLocation>
+                            </alertCLocation>
+                            <offsetDistance>
+                                <offsetDistance>354</offsetDistance>
+                            </offsetDistance>
+                        </alertCMethod4PrimaryPointLocation>
+                        <alertCMethod4SecondaryPointLocation>
+                            <alertCLocation>
+                                <specificLocation>2207</specificLocation>
+                            </alertCLocation>
+                            <offsetDistance>
+                                <offsetDistance>1671</offsetDistance>
+                            </offsetDistance>
+                        </alertCMethod4SecondaryPointLocation>
+                    </alertCLinear>
+                    <linearWithinLinearElement>
+                        <linearElement>
+                            <roadNumber>A4</roadNumber>
+                        </linearElement>
+                        <fromPoint xsi:type="DistanceFromLinearElementStart">
+                            <distanceAlong>10450.0</distanceAlong>
+                        </fromPoint>
+                        <toPoint xsi:type="DistanceFromLinearElementStart">
+                            <distanceAlong>10450.0</distanceAlong>
+                        </toPoint>
+                    </linearWithinLinearElement>
+                </groupOfLocations>
+                <roadMaintenanceType>roadworks</roadMaintenanceType>
+            </situationRecord>
+        </situation><situation id="231225" version="3">
+            <situationVersionTime>2026-02-18T05:19:16+01:00</situationVersionTime>
+            <headerInformation>
+                <confidentiality>noRestriction</confidentiality>
+                <informationStatus>real</informationStatus>
+            </headerInformation>
+            <situationRecord xsi:type="ConstructionWorks" id="231225-1" version="1">
+                <situationRecordCreationTime>2026-02-18T05:19:16+01:00</situationRecordCreationTime>
+                <situationRecordVersionTime>2026-02-18T05:19:16+01:00</situationRecordVersionTime>
+                <probabilityOfOccurrence>certain</probabilityOfOccurrence>
+                <validity>
+                    <validityStatus>active</validityStatus>
+                    <validityTimeSpecification>
+                        <overallStartTime>2026-02-18T05:19:16+01:00</overallStartTime>
+                    </validityTimeSpecification>
+                </validity>
+                <groupOfLocations xsi:type="Linear">
+                    <locationForDisplay>
+                        <latitude>49.57074</latitude>
+                        <longitude>6.125748</longitude>
+                    </locationForDisplay>
+                    <supplementaryPositionalDescription>
+                        <affectedCarriagewayAndLanes>
+                            <carriageway>mainCarriageway</carriageway>
+                            <lane>emergencyLane</lane>
+                        </affectedCarriagewayAndLanes>
+                    </supplementaryPositionalDescription>
+                    <alertCLinear xsi:type="AlertCMethod4Linear">
+                        <alertCLocationCountryCode>7</alertCLocationCountryCode>
+                        <alertCLocationTableNumber>1</alertCLocationTableNumber>
+                        <alertCLocationTableVersion>3.0</alertCLocationTableVersion>
+                        <alertCDirection>
+                            <alertCDirectionCoded>positive</alertCDirectionCoded>
+                            <alertCDirectionSense>true</alertCDirectionSense>
+                        </alertCDirection>
+                        <alertCMethod4PrimaryPointLocation>
+                            <alertCLocation>
+                                <specificLocation>2103</specificLocation>
+                            </alertCLocation>
+                            <offsetDistance>
+                                <offsetDistance>1146</offsetDistance>
+                            </offsetDistance>
+                        </alertCMethod4PrimaryPointLocation>
+                        <alertCMethod4SecondaryPointLocation>
+                            <alertCLocation>
+                                <specificLocation>2102</specificLocation>
+                            </alertCLocation>
+                            <offsetDistance>
+                                <offsetDistance>-730</offsetDistance>
+                            </offsetDistance>
+                        </alertCMethod4SecondaryPointLocation>
+                    </alertCLinear>
+                    <linearWithinLinearElement>
+                        <linearElement>
+                            <roadNumber>A3</roadNumber>
+                        </linearElement>
+                        <fromPoint xsi:type="DistanceFromLinearElementStart">
+                            <distanceAlong>1.0</distanceAlong>
+                        </fromPoint>
+                        <toPoint xsi:type="DistanceFromLinearElementStart">
+                            <distanceAlong>1165.0</distanceAlong>
+                        </toPoint>
+                    </linearWithinLinearElement>
+                </groupOfLocations>
+                <constructionWorkType>roadImprovementOrUpgrading</constructionWorkType>
+            </situationRecord>
+        </situation><situation id="237530" version="1">
+            <situationVersionTime>2026-10-05T19:03:22+02:00</situationVersionTime>
+            <headerInformation>
+                <confidentiality>noRestriction</confidentiality>
+                <informationStatus>real</informationStatus>
+            </headerInformation>
+            <situationRecord xsi:type="EquipmentOrSystemFault" id="237530-2" version="1">
+                <situationRecordCreationTime>2026-10-05T19:03:22+02:00</situationRecordCreationTime>
+                <situationRecordVersionTime>2026-10-05T19:03:22+02:00</situationRecordVersionTime>
+                <probabilityOfOccurrence>certain</probabilityOfOccurrence>
+                <validity>
+                    <validityStatus>active</validityStatus>
+                    <validityTimeSpecification>
+                        <overallStartTime>2026-10-05T19:03:22+02:00</overallStartTime>
+                    </validityTimeSpecification>
+                </validity>
+                <groupOfLocations xsi:type="Linear">
+                    <locationForDisplay>
+                        <latitude>49.48069</latitude>
+                        <longitude>6.342133</longitude>
+                    </locationForDisplay>
+                    <supplementaryPositionalDescription>
+                        <affectedCarriagewayAndLanes>
+                            <carriageway>mainCarriageway</carriageway>
+                        </affectedCarriagewayAndLanes>
+                    </supplementaryPositionalDescription>
+                    <alertCLinear xsi:type="AlertCMethod4Linear">
+                        <alertCLocationCountryCode>7</alertCLocationCountryCode>
+                        <alertCLocationTableNumber>1</alertCLocationTableNumber>
+                        <alertCLocationTableVersion>3.0</alertCLocationTableVersion>
+                        <alertCDirection>
+                            <alertCDirectionCoded>negative</alertCDirectionCoded>
+                            <alertCDirectionSense>false</alertCDirectionSense>
+                        </alertCDirection>
+                        <alertCMethod4PrimaryPointLocation>
+                            <alertCLocation>
+                                <specificLocation>2519</specificLocation>
+                            </alertCLocation>
+                            <offsetDistance>
+                                <offsetDistance>5169</offsetDistance>
+                            </offsetDistance>
+                        </alertCMethod4PrimaryPointLocation>
+                        <alertCMethod4SecondaryPointLocation>
+                            <alertCLocation>
+                                <specificLocation>2521</specificLocation>
+                            </alertCLocation>
+                            <offsetDistance>
+                                <offsetDistance>1717</offsetDistance>
+                            </offsetDistance>
+                        </alertCMethod4SecondaryPointLocation>
+                    </alertCLinear>
+                    <linearWithinLinearElement>
+                        <linearElement>
+                            <roadNumber>A13</roadNumber>
+                        </linearElement>
+                        <fromPoint xsi:type="DistanceFromLinearElementStart">
+                            <distanceAlong>38976.0</distanceAlong>
+                        </fromPoint>
+                        <toPoint xsi:type="DistanceFromLinearElementStart">
+                            <distanceAlong>39076.0</distanceAlong>
+                        </toPoint>
+                    </linearWithinLinearElement>
+                </groupOfLocations>
+                <equipmentOrSystemFaultType>notWorking</equipmentOrSystemFaultType>
+                <faultyEquipmentOrSystemType>other</faultyEquipmentOrSystemType>
+            </situationRecord>
+        </situation><situation id="237684" version="3">
+            <situationVersionTime>2026-10-10T06:40:20+02:00</situationVersionTime>
+            <headerInformation>
+                <confidentiality>noRestriction</confidentiality>
+                <informationStatus>real</informationStatus>
+            </headerInformation>
+            <situationRecord xsi:type="PublicEvent" id="237684-1" version="1">
+                <situationRecordCreationTime>2026-10-10T06:40:20+02:00</situationRecordCreationTime>
+                <situationRecordVersionTime>2026-10-10T06:40:20+02:00</situationRecordVersionTime>
+                <probabilityOfOccurrence>certain</probabilityOfOccurrence>
+                <validity>
+                    <validityStatus>active</validityStatus>
+                    <validityTimeSpecification>
+                        <overallStartTime>2026-10-10T06:40:20+02:00</overallStartTime>
+                    </validityTimeSpecification>
+                </validity>
+                <groupOfLocations xsi:type="Linear">
+                    <supplementaryPositionalDescription>
+                        <affectedCarriagewayAndLanes>
+                            <carriageway>mainCarriageway</carriageway>
+                            <lane>lane1</lane>
+                            <lane>emergencyLane</lane>
+                        </affectedCarriagewayAndLanes>
+                    </supplementaryPositionalDescription>
+                    <linearWithinLinearElement>
+                        <linearElement>
+                            <roadNumber>A1</roadNumber>
+                        </linearElement>
+                        <fromPoint xsi:type="DistanceFromLinearElementStart">
+                            <distanceAlong>1.0</distanceAlong>
+                        </fromPoint>
+                        <toPoint xsi:type="DistanceFromLinearElementStart">
+                            <distanceAlong>1158.0</distanceAlong>
+                        </toPoint>
+                    </linearWithinLinearElement>
+                </groupOfLocations>
+                <publicEventType>other</publicEventType>
+            </situationRecord>
+        </situation>
+    </payloadPublication>
+</d2LogicalModel>
