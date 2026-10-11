@@ -74,6 +74,23 @@ Calls block the calling thread until they are done (a sync takes as long as the
 network does); they run on the library's own threads, so the size of yours does
 not matter. Run them in a thread or an executor if your program has an event loop.
 
+## Offline area and report duration (1.2.0)
+
+From 1.2.0 the device chooses what it keeps of the static data (`offline-storage.md`): by default the surroundings of the
+position you give with `updatePosition`, a home, and places driven through lately — **a client that never gives a position
+stores nothing**. Pick regions or everything explicitly if that is what the app wants:
+
+```python
+client.set_offline_regions(mode="all")
+# or: regions = client.list_offline_regions(); client.set_offline_regions(regions=[regions[0]["id"]])
+client.set_storage_limits(max_bytes=300 * 1024 * 1024, wifi_only=True)
+client.set_connection_metered(False)
+```
+
+Also new: `getReportLimits(type)` and an optional duration on `submitReport` (`api.md`, "Writes"),
+`reportMissingSpeedLimit` for a road with no limit on record, and `lookupSpeedLimit`, which says *outside the offline area*
+instead of "no limit" where nothing could be looked at.
+
 ## Verified in CI
 
 `conformance-python` runs `conformance/scenarios.json` — the same scenarios,

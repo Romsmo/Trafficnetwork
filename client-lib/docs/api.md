@@ -120,6 +120,23 @@ segment decides regardless. The `unit` (`"kmh"`/`"mph"`) is never converted.
 (so a reverted correction is never lost). See `report_wrong_speed_limit`
 below for how a proposal gets there.
 
+`null` is ambiguous on purpose — it is what a local read can say. Which of
+*no limit is on record here* and *this place is outside what is stored* it
+is, `lookupSpeedLimit` (1.2.0) tells:
+
+```
+lookupSpeedLimit(lat, lng, heading?) -> SpeedLimitLookup                // async
+  { status: "found", source: "offline" | "online", ...SpeedLimitAnswer }
+| { status: "notRecorded", source: "offline" | "online" }
+| { status: "outsideOfflineArea" }
+```
+
+It answers from the local store; where the place is not in a stored package it
+asks a server with one small request (`GET /v1/speed-limit`; nothing is stored
+from it). Without a network that is **`outsideOfflineArea`** — an explicit
+"could not look", never a silent "no limit". A host app shows it as such. See
+[`offline-storage.md`](offline-storage.md).
+
 **`getNearby`** — reports, signs, and (only when the camera display is on
 — see below) cameras and camera zones within `radiusMeters` (1–50,000),
 nearest first.
@@ -147,10 +164,20 @@ kept.
 ## Writes — queue first, sent on the next sync
 
 ```
-submitReport(type, lat, lng, speedKmh?) -> localId
+submitReport(type, lat, lng, speedKmh?, ttlSeconds?) -> { localId, expiresInSeconds, durationHonoured, defaultSeconds }
+getReportLimits(type) -> { supported, defaultSeconds, minSeconds, maxSeconds }
 confirmReport(reportId, stillThere) -> localId
 reportCameraRemoved(cameraId) -> localId
 ```
+
+**How long a report lives (1.2.0).** `ttlSeconds` is the duration the reporter wants; it goes into the signed report, so
+every node computes the same end (`signed timestamp + duration`). The server's bounds come from its configuration:
+`getReportLimits(type)` gives the default and the minimum/maximum (`server/docs/report-expiry.md` lists the values) — a host
+app builds its "how long?" choice from that. A duration outside the bounds is **`ttlOutOfRange`** and nothing is queued (it
+is not clamped: the person should see what they get). Against a server that predates the feature
+(`supported: false`) a duration is left out and the server's default applies; `durationHonoured: false` tells the app, so
+it can say so. `getReportLimits` needs one successful sync (the configuration). The JS wrappers keep `submitReport`
+returning the local id and add `submitReportWithDuration` for the full result.
 
 Every write is stored locally before any network call and shows up in
 `getNearby` (marked `pending`) immediately — the local view is optimistic,
@@ -187,6 +214,21 @@ only withdrew this device's own still-queued proposal (nothing left to send).
 prompts) and returns an empty list, not an error, against a server that
 predates the feature.
 
+### A road with no limit on record (1.2.0)
+
+```
+reportMissingSpeedLimit({ lat, lng, bearing?, value, unit, reason? }) -> Proposal
+```
+
+"There is no speed limit on record for this road, it is X": a value for a road the import has none for (the server's
+`speed-limit-corrections.md`, D13). The road is named by position and **direction** (`bearing`: any heading along it, either
+way; the last heading given with a position is used when none is passed) — there is no segment to name. It is effective for
+this device at once as its own proposal (`getSpeedLimitAt` then answers it with `origin: locallyProposed`), sent signed on
+the next sync, and becomes a stretch of road everybody gets when three distinct devices agree. Same range/step validation as
+a correction. Where a road *with* a limit is stored right there running the same way the call fails with
+**`roadAlreadyHasLimit`** — correct that segment (`reportWrongSpeedLimit`) instead. A server without the feature is
+`notOffered`.
+
 ## Position and sync
 
 ```
@@ -214,8 +256,12 @@ full** (`storageFull`, from `SyncError::StorageFull` — see
 static part behind) is reported inside a successful `SyncReport`, not thrown:
 
 ```
-{ skipped, ok, staticDataError?, dynamicDataError?, submitted, rejected, pendingWrites }
+{ skipped, ok, staticDataError?, dynamicDataError?, submitted, rejected, pendingWrites,
+  offlineFetchedTiles, offlineRemovedTiles, offlineDeferredTiles, needsLocation }
 ```
+
+The last four are the offline area's (below): packages fetched / let go of / held back this time, and `needsLocation` when the
+automatic area has neither a position nor a home to cut around.
 
 `skipped: true` means another `sync()` was already running (calls do not
 overlap). `tick()` is what a host app's own timer/heartbeat should call —
@@ -225,6 +271,35 @@ changed, otherwise an instant no-op.
 `planBootstrap()` fetches just the manifest (a few KB) and reports what a
 static-data download still needs — `partitionsPending`/`bytesPending` — so a
 host app can compare that against free space *before* starting one.
+
+## Offline area (1.2.0)
+
+What the device keeps of the static data and what it costs — modes, the storage limit, metered connections, eviction,
+coverage and the measured sizes are in [`offline-storage.md`](offline-storage.md). The calls:
+
+```
+getOfflineSettings() -> OfflineSettings                                    // local
+setOfflineRegions({ mode?: "auto"|"regions"|"all", regions?: [id] }) -> OfflineSettings
+setAutoRegionPolicy({ homeRadiusTiles?, currentRadiusTiles?, recentPlaces?, recentRadiusTiles?, homeLat?, homeLng? }) -> OfflineSettings
+setStorageLimits({ maxBytes?: number | null, wifiOnly?: boolean }) -> OfflineSettings
+setConnectionMetered(metered)
+listOfflineRegions() -> RegionView[]                                       // async, needs a server; notOffered on one before 1.1.0
+getStoragePlan() -> StoragePlan                                            // async
+getStorageUsage() -> StorageUsage                                          // local
+getCoverage(lat, lng) -> { covered, tile, state: "stored"|"wanted"|"outside", usesNetwork }   // local
+```
+
+Changes take effect with the next sync (`tick`/`sync`); what is no longer wanted is let go of then (regions/all) or kept as a
+cache until room is needed (auto). `setOfflineRegions({ regions })` without a mode switches to `regions`. **Default is
+`auto`**: a client that never says where it is stores no static data — give `updatePosition`, a home, or choose regions
+(`mode: "all"` is the pre-1.2.0 behaviour). `maxBytes: null` removes the limit; leaving the key out keeps it.
+
+`RegionView`: `{ id, country, tileCount, downloadBytes, sizeBytes, estimatedDeviceBytes, complete, bbox, selected,
+storedTiles, state: "none"|"partial"|"complete" }` — the sizes come from the server's `GET /v1/static-data/regions`
+(`complete: false` means the byte counts are lower bounds while the server still builds compressed copies).
+
+Rust: `set_offline_regions(&OfflineSettingsPatch)`, `set_auto_region_policy(&AutoPolicyPatch)`, `set_storage_limits`,
+`set_connection_metered`, `get_coverage`, `get_storage_usage`, `get_storage_plan`, `list_offline_regions`.
 
 ## Realtime push (add-on B1)
 
@@ -403,6 +478,8 @@ logs, `code` is what a host app should branch on:
 | `auth` | The server refused the credentials. |
 | `rejected` | The server refused the request itself. |
 | `unavailable` | The data the call needs is not there yet (e.g. sync once first). |
+| `ttlOutOfRange` | The duration asked for a report is outside the server's bounds for its type; nothing was queued (`getReportLimits`). |
+| `roadAlreadyHasLimit` | "No limit here" was reported where a road with a limit is stored running the same way — correct that segment instead. |
 | `closed` | The client was closed. |
 | `internal` | An internal error (in the C ABI: including a caught panic — never crosses the boundary as a crash). |
 

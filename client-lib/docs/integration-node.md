@@ -76,6 +76,24 @@ types ship alongside (`index.d.ts`).
 - **Finish:** `client.free()`. The data stays on disk; a new client on the
   same `storagePath` picks up where this one left off.
 
+## Offline area and report duration (1.2.0)
+
+From 1.2.0 the device chooses what it keeps of the static data (`offline-storage.md`): by default the surroundings of the
+position you give with `updatePosition`, a home, and places driven through lately — **a client that never gives a position
+stores nothing**. Pick regions or everything explicitly if that is what the app wants:
+
+```js
+await client.setOfflineRegions({ mode: "all" });                       // everything the server lists
+// or: const regions = await client.listOfflineRegions();
+//     await client.setOfflineRegions({ regions: [regions[0].id] });
+await client.setStorageLimits({ maxBytes: 300 * 1024 * 1024, wifiOnly: true });
+await client.setConnectionMetered(false);                             // your app knows, the library cannot
+```
+
+Also new: `getReportLimits(type)` and an optional duration on `submitReport` (`api.md`, "Writes"),
+`reportMissingSpeedLimit` for a road with no limit on record, and `lookupSpeedLimit`, which says *outside the offline area*
+instead of "no limit" where nothing could be looked at.
+
 ## How it behaves
 
 - **Calls run on a worker thread**, so a sync (which waits for the network)
