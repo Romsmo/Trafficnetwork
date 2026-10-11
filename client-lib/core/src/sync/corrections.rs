@@ -977,6 +977,7 @@ mod tests {
             network_config: None,
             community_corrections,
             camera_policy: None,
+            report_expiry: HashMap::new(),
         }
     }
 

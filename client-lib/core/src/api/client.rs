@@ -24,15 +24,16 @@ use crate::crypto::{generate_ed25519_keypair, verify_signed_envelope, Ed25519Key
 use crate::discovery::{DiscoveryConfig, DiscoveryService};
 use crate::platform::{Clock, HttpTransport, Sleep, WsTransport};
 use crate::status::OnlineStatusService;
-use crate::storage::{Store, WriteKind};
+use crate::storage::{PendingWrite, Store, WriteKind};
 use crate::sync::{
-    bind_device_key, confirm_hazard_report, confirm_speed_limit_correction,
-    effective_camera_policy, exchange_client_secret, fetch_corrections, flush_pending,
-    haversine_distance_meters, nearby_hazard_reports, purge_camera_data, register_device,
-    report_camera_removed, report_wrong_speed_limit, run_realtime as run_realtime_protocol,
-    speed_limit_at, submit_report, CameraLevel, CameraNotice, ClientConfig, Correction,
-    CorrectionTarget, EffectiveCameraPolicy, FlushOutcome, HazardType, NetworkConfigPayload,
-    ReportSubmission, SegmentRef, SyncEngine, WrongSpeedLimitReport,
+    bind_device_key, check_ttl, confirm_hazard_report, confirm_speed_limit_correction,
+    effective_camera_policy, exchange_client_secret, expiry_ms_for, fetch_corrections,
+    flush_pending, haversine_distance_meters, limits_for, nearby_hazard_reports, purge_camera_data,
+    register_device, report_camera_removed, report_wrong_speed_limit,
+    run_realtime as run_realtime_protocol, speed_limit_at, submit_report, CameraLevel,
+    CameraNotice, ClientConfig, Correction, CorrectionTarget, EffectiveCameraPolicy, FlushOutcome,
+    HazardType, NetworkConfigPayload, ReportLimits, ReportSubmission, SegmentRef, SyncEngine,
+    TtlDecision, WrongSpeedLimitReport,
 };
 
 use super::error::{code, ApiError};
@@ -45,7 +46,8 @@ use super::secure_store::{
 use super::tiles::{ring_for_speed, tiles_around, DEFAULT_REGION_RESOLUTION};
 use super::types::{
     BootstrapPlanView, CameraPolicyView, NearbyCategory, NearbyItem, NetworkStatusView, NodeView,
-    PositionUpdate, ProposalView, SpeedLimitAnswer, SyncReport, SyncStatus, TickResult,
+    PositionUpdate, ProposalView, SpeedLimitAnswer, SubmittedReport, SyncReport, SyncStatus,
+    TickResult,
 };
 
 /// A token is renewed this long before it runs out.
@@ -685,7 +687,7 @@ impl TrafficNetworkClient {
                     continue;
                 }
                 if let Some(item) =
-                    pending_hazard(&write.id, &write.request_body, lat, lng, radius_meters)
+                    pending_hazard(&write, lat, lng, radius_meters, now, config.as_ref())
                 {
                     items.push(item);
                 }
@@ -771,9 +773,41 @@ impl TrafficNetworkClient {
         lng: f64,
         speed_kmh: Option<f64>,
     ) -> Result<String, ApiError> {
+        Ok(self
+            .submit_report_with_duration(hazard_type, lat, lng, speed_kmh, None)?
+            .local_id)
+    }
+
+    /// [`submit_report`](Self::submit_report) with the duration the reporter wants the report to live
+    /// (`ttl_seconds`, optional). Checked against the server's bounds *before* anything is queued
+    /// (`ttlOutOfRange`, see [`get_report_limits`](Self::get_report_limits)); the duration goes through the offline
+    /// buffer and is part of the signature. A server that predates the feature does not take it: the report is queued
+    /// without it and the answer says so (`duration_honoured: false`).
+    pub fn submit_report_with_duration(
+        &self,
+        hazard_type: &str,
+        lat: f64,
+        lng: f64,
+        speed_kmh: Option<f64>,
+        ttl_seconds: Option<u32>,
+    ) -> Result<SubmittedReport, ApiError> {
         self.check_open()?;
         check_position(lat, lng)?;
         let hazard_type = parse_hazard_type(hazard_type)?;
+        let config = self.cached_config();
+        let decision = check_ttl(hazard_type, ttl_seconds, config.as_ref()).map_err(|range| {
+            ApiError::new(
+                code::TTL_OUT_OF_RANGE,
+                format!(
+                    "a duration of {} s is not accepted for this report type: it must be between {} and {} s (default {})",
+                    range.requested_seconds, range.min_seconds, range.max_seconds, range.default_seconds
+                ),
+            )
+        })?;
+        let queued_ttl = match decision {
+            TtlDecision::Requested(seconds) => Some(seconds),
+            TtlDecision::Default | TtlDecision::NotSupported => None,
+        };
         let id = submit_report(
             &*self.store,
             &*self.clock,
@@ -782,9 +816,25 @@ impl TrafficNetworkClient {
                 lat,
                 lng,
                 speed_kmh,
+                ttl_seconds: queued_ttl,
             },
         )?;
-        Ok(id)
+        let limits = limits_for(hazard_type, config.as_ref());
+        Ok(SubmittedReport {
+            local_id: id,
+            expires_in_seconds: queued_ttl,
+            duration_honoured: decision != TtlDecision::NotSupported,
+            default_seconds: limits.default_seconds,
+        })
+    }
+
+    /// What a report of this type may be asked to live: the default and the bounds, from the server's rules. A host
+    /// app builds its "how long?" choice from this. `supported: false` means the server takes no duration (an
+    /// older server) — offer no choice, the default applies. Needs one successful sync (the configuration).
+    pub fn get_report_limits(&self, hazard_type: &str) -> Result<ReportLimits, ApiError> {
+        self.check_open()?;
+        let hazard_type = parse_hazard_type(hazard_type)?;
+        Ok(limits_for(hazard_type, self.cached_config().as_ref()))
     }
 
     /// "Still there" (`true`) or "gone" (`false`) for a report from
@@ -1021,7 +1071,9 @@ impl TrafficNetworkClient {
                 for outcome in outcomes {
                     match outcome {
                         FlushOutcome::Submitted { .. } => report.submitted += 1,
-                        FlushOutcome::Rejected { .. } => report.rejected += 1,
+                        FlushOutcome::Rejected { .. } | FlushOutcome::Ended { .. } => {
+                            report.rejected += 1
+                        }
                         FlushOutcome::Failed { .. } => {}
                     }
                 }
@@ -1314,28 +1366,57 @@ fn is_camera_type(hazard_type: HazardType) -> bool {
 }
 
 /// A report still in the write buffer, as it would appear once delivered.
+///
+/// Its end is worked out at once, from what the reporter asked for (`expiresInSeconds`) or the server's default for
+/// the type, counted from when it was made — so it disappears when it should even if it never gets sent, and the
+/// server's own `expiresAt` replaces this one as soon as it has been delivered.
 fn pending_hazard(
-    id: &str,
-    body: &serde_json::Value,
+    write: &PendingWrite,
     lat: f64,
     lng: f64,
     radius_meters: f64,
+    now_unix_ms: i64,
+    config: Option<&ClientConfig>,
 ) -> Option<NearbyItem> {
-    let hazard_type = body.get("type")?.as_str()?.to_string();
+    let body = &write.request_body;
+    let hazard_type_name = body.get("type")?.as_str()?.to_string();
     let report_lat = body.get("lat")?.as_f64()?;
     let report_lng = body.get("lng")?.as_f64()?;
+
+    let requested_ms = body
+        .get("expiresInSeconds")
+        .and_then(|v| v.as_i64())
+        .map(|seconds| seconds * 1000);
+    let default_ms = config.and_then(|c| {
+        serde_json::from_value::<HazardType>(serde_json::Value::String(hazard_type_name.clone()))
+            .ok()
+            .and_then(|t| expiry_ms_for(t, c))
+    });
+    let expires_at_ms = requested_ms
+        .or(default_ms)
+        .map(|ttl| write.created_at_unix_ms + ttl);
+    if expires_at_ms.is_some_and(|end| end <= now_unix_ms) {
+        return None;
+    }
+
     let distance = haversine_distance_meters(lat, lng, report_lat, report_lng);
     (distance <= radius_meters).then(|| NearbyItem::Hazard {
-        id: id.to_string(),
-        hazard_type,
+        id: write.id.clone(),
+        hazard_type: hazard_type_name,
         lat: report_lat,
         lng: report_lng,
         distance_meters: distance,
-        expires_at: None,
+        expires_at: expires_at_ms.map(unix_ms_to_rfc3339_utc),
         confirm_count: 0,
         deny_count: 0,
         pending: true,
     })
+}
+
+fn unix_ms_to_rfc3339_utc(unix_ms: i64) -> String {
+    chrono::DateTime::from_timestamp_millis(unix_ms)
+        .map(|dt| dt.to_rfc3339_opts(chrono::SecondsFormat::Millis, true))
+        .unwrap_or_default()
 }
 
 /// The same event can reach a device through two servers with two different

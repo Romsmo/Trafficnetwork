@@ -35,6 +35,9 @@ pub mod code {
     /// The data the call needs is not there yet (for example: the server's
     /// configuration has not been fetched, sync once first).
     pub const UNAVAILABLE: &str = "unavailable";
+    /// The duration asked for a report is outside what the server accepts for that type. Nothing was
+    /// queued; `getReportLimits` gives the bounds.
+    pub const TTL_OUT_OF_RANGE: &str = "ttlOutOfRange";
     /// The client was closed.
     pub const CLOSED: &str = "closed";
     pub const INTERNAL: &str = "internal";

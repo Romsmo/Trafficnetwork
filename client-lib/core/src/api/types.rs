@@ -26,6 +26,23 @@ pub struct SpeedLimitAnswer {
     pub imported_value: Option<f64>,
 }
 
+/// What `submitReport` tells a host app about the duration of what it queued.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct SubmittedReport {
+    #[serde(rename = "localId")]
+    pub local_id: String,
+    /// The duration that was queued (and will be signed), if the host asked for one and the server takes it.
+    #[serde(rename = "expiresInSeconds")]
+    pub expires_in_seconds: Option<u32>,
+    /// `false`: the host asked for a duration but this server does not take one (it predates the feature); the
+    /// report was queued without it and the server's default applies. `true` otherwise.
+    #[serde(rename = "durationHonoured")]
+    pub duration_honoured: bool,
+    /// How long the report lives when nothing is asked for, if known.
+    #[serde(rename = "defaultSeconds")]
+    pub default_seconds: Option<u32>,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum OriginView {

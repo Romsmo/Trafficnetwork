@@ -15,6 +15,7 @@ pub mod engine;
 pub mod expiry;
 pub mod matching;
 pub mod realtime;
+pub mod report_ttl;
 pub(crate) mod server_time;
 pub mod types;
 pub mod withholding;
@@ -40,6 +41,9 @@ pub use matching::{
     NearestSpeedLimit, SpeedLimitOrigin,
 };
 pub use realtime::run as run_realtime;
+pub use report_ttl::{
+    check_ttl, limits_for, remaining_seconds, ExpiryRule, ReportLimits, TtlDecision, TtlOutOfRange,
+};
 pub use types::{
     effective_camera_namespace_enabled, ClientConfig, CommunityCorrectionsConfig, CorrectionReason,
     DeltaPage, EventLogEntry, FixedSpeedCamera, Geometry, HazardReport, HazardType,

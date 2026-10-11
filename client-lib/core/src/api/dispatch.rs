@@ -57,6 +57,15 @@ struct SubmitReportArgs {
     lat: f64,
     lng: f64,
     speed_kmh: Option<f64>,
+    /// How long the report should live, in seconds (optional; within `getReportLimits`).
+    ttl_seconds: Option<u32>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ReportLimitsArgs {
+    #[serde(rename = "type")]
+    hazard_type: String,
 }
 
 #[derive(Deserialize)]
@@ -116,8 +125,18 @@ impl TrafficNetworkClient {
             }
             "submitReport" => {
                 let a: SubmitReportArgs = parse(method, args)?;
-                let id = self.submit_report(&a.hazard_type, a.lat, a.lng, a.speed_kmh)?;
-                Ok(local_id(id))
+                let submitted = self.submit_report_with_duration(
+                    &a.hazard_type,
+                    a.lat,
+                    a.lng,
+                    a.speed_kmh,
+                    a.ttl_seconds,
+                )?;
+                to_json(submitted)
+            }
+            "getReportLimits" => {
+                let a: ReportLimitsArgs = parse(method, args)?;
+                to_json(self.get_report_limits(&a.hazard_type)?)
             }
             "confirmReport" => {
                 let a: ConfirmReportArgs = parse(method, args)?;

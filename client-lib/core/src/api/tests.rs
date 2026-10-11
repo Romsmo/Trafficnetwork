@@ -1093,3 +1093,158 @@ fn the_camera_display_is_off_unless_the_host_app_switches_it_on() {
             .host_enabled
     );
 }
+
+// ------------------------------------------------------------ duration of a report (server 1.1.0)
+
+fn config_with_report_expiry() -> Value {
+    let mut config = config_json(false);
+    config["hazardExpiryMsByType"] =
+        json!({ "traffic": 1_500_000, "mobileSpeedCamera": 10_800_000 });
+    config["reportExpiry"] = json!({
+        "traffic": { "defaultSeconds": 1500, "minSeconds": 300, "maxSeconds": 21600 },
+        "mobileSpeedCamera": { "defaultSeconds": 10800, "minSeconds": 600, "maxSeconds": 43200 },
+        // a type this build does not know, and a malformed entry: neither may break the configuration
+        "hovercraft": { "defaultSeconds": 60, "minSeconds": 1, "maxSeconds": 120 },
+        "ice": { "defaultSeconds": "soon" }
+    });
+    config
+}
+
+#[tokio::test]
+async fn the_limits_of_a_report_type_come_from_the_servers_rules() {
+    let server = working_server(false);
+    server.route("GET", "/v1/config", 200, config_with_report_expiry());
+    let client = client(server);
+    client.sync().await.unwrap();
+
+    let limits = client
+        .call("getReportLimits", json!({ "type": "mobileSpeedCamera" }))
+        .await
+        .unwrap();
+    assert_eq!(
+        limits,
+        json!({ "supported": true, "defaultSeconds": 10800, "minSeconds": 600, "maxSeconds": 43200 })
+    );
+    // a type the server lists nothing for has no bounds to offer
+    let ice = client
+        .call("getReportLimits", json!({ "type": "ice" }))
+        .await
+        .unwrap();
+    assert_eq!(ice["supported"], json!(false));
+}
+
+#[tokio::test]
+async fn a_requested_duration_is_queued_signed_and_sent() {
+    let server = working_server(false);
+    server.route("GET", "/v1/config", 200, config_with_report_expiry());
+    let client = client(server.clone());
+    client.sync().await.unwrap();
+
+    let queued = client
+        .call(
+            "submitReport",
+            json!({ "type": "mobileSpeedCamera", "lat": 52.0, "lng": 13.0, "ttlSeconds": 7200 }),
+        )
+        .await
+        .unwrap();
+    assert_eq!(queued["expiresInSeconds"], json!(7200));
+    assert_eq!(queued["durationHonoured"], json!(true));
+    assert_eq!(queued["defaultSeconds"], json!(10800));
+    assert!(queued["localId"].is_string());
+
+    // the local view uses it at once: the pending report ends in two hours, not at the server's default
+    let nearby = client
+        .call(
+            "getNearby",
+            json!({ "lat": 52.0, "lng": 13.0, "radiusMeters": 500, "categories": ["hazards"] }),
+        )
+        .await
+        .unwrap();
+    let pending = &nearby["items"][0];
+    assert_eq!(pending["pending"], json!(true));
+    let ends = chrono::DateTime::parse_from_rfc3339(pending["expiresAt"].as_str().unwrap())
+        .unwrap()
+        .timestamp_millis();
+    assert_eq!(ends, NOW_MS + 7_200_000);
+
+    client.sync().await.unwrap();
+    let sent = server.bodies_to("POST", "/v1/hazard-reports");
+    assert_eq!(sent.len(), 1);
+    assert_eq!(sent[0]["expiresInSeconds"], json!(7200));
+}
+
+#[tokio::test]
+async fn a_duration_outside_the_bounds_is_refused_before_anything_is_queued() {
+    let server = working_server(false);
+    server.route("GET", "/v1/config", 200, config_with_report_expiry());
+    let store = Arc::new(InMemoryStore::new());
+    let client = client_on(server.clone(), store.clone(), options());
+    client.sync().await.unwrap();
+
+    for seconds in [30, 600_000] {
+        let error = client
+            .call(
+                "submitReport",
+                json!({ "type": "traffic", "lat": 52.0, "lng": 13.0, "ttlSeconds": seconds }),
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(error.code, "ttlOutOfRange");
+        assert!(error.message.contains("300") && error.message.contains("21600"));
+    }
+    assert!(store.pending_writes().unwrap().is_empty());
+    assert_eq!(server.count("POST", "/v1/hazard-reports"), 0);
+}
+
+#[tokio::test]
+async fn an_older_server_takes_no_duration_and_the_host_app_is_told() {
+    let server = working_server(false); // its configuration has no `reportExpiry`
+    let client = client(server.clone());
+    client.sync().await.unwrap();
+
+    let limits = client
+        .call("getReportLimits", json!({ "type": "traffic" }))
+        .await
+        .unwrap();
+    assert_eq!(limits["supported"], json!(false));
+    assert_eq!(limits["defaultSeconds"], json!(900));
+
+    let queued = client
+        .call(
+            "submitReport",
+            json!({ "type": "traffic", "lat": 52.0, "lng": 13.0, "ttlSeconds": 3600 }),
+        )
+        .await
+        .unwrap();
+    assert_eq!(queued["durationHonoured"], json!(false));
+    assert_eq!(queued["expiresInSeconds"], json!(null));
+
+    client.sync().await.unwrap();
+    let sent = server.bodies_to("POST", "/v1/hazard-reports");
+    assert!(
+        sent[0].get("expiresInSeconds").is_none(),
+        "an older server never sees the field"
+    );
+}
+
+#[tokio::test]
+async fn without_a_duration_nothing_changes_for_the_host_app() {
+    let server = working_server(false);
+    server.route("GET", "/v1/config", 200, config_with_report_expiry());
+    let client = client(server.clone());
+    client.sync().await.unwrap();
+    let queued = client
+        .call(
+            "submitReport",
+            json!({ "type": "traffic", "lat": 52.0, "lng": 13.0 }),
+        )
+        .await
+        .unwrap();
+    assert_eq!(queued["expiresInSeconds"], json!(null));
+    assert_eq!(queued["durationHonoured"], json!(true));
+    assert!(queued["localId"].is_string());
+    client.sync().await.unwrap();
+    assert!(server.bodies_to("POST", "/v1/hazard-reports")[0]
+        .get("expiresInSeconds")
+        .is_none());
+}
