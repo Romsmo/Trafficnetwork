@@ -1,5 +1,7 @@
 import { h } from "./dom.js";
-import { currentTranslator, onLangChange } from "./i18n.js";
+import { AMOUNT_UNITS, expiryRefusal, expiryRuleFor, formatEndDate, formatExactDuration, parseAmount, quickChoices, splitSeconds } from "./duration.js";
+import { normalizeTimestamp } from "./format.js";
+import { currentLang, currentTranslator, onLangChange } from "./i18n.js";
 
 /** Maps an API failure to the visitor-facing result the dialog shows. */
 export function describeSubmitFailure(error) {
@@ -8,6 +10,9 @@ export function describeSubmitFailure(error) {
     const key = scope.startsWith("session") ? "session" : scope.startsWith("node") ? "node" : scope.startsWith("network") ? "network" : "unknown";
     return { kind: "rateLimited", scope: key, minutes: Math.max(1, Math.ceil((error.retryAfterSeconds ?? 60) / 60)) };
   }
+  // The node refuses a duration outside the bounds of the category (never clamps it) and says which bounds apply.
+  const refusal = expiryRefusal(error);
+  if (refusal) return { kind: "expiryRefused", ...refusal };
   if (error?.status >= 400 && error?.status < 500) return { kind: "rejected", reason: error.message };
   return { kind: "error" };
 }
@@ -33,8 +38,19 @@ export class ReportDialog {
     });
   }
 
-  open({ types, center }) {
-    this.#state = { types, type: null, position: { lat: center.lat, lng: center.lng, source: "center" }, center, result: null, sending: false, locating: false };
+  /** `expiry`: the node's `reportExpiry` (bounds per category), or null when it has none — then there is no choice of duration. */
+  open({ types, center, expiry = null }) {
+    this.#state = {
+      types,
+      type: null,
+      position: { lat: center.lat, lng: center.lng, source: "center" },
+      center,
+      expiry,
+      duration: { mode: "default", amount: "", unit: "hours", error: null },
+      result: null,
+      sending: false,
+      locating: false,
+    };
     this.render();
     this.show();
   }
@@ -66,7 +82,11 @@ export class ReportDialog {
       h(
         "label",
         null,
-        h("input", { type: "radio", name: "type", value: type, required: index === 0 ? true : undefined, checked: s.type === type ? true : undefined, disabled: succeeded || s.sending ? true : undefined, onchange: () => (s.type = type) }),
+        h("input", { type: "radio", name: "type", value: type, required: index === 0 ? true : undefined, checked: s.type === type ? true : undefined, disabled: succeeded || s.sending ? true : undefined, onchange: () => {
+          s.type = type;
+          s.result = null;
+          this.#renderDuration();
+        } }),
         h("span", null, tr.t(`type.${type}`)),
       ),
     );
@@ -84,6 +104,7 @@ export class ReportDialog {
       h("h2", { id: "report-dialog-title" }, tr.t("reportDialog.title")),
       h("p", { class: "hint" }, tr.t("reportDialog.safety")),
       h("fieldset", null, h("legend", null, tr.t("reportDialog.type")), h("div", { class: "choice-grid" }, typeChoices)),
+      (this.durationBox = h("div", { class: "duration-box" })),
       h(
         "fieldset",
         null,
@@ -102,6 +123,133 @@ export class ReportDialog {
     );
     this.dialog.setAttribute("aria-labelledby", "report-dialog-title");
     this.dialog.replaceChildren(form);
+    this.#renderDuration();
+  }
+
+  /**
+   * "How long should the report stay": the category's default, or a duration of the visitor's own inside the bounds the node
+   * publishes. Not shown for a category without bounds (fixed cameras never expire; an older node has no choice to offer).
+   */
+  #renderDuration() {
+    const s = this.#state;
+    const box = this.durationBox;
+    if (!s || !box) return;
+    const rule = s.type ? expiryRuleFor(s.expiry, s.type) : null;
+    if (!rule) {
+      box.replaceChildren();
+      return;
+    }
+    const tr = currentTranslator();
+    const d = s.duration;
+    const locked = Boolean(s.result && (s.result.kind === "created" || s.result.kind === "merged" || s.result.kind === "accepted")) || s.sending;
+    const custom = d.mode === "custom";
+    const amountId = "report-duration-amount";
+    const unitId = "report-duration-unit";
+    const errorId = "report-duration-error";
+
+    const apply = () => {
+      d.error = null;
+      this.#renderDuration();
+    };
+    const quick = h(
+      "div",
+      { class: "chip-row", role: "group", "aria-label": tr.t("reportDialog.duration.quick") },
+      quickChoices(rule).map((seconds) => {
+        const split = splitSeconds(seconds);
+        const pressed = custom && d.amount === String(split.amount) && d.unit === split.unit;
+        return h(
+          "button",
+          {
+            type: "button",
+            class: "chip-button",
+            "aria-pressed": String(pressed),
+            disabled: locked ? true : undefined,
+            onclick: () => {
+              d.amount = String(split.amount);
+              d.unit = split.unit;
+              apply();
+            },
+          },
+          formatExactDuration(seconds, tr),
+        );
+      }),
+    );
+    const amount = h("input", {
+      id: amountId,
+      type: "text",
+      inputmode: "numeric",
+      autocomplete: "off",
+      value: d.amount,
+      disabled: locked ? true : undefined,
+      "aria-describedby": d.error ? errorId : "report-duration-range",
+      "aria-invalid": d.error ? "true" : undefined,
+    });
+    amount.addEventListener("input", () => {
+      d.amount = amount.value;
+      d.error = null;
+      for (const chip of quick.querySelectorAll("button")) chip.setAttribute("aria-pressed", "false");
+    });
+    const unit = h(
+      "select",
+      { id: unitId, disabled: locked ? true : undefined, onchange: (event) => (d.unit = event.target.value) },
+      AMOUNT_UNITS.map((u) => h("option", { value: u.id, selected: d.unit === u.id ? true : undefined }, tr.t(`duration.${u.id}.unit`))),
+    );
+
+    box.replaceChildren(
+      h(
+        "fieldset",
+        { class: "duration" },
+        h("legend", null, tr.t("reportDialog.duration.legend")),
+        h(
+          "div",
+          { class: "choice-grid" },
+          h(
+            "label",
+            null,
+            h("input", { type: "radio", name: "duration", value: "default", checked: !custom ? true : undefined, disabled: locked ? true : undefined, onchange: () => { d.mode = "default"; apply(); } }),
+            h("span", null, tr.t("reportDialog.duration.default", { duration: formatExactDuration(rule.defaultSeconds, tr) })),
+          ),
+          h(
+            "label",
+            null,
+            h("input", { type: "radio", name: "duration", value: "custom", checked: custom ? true : undefined, disabled: locked ? true : undefined, onchange: () => { d.mode = "custom"; apply(); } }),
+            h("span", null, tr.t("reportDialog.duration.custom")),
+          ),
+        ),
+        ...(custom
+          ? [
+              h(
+                "div",
+                { class: "duration-custom" },
+                quick,
+                h(
+                  "div",
+                  { class: "field-row" },
+                  h("div", { class: "field" }, h("label", { for: amountId }, tr.t("reportDialog.duration.amount")), amount),
+                  h("div", { class: "field" }, h("label", { for: unitId }, tr.t("reportDialog.duration.unit")), unit),
+                ),
+                h("p", { id: "report-duration-range", class: "hint" }, tr.t("reportDialog.duration.range", { min: formatExactDuration(rule.minSeconds, tr), max: formatExactDuration(rule.maxSeconds, tr) })),
+                d.error ? h("p", { id: errorId, class: "result bad", role: "alert" }, d.error) : null,
+              ),
+            ]
+          : []),
+      ),
+    );
+  }
+
+  /** The duration to send: undefined for "the category's default", a number of seconds for a valid own choice, or null (invalid, message shown). */
+  #chosenDuration() {
+    const s = this.#state;
+    const rule = s.type ? expiryRuleFor(s.expiry, s.type) : null;
+    if (!rule || s.duration.mode !== "custom") return undefined;
+    const tr = currentTranslator();
+    const parsed = parseAmount(s.duration.amount, s.duration.unit, rule);
+    if (parsed.ok) return parsed.seconds;
+    const bounds = { min: formatExactDuration(rule.minSeconds, tr), max: formatExactDuration(rule.maxSeconds, tr) };
+    s.duration.error = tr.t(`reportDialog.duration.error.${parsed.reason}`, bounds);
+    this.#renderDuration();
+    this.dialog.querySelector("#report-duration-amount")?.focus();
+    return null;
   }
 
   #resultBox(result, tr) {
@@ -127,11 +275,19 @@ export class ReportDialog {
       case "rejected":
         text = tr.t("reportDialog.result.rejected", { reason: result.reason });
         break;
+      case "expiryRefused":
+        text = tr.t("reportDialog.result.expiryRefused", { min: formatExactDuration(result.minSeconds, tr), max: formatExactDuration(result.maxSeconds, tr) });
+        break;
       case "locateDenied":
         text = tr.t("map.locate.denied");
         break;
       default:
         text = tr.t("reportDialog.result.error");
+    }
+    // The end of the report as the node set it (it may differ from the request when the report was merged into an existing one).
+    if (ok && result.expiresAt) {
+      const until = formatEndDate(result.expiresAt, currentLang(), normalizeTimestamp);
+      if (until) text = `${text} ${tr.t("reportDialog.result.until", { date: until })}`;
     }
     // A report in a category the visitor has switched off would be invisible to them: say how to see it.
     if (ok && result.filterOffType) text = `${text} ${tr.t("reportDialog.result.filterOff", { type: tr.t(`type.${result.filterOffType}`) })}`;
@@ -178,10 +334,12 @@ export class ReportDialog {
     event.preventDefault();
     const s = this.#state;
     if (!s.type || s.sending) return;
+    const expiresInSeconds = this.#chosenDuration();
+    if (expiresInSeconds === null) return;
     s.sending = true;
     s.result = null;
     this.render();
-    s.result = await this.onSubmit({ type: s.type, lat: s.position.lat, lng: s.position.lng });
+    s.result = await this.onSubmit({ type: s.type, lat: s.position.lat, lng: s.position.lng, ...(expiresInSeconds !== undefined ? { expiresInSeconds } : {}) });
     s.sending = false;
     this.render();
   }

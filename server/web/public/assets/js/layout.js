@@ -47,6 +47,7 @@ export function mountLayout(config, pageId) {
       ),
     );
 
+    // The pages carry the (empty) banner so its place is reserved before this runs and nothing below it moves.
     let banner = document.getElementById("safety-banner");
     if (!banner) {
       banner = h("div", { id: "safety-banner", class: "safety-banner", role: "note" });
