@@ -249,6 +249,15 @@ pub struct SyncReport {
     pub rejected: usize,
     /// Still waiting to be sent.
     pub pending_writes: usize,
+    /// Offline area: packages fetched this time, let go of, and wanted but held back (a metered connection, or
+    /// the storage limit — `getStoragePlan` says which).
+    pub offline_fetched_tiles: usize,
+    pub offline_removed_tiles: usize,
+    pub offline_deferred_tiles: usize,
+    /// Automatic offline area, and the device knows neither where it is nor where home is: nothing was selected.
+    /// The host app should give a position (`updatePosition`), a home (`setAutoRegionPolicy`) or choose
+    /// regions (`setOfflineRegions`).
+    pub needs_location: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]

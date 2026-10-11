@@ -238,14 +238,14 @@ impl CachedConfig {
 }
 
 #[derive(Default)]
-struct State {
+pub(super) struct State {
     token: Option<CachedToken>,
     config: Option<CachedConfig>,
     /// The device's signing key, once it exists and the server has bound it.
     device_key: Option<Ed25519KeyPair>,
     tiles: Vec<String>,
     /// The tiles changed since the last sync.
-    sync_due: bool,
+    pub(super) sync_due: bool,
     last_sync_at_ms: Option<i64>,
     last_sync_ok: Option<bool>,
     last_error: Option<ApiError>,
@@ -257,15 +257,27 @@ struct State {
     /// The last heading (degrees) the host app gave with a position: what "no limit here" falls back to for the
     /// direction of the road when it is not given explicitly.
     last_heading: Option<f64>,
+    /// Where the device last said it was — the automatic offline area follows it (api/offline.rs).
+    pub(super) last_position: Option<(f64, f64)>,
+    pub(super) last_position_tile: Option<String>,
+    pub(super) last_use_noted_ms: i64,
+    /// The host app's word that the connection is metered.
+    pub(super) metered: bool,
+    /// `GET /v1/static-data/regions`, with the static-data version it was read at.
+    pub(super) regions: Option<(u64, Vec<super::offline::ServerRegion>)>,
+}
+
+pub(super) fn check_position_public(lat: f64, lng: f64) -> Result<(), ApiError> {
+    check_position(lat, lng)
 }
 
 pub struct TrafficNetworkClient {
     options: ClientOptions,
     clock: Arc<dyn Clock>,
-    store: Arc<dyn Store>,
+    pub(super) store: Arc<dyn Store>,
     secure: Arc<dyn SecureStore>,
-    discovery: Arc<DiscoveryService>,
-    engine: SyncEngine,
+    pub(super) discovery: Arc<DiscoveryService>,
+    pub(super) engine: SyncEngine,
     online: OnlineStatusService,
     events: Arc<EventHub>,
     ws: Arc<dyn WsTransport>,
@@ -333,11 +345,11 @@ impl TrafficNetworkClient {
 
     // ------------------------------------------------------------ plumbing
 
-    fn state(&self) -> std::sync::MutexGuard<'_, State> {
+    pub(super) fn state(&self) -> std::sync::MutexGuard<'_, State> {
         self.state.lock().unwrap()
     }
 
-    fn check_open(&self) -> Result<(), ApiError> {
+    pub(super) fn check_open(&self) -> Result<(), ApiError> {
         if self.state().closed {
             Err(ApiError::new(code::CLOSED, "the client was closed"))
         } else {
@@ -345,7 +357,7 @@ impl TrafficNetworkClient {
         }
     }
 
-    fn now(&self) -> i64 {
+    pub(super) fn now(&self) -> i64 {
         self.clock.now_unix_ms()
     }
 
@@ -357,7 +369,7 @@ impl TrafficNetworkClient {
             .saturating_mul(1000)
     }
 
-    fn cached_config(&self) -> Option<ClientConfig> {
+    pub(super) fn cached_config(&self) -> Option<ClientConfig> {
         self.state().config.as_ref().map(|c| c.config.clone())
     }
 
@@ -471,7 +483,7 @@ impl TrafficNetworkClient {
 
     // ---------------------------------------------------------------- auth
 
-    async fn ensure_token(&self) -> Result<String, ApiError> {
+    pub(super) async fn ensure_token(&self) -> Result<String, ApiError> {
         self.check_open()?;
         let now = self.now();
         if let Some(token) = &self.state().token {
@@ -626,6 +638,7 @@ impl TrafficNetworkClient {
             .cached_config()
             .map(|c| c.speed_limit_lookup_max_distance_meters)
             .unwrap_or(DEFAULT_LOOKUP_METERS);
+        self.note_position(lat, lng);
         let nearest = speed_limit_at(&*self.store, lat, lng, max_distance)?;
         if let Some(nearest) = nearest {
             return Ok(Some(SpeedLimitAnswer::from(nearest)));
@@ -1062,12 +1075,16 @@ impl TrafficNetworkClient {
             self.region_resolution(),
             ring_for_speed(speed_kmh),
         );
-        let mut state = self.state();
-        let changed = state.tiles != tiles;
-        if changed {
-            state.tiles = tiles.clone();
-            state.sync_due = true;
-        }
+        let changed = {
+            let mut state = self.state();
+            let changed = state.tiles != tiles;
+            if changed {
+                state.tiles = tiles.clone();
+                state.sync_due = true;
+            }
+            changed
+        };
+        self.note_position(lat, lng);
         Ok(PositionUpdate { tiles, changed })
     }
 
@@ -1146,13 +1163,26 @@ impl TrafficNetworkClient {
             ..SyncReport::default()
         };
 
-        if let Err(error) = self.engine.sync_static_data(&token).await {
-            let error = ApiError::from(error);
-            if error.code == code::STORAGE_FULL {
-                return Err(error);
+        let request = self.static_request(&token).await;
+        match self.engine.sync_static_data_for(&token, &request).await {
+            Ok(outcome) => {
+                report.offline_fetched_tiles = outcome.fetched_tiles;
+                if outcome.fetched_tiles > 0 {
+                    // a package that was not there before has not been used yet: note its first lookup at once
+                    self.state().last_use_noted_ms = 0;
+                }
+                report.offline_removed_tiles = outcome.removed_tiles;
+                report.offline_deferred_tiles = outcome.deferred.len();
+                report.needs_location = outcome.needs_location;
             }
-            report.ok = false;
-            report.static_data_error = Some(error.code);
+            Err(error) => {
+                let error = ApiError::from(error);
+                if error.code == code::STORAGE_FULL {
+                    return Err(error);
+                }
+                report.ok = false;
+                report.static_data_error = Some(error.code);
+            }
         }
         // The server rebuilt its packages (a change of the camera policy
         // always does): what the configuration says may be out of date, so it
@@ -1163,7 +1193,8 @@ impl TrafficNetworkClient {
                 cached.fetched_at_ms = 0;
             }
             if self.ensure_config(&token).await.is_ok() {
-                let _ = self.engine.sync_static_data(&token).await;
+                let request = self.static_request(&token).await;
+                let _ = self.engine.sync_static_data_for(&token, &request).await;
             }
         }
         if let Err(error) = self.engine.sync_dynamic(&token, &tiles).await {

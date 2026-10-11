@@ -36,7 +36,10 @@ pub use corrections::{
     report_wrong_speed_limit, Correction, CorrectionError, CorrectionTarget,
     MissingSpeedLimitReport, SegmentRef, WrongSpeedLimitReport,
 };
-pub use engine::{BootstrapPlan, BootstrapProgress, SyncEngine, SyncError, SyncObserver};
+pub use engine::{
+    BootstrapPlan, BootstrapProgress, StaticPlanReport, StaticSyncOutcome, StaticSyncRequest,
+    SyncEngine, SyncError, SyncObserver,
+};
 pub use expiry::{expires_at_unix_ms, expiry_ms_for, is_expired};
 pub use matching::{
     distance_to_line_string_meters, haversine_distance_meters, nearby_hazard_reports,

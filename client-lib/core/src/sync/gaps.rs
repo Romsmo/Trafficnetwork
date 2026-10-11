@@ -245,9 +245,9 @@ mod tests {
     fn an_imported_road_running_the_same_way_means_the_road_is_not_missing() {
         // a road along latitude 50.1 (east–west), 5 m north of the point
         let road = segment_along(50.100_045, 9.09, 9.11, "osm");
-        assert!(road_already_there(&[road.clone()], 50.1, 9.1, 90.0).is_some());
+        assert!(road_already_there(std::slice::from_ref(&road), 50.1, 9.1, 90.0).is_some());
         // a proposal across it (north–south) is a side street, not that road
-        assert!(road_already_there(&[road.clone()], 50.1, 9.1, 0.0).is_none());
+        assert!(road_already_there(std::slice::from_ref(&road), 50.1, 9.1, 0.0).is_none());
         // far away: not this road
         let far = segment_along(50.101, 9.09, 9.11, "osm");
         assert!(road_already_there(&[far], 50.1, 9.1, 90.0).is_none());

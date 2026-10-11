@@ -115,6 +115,36 @@ struct ConfirmCorrectionArgs {
     agrees: bool,
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct StorageLimitsArgs {
+    /// A number sets the limit, `null` removes it, absent leaves it.
+    #[serde(default, deserialize_with = "double_option")]
+    max_bytes: Option<Option<u64>>,
+    wifi_only: Option<bool>,
+}
+
+fn double_option<'de, D, T>(deserializer: D) -> Result<Option<Option<T>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    Option::<T>::deserialize(deserializer).map(Some)
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct MeteredArgs {
+    metered: bool,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CoverageArgs {
+    lat: f64,
+    lng: f64,
+}
+
 fn local_id(id: String) -> Value {
     json!({ "localId": id })
 }
@@ -203,6 +233,33 @@ impl TrafficNetworkClient {
             "fetchCorrections" => {
                 let corrections = self.fetch_corrections().await?;
                 Ok(json!({ "corrections": to_json(corrections)? }))
+            }
+            "getOfflineSettings" => to_json(self.get_offline_settings()?),
+            "setOfflineRegions" => {
+                let patch: super::offline::OfflineSettingsPatch = parse(method, args)?;
+                to_json(self.apply_offline_regions(&patch)?)
+            }
+            "setAutoRegionPolicy" => {
+                let patch: super::offline::AutoPolicyPatch = parse(method, args)?;
+                to_json(self.apply_auto_region_policy(&patch)?)
+            }
+            "setStorageLimits" => {
+                let a: StorageLimitsArgs = parse(method, args)?;
+                to_json(self.set_storage_limits(a.max_bytes, a.wifi_only)?)
+            }
+            "setConnectionMetered" => {
+                let a: MeteredArgs = parse(method, args)?;
+                self.set_connection_metered(a.metered);
+                Ok(json!({}))
+            }
+            "listOfflineRegions" => {
+                Ok(json!({ "regions": to_json(self.list_offline_regions().await?)? }))
+            }
+            "getStoragePlan" => to_json(self.get_storage_plan().await?),
+            "getStorageUsage" => to_json(self.get_storage_usage()?),
+            "getCoverage" => {
+                let a: CoverageArgs = parse(method, args)?;
+                to_json(self.get_coverage(a.lat, a.lng)?)
             }
             "updatePosition" => {
                 let a: PositionArgs = parse(method, args)?;

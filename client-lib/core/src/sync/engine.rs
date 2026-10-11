@@ -19,6 +19,7 @@
 //! facade (F-C0 plan §3's `api.rs`), once there's an actual host-app-facing
 //! surface to hang a refresh policy off of.
 
+use std::collections::BTreeSet;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
@@ -132,6 +133,23 @@ pub struct BootstrapProgress {
     pub bytes_done: u64,
 }
 
+/// What a sync of the static data would do for an offline-area request — see
+/// [`SyncEngine::plan_static_sync_for`]. Sizes are the manifest's (JSON bytes).
+#[derive(Debug, Clone, PartialEq)]
+pub struct StaticPlanReport {
+    pub offered_tiles: usize,
+    pub offered_bytes: u64,
+    pub fetch_tiles: Vec<String>,
+    pub bytes_to_fetch: u64,
+    /// Stored and no longer wanted: let go of at once.
+    pub remove_tiles: Vec<String>,
+    /// Stored, unwanted, kept as a cache: let go of if the downloads need the room.
+    pub evict_tiles: Vec<String>,
+    pub deferred: Vec<(String, super::offline::DeferReason)>,
+    pub needs_location: bool,
+    pub static_data_version: u64,
+}
+
 /// What a static-data bootstrap still has to download — see
 /// [`SyncEngine::plan_static_bootstrap`].
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -140,6 +158,128 @@ pub struct BootstrapPlan {
     pub partitions_pending: usize,
     pub bytes_total: u64,
     pub bytes_pending: u64,
+}
+
+/// What the static-data part of a sync is told about the offline area: the host's settings and what the device
+/// knows about where it is. The engine turns it into a set of tiles once it knows the resolution the manifest
+/// cuts them at (`docs/offline-storage.md`).
+#[derive(Debug, Clone)]
+pub struct StaticSyncRequest {
+    pub settings: super::offline::OfflineSettings,
+    /// The device's position now.
+    pub current: Option<(f64, f64)>,
+    /// Places driven through lately, newest first.
+    pub visited: Vec<super::offline::VisitedTile>,
+    /// For `OfflineMode::Regions`: the tiles of the chosen regions (from `GET /v1/static-data/regions`).
+    pub region_tiles: BTreeSet<String>,
+    /// The connection is metered and the host wants downloads kept to a minimum there.
+    pub metered: bool,
+}
+
+impl StaticSyncRequest {
+    /// Everything the manifest lists — what `sync_static_data` always did.
+    pub fn everything() -> Self {
+        Self {
+            settings: super::offline::OfflineSettings {
+                mode: super::offline::OfflineMode::All,
+                ..super::offline::OfflineSettings::default()
+            },
+            current: None,
+            visited: Vec::new(),
+            region_tiles: BTreeSet::new(),
+            metered: false,
+        }
+    }
+}
+
+/// What a static-data sync did.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct StaticSyncOutcome {
+    pub fetched_tiles: usize,
+    pub fetched_bytes: u64,
+    pub removed_tiles: usize,
+    /// Wanted and not fetched, with why.
+    pub deferred: Vec<(String, super::offline::DeferReason)>,
+    /// Auto mode and the device knows neither a position nor a home: there is nothing to select.
+    pub needs_location: bool,
+}
+
+/// The decided selection for one manifest.
+struct Selection {
+    wanted: Option<BTreeSet<String>>,
+    protected: BTreeSet<String>,
+    urgent: BTreeSet<String>,
+    priority: Vec<String>,
+    prune_unwanted: bool,
+    needs_location: bool,
+}
+
+fn decide_selection(request: &StaticSyncRequest, resolution: u8) -> Selection {
+    use super::offline::{auto_selection, tile_disk, tile_of, OfflineMode};
+    let settings = &request.settings;
+    let home_disk: BTreeSet<String> = settings
+        .home
+        .and_then(|(lat, lng)| tile_of(lat, lng, resolution))
+        .map(|tile| {
+            tile_disk(&tile, settings.auto.home_radius_tiles)
+                .into_iter()
+                .collect()
+        })
+        .unwrap_or_default();
+    match settings.mode {
+        OfflineMode::All => Selection {
+            wanted: None,
+            protected: BTreeSet::new(),
+            urgent: BTreeSet::new(),
+            priority: Vec::new(),
+            prune_unwanted: false,
+            needs_location: false,
+        },
+        OfflineMode::Regions => {
+            let urgent: BTreeSet<String> = request
+                .current
+                .and_then(|(lat, lng)| tile_of(lat, lng, resolution))
+                .into_iter()
+                .collect();
+            Selection {
+                wanted: Some(request.region_tiles.clone()),
+                protected: home_disk,
+                urgent,
+                priority: Vec::new(),
+                prune_unwanted: true,
+                needs_location: false,
+            }
+        }
+        OfflineMode::Auto => {
+            let auto = auto_selection(
+                &settings.auto,
+                resolution,
+                settings.home,
+                request.current,
+                &request.visited,
+            );
+            let urgent: BTreeSet<String> = request
+                .current
+                .and_then(|(lat, lng)| tile_of(lat, lng, resolution))
+                .into_iter()
+                .collect();
+            let needs_location = request.current.is_none() && settings.home.is_none();
+            let mut priority: Vec<String> = Vec::new();
+            for tile in auto.current.iter().chain(&auto.home).chain(&auto.recent) {
+                if !priority.contains(tile) {
+                    priority.push(tile.clone());
+                }
+            }
+            Selection {
+                wanted: Some(auto.all()),
+                protected: home_disk,
+                urgent,
+                priority,
+                prune_unwanted: false,
+                needs_location,
+            }
+        }
+    }
 }
 
 /// Receives progress while [`SyncEngine::sync_static_data`] runs — once at
@@ -675,17 +815,61 @@ impl SyncEngine {
     /// another partition resolution than the one the stored packages have,
     /// the stored packages are dropped and downloaded again.
     pub async fn sync_static_data(&self, bearer_token: &str) -> Result<(), SyncError> {
+        self.sync_static_data_for(bearer_token, &StaticSyncRequest::everything())
+            .await
+            .map(|_| ())
+    }
+
+    /// [`sync_static_data`](Self::sync_static_data) for the offline area the host chose: only the wanted
+    /// packages are fetched (the one of the current position first), stored packages that are no longer wanted
+    /// are let go of (or kept as a cache until room is needed, in automatic mode), and the device-size limit is
+    /// kept by letting go of the longest unused first — never the home area. A package that does not fit, or that
+    /// a metered connection holds back, is reported as deferred, not as an error.
+    pub async fn sync_static_data_for(
+        &self,
+        bearer_token: &str,
+        request: &StaticSyncRequest,
+    ) -> Result<StaticSyncOutcome, SyncError> {
         let (server, manifest) = self.fetch_manifest(bearer_token).await?;
         self.reconcile_partition_resolution(&manifest)?;
-        let pending = self.pending_partitions(&manifest)?;
+        let plan_input = self.plan_for(&manifest, request)?;
+        let mut outcome = StaticSyncOutcome {
+            needs_location: plan_input.1,
+            ..StaticSyncOutcome::default()
+        };
+        let plan = plan_input.0;
+
+        for tile in &plan.remove {
+            super::offline::remove_partition(&*self.store, tile).map_err(SyncError::from_store)?;
+            outcome.removed_tiles += 1;
+        }
+        let by_tile: std::collections::HashMap<&str, &PartitionSummary> = manifest
+            .partitions
+            .iter()
+            .map(|p| (p.tile.as_str(), p))
+            .collect();
+        let to_fetch: Vec<&PartitionSummary> = plan
+            .fetch
+            .iter()
+            .filter_map(|f| by_tile.get(f.tile.as_str()).copied())
+            .collect();
         let mut progress = BootstrapProgress {
-            partitions_total: pending.len(),
+            partitions_total: to_fetch.len(),
             partitions_done: 0,
-            bytes_total: pending.iter().map(|p| p.size_bytes).sum(),
+            bytes_total: to_fetch.iter().map(|p| p.size_bytes).sum(),
             bytes_done: 0,
         };
         self.report(&progress);
-        for partition in pending {
+        for planned in &plan.fetch {
+            let Some(partition) = by_tile.get(planned.tile.as_str()).copied() else {
+                continue;
+            };
+            // Room is made only now, one package at a time: a download that fails leaves the rest in place.
+            for victim in &planned.evict_first {
+                super::offline::remove_partition(&*self.store, victim)
+                    .map_err(SyncError::from_store)?;
+                outcome.removed_tiles += 1;
+            }
             let content = self
                 .fetch_partition(bearer_token, &server, partition)
                 .await?;
@@ -699,11 +883,112 @@ impl SyncEngine {
             self.store
                 .upsert_static_partition(&partition.tile, &partition.hash, &data)
                 .map_err(SyncError::from_store)?;
+            self.store
+                .set_partition_size(&partition.tile, partition.size_bytes)
+                .map_err(SyncError::from_store)?;
             progress.partitions_done += 1;
             progress.bytes_done += partition.size_bytes;
+            outcome.fetched_tiles += 1;
+            outcome.fetched_bytes += partition.size_bytes;
             self.report(&progress);
         }
-        Ok(())
+        outcome.deferred = plan.deferred;
+        Ok(outcome)
+    }
+
+    /// The plan for a manifest: what is stored (with sizes), what is wanted, what to remove, fetch and defer.
+    /// Second value: automatic mode with nothing to go on.
+    fn plan_for(
+        &self,
+        manifest: &StaticDataManifest,
+        request: &StaticSyncRequest,
+    ) -> Result<(super::offline::StaticPlan, bool), SyncError> {
+        use super::offline::{plan_static_sync, OfferedTile, PlanInput};
+        let resolution = manifest
+            .partition_resolution
+            .or(self
+                .store
+                .static_partition_resolution()
+                .map_err(SyncError::from_store)?)
+            .unwrap_or(4);
+        let offered: Vec<OfferedTile> = manifest
+            .partitions
+            .iter()
+            .map(|p| OfferedTile {
+                tile: p.tile.clone(),
+                hash: p.hash.clone(),
+                size_bytes: p.size_bytes,
+            })
+            .collect();
+        let mut stored = self
+            .store
+            .partition_records()
+            .map_err(SyncError::from_store)?;
+        if stored.is_empty() {
+            // A store that keeps no records: what is stored is what the hashes say, offered tiles only.
+            for offer in &offered {
+                if let Some(hash) = self
+                    .store
+                    .get_partition_hash(&offer.tile)
+                    .map_err(SyncError::from_store)?
+                {
+                    stored.push(crate::storage::PartitionRecord {
+                        tile: offer.tile.clone(),
+                        hash,
+                        size_bytes: 0,
+                        last_used_unix_ms: 0,
+                    });
+                }
+            }
+        }
+        let selection = decide_selection(request, resolution);
+        let plan = plan_static_sync(&PlanInput {
+            offered: &offered,
+            stored: &stored,
+            wanted: selection.wanted.as_ref(),
+            protected: &selection.protected,
+            urgent: &selection.urgent,
+            priority: &selection.priority,
+            max_device_bytes: request.settings.max_bytes,
+            metered_blocks: request.metered && request.settings.wifi_only,
+            prune_unwanted: selection.prune_unwanted,
+        });
+        Ok((plan, selection.needs_location))
+    }
+
+    /// What a sync for this request would do — fetch, remove, defer — without doing it. One manifest request.
+    pub async fn plan_static_sync_for(
+        &self,
+        bearer_token: &str,
+        request: &StaticSyncRequest,
+    ) -> Result<StaticPlanReport, SyncError> {
+        let (_, manifest) = self.fetch_manifest(bearer_token).await?;
+        let (plan, needs_location) = self.plan_for(&manifest, request)?;
+        let sizes: std::collections::HashMap<&str, u64> = manifest
+            .partitions
+            .iter()
+            .map(|p| (p.tile.as_str(), p.size_bytes))
+            .collect();
+        let fetch_tiles: Vec<String> = plan.fetch.iter().map(|f| f.tile.clone()).collect();
+        let bytes_to_fetch: u64 = fetch_tiles
+            .iter()
+            .filter_map(|t| sizes.get(t.as_str()))
+            .sum();
+        Ok(StaticPlanReport {
+            offered_tiles: manifest.partitions.len(),
+            offered_bytes: manifest.partitions.iter().map(|p| p.size_bytes).sum(),
+            fetch_tiles,
+            bytes_to_fetch,
+            remove_tiles: plan.remove,
+            evict_tiles: plan
+                .fetch
+                .iter()
+                .flat_map(|f| f.evict_first.clone())
+                .collect(),
+            deferred: plan.deferred,
+            needs_location,
+            static_data_version: manifest.static_data_version,
+        })
     }
 
     fn report(&self, progress: &BootstrapProgress) {
