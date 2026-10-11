@@ -108,3 +108,33 @@ describe("Content-Security-Policy", () => {
     expect(headers["permissions-policy"]).toContain("geolocation=(self)");
   });
 });
+
+describe("operator details (imprint)", () => {
+  it("are empty by default, so nothing is invented, and the node warns", async () => {
+    resetEnvCache();
+    const { operatorInfo, operatorWarning } = await import("../../src/modules/web/operator.js");
+    const info = operatorInfo(loadEnv(base));
+    expect(info).toMatchObject({ name: "", address: [], email: "", complete: false, missing: ["name", "address", "email"] });
+    expect(operatorWarning(info)).toMatch(/OPERATOR_NAME, OPERATOR_ADDRESS, OPERATOR_EMAIL are not set/);
+  });
+
+  it("are complete with name, address and e-mail; the address may be one variable with ';' or a backslash-n between lines", async () => {
+    resetEnvCache();
+    const { operatorInfo, operatorWarning } = await import("../../src/modules/web/operator.js");
+    const env = loadEnv({ ...base, OPERATOR_NAME: " Erika Beispiel ", OPERATOR_ADDRESS: "Musterstr. 1; 12345 Musterstadt\nDeutschland", OPERATOR_EMAIL: "kontakt@example.org", OPERATOR_PHONE: "+49 30 0000" });
+    const info = operatorInfo(env);
+    expect(info.complete).toBe(true);
+    expect(info.name).toBe("Erika Beispiel");
+    expect(info.address).toEqual(["Musterstr. 1", "12345 Musterstadt", "Deutschland"]);
+    expect(info.phone).toBe("+49 30 0000");
+    expect(operatorWarning(info)).toBeNull();
+  });
+
+  it("name what is still missing", async () => {
+    resetEnvCache();
+    const { operatorInfo, operatorWarning } = await import("../../src/modules/web/operator.js");
+    const info = operatorInfo(loadEnv({ ...base, OPERATOR_NAME: "Erika Beispiel", OPERATOR_ADDRESS: "Musterstr. 1" }));
+    expect(info.missing).toEqual(["email"]);
+    expect(operatorWarning(info)).toMatch(/OPERATOR_EMAIL is not set/);
+  });
+});

@@ -122,7 +122,7 @@ export default {
   "reportDialog.position.selected": "Gewählte Stelle: {lat}, {lng}",
   "reportDialog.position.none": "Noch keine Stelle gewählt.",
   "reportDialog.pick.hint": "Tippe auf die Karte, um die Stelle festzulegen.",
-  "reportDialog.privacy": "Die Meldung ist anonym und bleibt auf diesem Knoten. Dein Standort wird nur verwendet, wenn du ihn hier ausdrücklich freigibst, und nicht gespeichert.",
+  "reportDialog.privacy": "Gesendet werden: die gewählte Stelle, die Art der Meldung und die gewählte Dauer – und technisch bedingt deine IP-Adresse an diesen Knoten. Der Knoten legt Zeitpunkt und eine zufällige, anonyme Sitzungskennung dazu. Die Meldung ist für alle sichtbar. Dein Standort wird nur verwendet, wenn du ihn hier ausdrücklich freigibst, und nicht gespeichert.",
   "reportDialog.safety": "Bitte nur melden, wenn du nicht fährst.",
   "reportDialog.submit": "Melden",
   "reportDialog.cancel": "Abbrechen",
@@ -180,7 +180,7 @@ export default {
   "about.github.button": "Zum GitHub-Projekt",
   "about.github.note": "Hinweis: Solange das Repository nicht öffentlich ist, ist der Link nur für Mitwirkende erreichbar.",
   "about.data.title": "Datenquellen",
-  "about.data.body": "Tempolimits und Schilder stammen aus OpenStreetMap-Daten (Open Database License, © OpenStreetMap contributors), Gefahrenmeldungen von Nutzerinnen und Nutzern. Die Angaben sind Hinweise, keine amtliche Beschilderung – maßgeblich sind immer die Schilder vor Ort und die Straßenverkehrsordnung.",
+  "about.data.body": "Tempolimits und Schilder stammen überwiegend aus OpenStreetMap-Daten (Open Database License, © OpenStreetMap contributors), Gefahrenmeldungen von Nutzerinnen und Nutzern. Baustellen können aus amtlichen offenen Daten stammen: Frankreich – Bison Futé / DIR über transport.data.gouv.fr (Licence Ouverte 2.0), Luxemburg – Administration des Ponts et Chaussées (CC0), Niederlande – NDW. Welche Quellen dieser Knoten tatsächlich eingespielt hat, entscheidet sein Betreiber. Die Angaben sind Hinweise, keine amtliche Beschilderung – maßgeblich sind immer die Schilder vor Ort und die Straßenverkehrsordnung.",
   "about.safety.title": "Sicherheitshinweis",
   "about.safety.body": "Bedien diese Seite nicht während der Fahrt. Melde nur, wenn du nicht am Steuer sitzt.",
   "about.cameras.title": "Blitzer-Meldungen: rechtlicher Hinweis",
@@ -189,14 +189,14 @@ export default {
   "about.privacy.title": "Datenschutz in Kürze",
   "about.privacy.noAccount": "Kein Konto, keine Anmeldung, keine Cookies. Im Browser (localStorage) werden nur deine Spracheinstellung, deine Auswahl der Kategorien und ob du den Blitzer-Hinweis schon gesehen hast gemerkt.",
   "about.privacy.session": "Beim Öffnen der Karte bekommt dein Browser eine anonyme, zufällige Sitzung, die nach kurzer Zeit verfällt und nicht mit früheren Sitzungen verknüpft ist.",
-  "about.privacy.location": "Dein Standort wird nur verwendet, wenn du ihn per Knopfdruck freigibst – nie im Hintergrund – und wird nicht gespeichert. Gespeichert wird nur die Stelle einer Meldung, für die Dauer ihrer Gültigkeit; Meldungen sind für alle sichtbar, aber nicht mit dir verknüpft.",
+  "about.privacy.location": "Dein Standort wird nur verwendet, wenn du ihn per Knopfdruck freigibst – nie im Hintergrund – und wird nicht gespeichert. Gespeichert wird nur die Stelle einer Meldung: solange sie gilt und danach noch kurze Zeit (standardmäßig bis zu 3 Tage), dann wird sie gelöscht. Meldungen sind für alle sichtbar und tragen nur eine zufällige Sitzungskennung, die nicht mitgeliefert wird.",
   "about.privacy.ip": "Deine IP-Adresse wird kurz im Arbeitsspeicher für die Missbrauchsbegrenzung gezählt, nicht in der Datenbank gespeichert.",
   "about.privacy.logs.on": "Die Zugriffsprotokolle dieses Knotens enthalten weder Koordinaten noch IP-Adressen.",
   "about.privacy.logs.off": "Achtung: Der Betreiber dieses Knotens hat die Datenschutz-Protokollierung abgeschaltet – Zugriffsprotokolle können IP-Adressen und Koordinaten enthalten.",
   "about.privacy.tiles": "Die Kartenkacheln lädt dein Browser direkt von {host}; dieser Anbieter sieht deine IP-Adresse und den angezeigten Kartenausschnitt.",
   "about.privacy.tiles.none": "Diese Seite lädt keine Karten von Drittanbietern.",
   "about.privacy.more": "Ausführlich:",
-  "about.privacy.link": "Datenschutzhinweis",
+  "about.privacy.link": "Datenschutzhinweise (Entwurf)",
   "about.license": "Lizenz: Apache License 2.0",
 
   // Mobile map, duration of a report, speed-limit proposals (October 2026)
@@ -316,5 +316,15 @@ export default {
   "limit.result.merged": "Deine Angabe wurde mit einem bestehenden Vorschlag zusammengeführt ({confirmations} von {required} Bestätigungen).",
   "limit.result.new": "Dein Vorschlag {value} {unit} ist eingegangen ({confirmations} von {required} Bestätigungen).",
   "limit.result.applied": "Der Wert {value} {unit} gilt jetzt.",
-  "limit.result.back": "Zurück"
+  "limit.result.back": "Zurück",
+
+  // Legal pages (privacy notice, terms of use, imprint)
+  "footer.terms": "Nutzungsbedingungen",
+  "footer.imprint": "Impressum",
+  "page.privacy.title": "Datenschutz – Trafficnetwork",
+  "page.terms.title": "Nutzungsbedingungen – Trafficnetwork",
+  "page.imprint.title": "Impressum – Trafficnetwork",
+  "reportDialog.privacy.link": "Datenschutzhinweise",
+  "about.privacy.following": "Folgt die Karte deinem Standort, ist der Kartenausschnitt, den die Seite beim Knoten anfragt, dein ungefährer Standort.",
+  "about.terms.link": "Nutzungsbedingungen (Entwurf) und Impressum"
 };

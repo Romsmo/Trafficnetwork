@@ -120,6 +120,34 @@ The Docker image contains the UI (`server/web` is copied into it); `docker-compo
 * German and English (browser language, switchable, remembered in `localStorage` together with the category selection), mobile
   friendly, keyboard operable, WCAG 2 A/AA checked automatically (light and dark mode).
 
+## Legal pages
+
+The node serves three more pages besides the map, the connect guide and "About": `/privacy` (privacy notice), `/terms` (terms
+of use) and `/imprint` (provider identification). They are in German and English in the same HTML (the one that is not the
+page's language is hidden), are linked from the footer of **every** page (on a phone the footer is the last thing in the bottom
+sheet) and from the report form. `privacy` and `terms` are **drafts** and say so on the page: they describe what the software
+does, they are not legally reviewed, and the operator has to review and release them (`docs/web-compliance.md` has the findings,
+the inventories and the open legal questions).
+
+What they fill in from the node's own configuration (`/web-config.json`): the operator, the tile host (or "no map background"),
+the session lifetime (`WEB_SESSION_TTL_SECONDS`), how long an ended report is kept (`EVENT_LOG_RETENTION_DAYS_DYNAMIC`) and
+whether the access log is in privacy mode (`LOG_PRIVACY_MODE`). Nothing is invented.
+
+| Variable | Needed for a public node | Shown on |
+|---|---|---|
+| `OPERATOR_NAME` | yes | imprint, privacy notice |
+| `OPERATOR_ADDRESS` (lines separated by `;`) | yes | imprint, privacy notice |
+| `OPERATOR_EMAIL` | yes | imprint (as a `mailto:` link), privacy notice |
+| `OPERATOR_PHONE`, `OPERATOR_REPRESENTATIVE`, `OPERATOR_REGISTER`, `OPERATOR_VAT_ID` | depends on who runs the node (ask a lawyer) | imprint, only when set |
+
+While name, address or e-mail is missing, the imprint and the privacy notice say that the operator has not entered their details
+yet — they do not show a made-up provider — and **the node logs a warning at start** naming the missing variables. Setting them is
+the operator's job; this repository ships none.
+
+There is no cookie banner on purpose: the page sets no cookie and stores only three `localStorage` keys, each written on the
+visitor's explicit action (language switch, category choice, "notice seen"); the reasoning and its open point are in
+`docs/web-compliance.md`. If a later change stored anything non-essential, a banner with an equal "reject" would be needed.
+
 ## "N online" display (add-on O-B)
 
 Bottom right of every page (in the footer, so it never covers the map's controls) the page shows how many are online, e.g.

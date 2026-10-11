@@ -15,6 +15,7 @@ async function clearMarkers(page: Page): Promise<void> {
 }
 
 test.describe("own duration of a report", () => {
+  // (Uses "Panne": no other test reports that category at the map centre, where a merge would change the wording of the answers.)
   test("the dialog offers the category's standard, an own duration inside the node's bounds, and says when the report ends", async ({ page }) => {
     await watchTraffic(page, node);
     await openMap(page, node);
@@ -23,7 +24,7 @@ test.describe("own duration of a report", () => {
     // No category chosen yet: nothing to choose a duration for.
     await expect(dialog.getByRole("group", { name: "Wie lange soll die Meldung gelten?" })).toHaveCount(0);
 
-    await dialog.getByRole("radio", { name: "Unfall", exact: true }).check();
+    await dialog.getByRole("radio", { name: "Panne", exact: true }).check();
     const duration = dialog.getByRole("group", { name: "Wie lange soll die Meldung gelten?" });
     await expect(duration.getByRole("radio", { name: "Standard (25 Minuten)" })).toBeChecked();
     await duration.getByRole("radio", { name: "Eigene Dauer" }).check();
@@ -53,7 +54,7 @@ test.describe("own duration of a report", () => {
     });
     await page.locator("#report-open").click();
     const dialog = page.locator("#report-dialog");
-    await dialog.getByRole("radio", { name: "Unfall", exact: true }).check();
+    await dialog.getByRole("radio", { name: "Panne", exact: true }).check();
     await dialog.getByRole("radio", { name: "Eigene Dauer" }).check();
     await dialog.getByRole("textbox", { name: "Dauer" }).fill("7");
     await dialog.getByLabel("Einheit").selectOption("hours");
@@ -84,7 +85,7 @@ test.describe("own duration of a report", () => {
     });
     await page.locator("#report-open").click();
     const dialog = page.locator("#report-dialog");
-    await dialog.getByRole("radio", { name: "Unfall", exact: true }).check();
+    await dialog.getByRole("radio", { name: "Panne", exact: true }).check();
     await dialog.getByRole("radio", { name: "Eigene Dauer" }).check();
     await dialog.getByRole("button", { name: "30 Minuten" }).click();
     await dialog.getByRole("button", { name: "Melden", exact: true }).click();

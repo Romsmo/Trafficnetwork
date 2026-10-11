@@ -310,6 +310,17 @@ const envSchema = z.object({
     .transform((v) => v === "true"),
   // Shown in the web UI footer/about page; one place to change for a fork or after publication.
   PROJECT_REPO_URL: z.string().url().default("https://github.com/Romsmo/Trafficnetwork"),
+  // Who runs this node, for the imprint page (/imprint) and the privacy notice (/privacy). The software invents nothing: with
+  // these empty the imprint says that the operator has not entered their details yet, and the node logs a warning at start.
+  // OPERATOR_ADDRESS separates its lines with ";" (or a backslash-n). Which of the optional ones a node needs depends on who runs it
+  // (a company needs the register entry and VAT id; a private person may need neither) - ask a lawyer, not this file.
+  OPERATOR_NAME: z.string().trim().max(200).default(""),
+  OPERATOR_ADDRESS: z.string().trim().max(500).default(""),
+  OPERATOR_EMAIL: z.string().trim().max(200).default(""),
+  OPERATOR_PHONE: z.string().trim().max(60).default(""),
+  OPERATOR_REPRESENTATIVE: z.string().trim().max(200).default(""),
+  OPERATOR_REGISTER: z.string().trim().max(200).default(""),
+  OPERATOR_VAT_ID: z.string().trim().max(60).default(""),
   // Raster tile source for the web UI map, with {z}/{x}/{y} placeholders. Unset or empty = the default,
   // OpenStreetMap's public tile server, whose usage policy
   // (https://operations.osmfoundation.org/policies/tiles/) is not meant for heavy use: a node with

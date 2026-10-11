@@ -394,3 +394,14 @@ path.cam-zone:focus-visible { outline: 3px solid var(--focus); outline-offset: 2
 @media (prefers-reduced-motion: reduce) {
   * { scroll-behavior: auto !important; transition: none !important; animation: none !important; }
 }
+
+/* legal pages: both languages are in the HTML, the one that is not the page's language is hidden */
+:root[lang="de"] .lang-block[lang="en"], :root[lang="en"] .lang-block[lang="de"] { display: none; }
+.legal .card { margin: 14px 0; }
+.legal .draft-note { border: 1px solid var(--warn, var(--line)); background: var(--warn-bg, transparent); padding: 10px 12px; border-radius: var(--radius); }
+.legal-table { width: 100%; border-collapse: collapse; margin: 8px 0; table-layout: fixed; }
+.legal-table th, .legal-table td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+.legal-table th, .legal-table td { overflow-wrap: anywhere; }
+.legal-table code { overflow-wrap: anywhere; }
+[hidden] { display: none !important; }
+.legal { overflow-wrap: anywhere; }
