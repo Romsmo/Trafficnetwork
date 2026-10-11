@@ -15,6 +15,11 @@ Rein additiv: `apiVersion`, bestehende Endpunkte und Ergebnisformate ändern sic
 - **Achtung beim Update:** `.env`-Dateien, die aus der alten `.env.example` kopiert wurden, enthalten `HAZARD_EXPIRY_SHORT_MINUTES=12`. Das gilt jetzt nur noch für Rotlicht-/Abstandsmeldungen (und lässt die 3 h/14 d unberührt); die Vorlage hat die Zeile auskommentiert. Alle Knoten eines Netzes aktualisieren, bevor man sich auf Dauern verlässt: ein Knoten < 1.1.0 ignoriert das Feld.
 - Doku: [`server/docs/report-expiry.md`](server/docs/report-expiry.md), `api.md`, `federation-protocol.md` (4.4b, 5), `operating.md`, `docs/concept.md` 3.2.
 
+## server — Unreleased (1.1.0), Fortsetzung
+
+- **Offline-Regionen:** `GET /v1/static-data/regions` fasst die Pakete zu Ländern (nach Mittelpunkt der Kachel, aus den Grenzdaten der Blitzer-Politik) bzw. groben H3-Gebieten zusammen, mit unkomprimierter und komprimierter Größe, Kachelzahl, Bounding-Box und den Kachel-IDs. Damit können Apps „Frankreich: 410 MB" anzeigen und genau diese Kacheln laden. Rein additiv, eine Kachel zählt genau einmal. Gemessene und abgeleitete Größen: `server/docs/operating.md`, „Offline regions".
+- **Baustellen-Import:** das Enddatum der Quelle bleibt `expiresAt` (es wird nicht auf die 7-Tage-Standarddauer gekappt, Test belegt es); ein Enddatum weiter als `SEED_REPORT_MAX_END_DAYS` (Standard 365) entfernt — Platzhalter wie 2099-12-31 — wird darauf begrenzt, die Antwort zählt `endCapped`, ein späterer Lauf erneuert ohne Ereignisflut.
+
 ## client-lib v1.1.0 — 2026-10-04
 
 **Blitzer nach Land** (Teil C des Zusatzauftrags „Blitzer-Funktion aktivierbar machen — länderabhängig“; Teil A ist der Server, Teil B die Weboberfläche). Rein additiv: `apiVersion` bleibt `1`, bestehende Aufrufe und Ergebnisse ändern sich nicht.

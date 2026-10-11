@@ -42,6 +42,8 @@ import { conflict } from "../../lib/errors.js";
 const MOVED_METERS = 100;
 /** A source-given end date that changed by less than this is treated as unchanged. */
 const END_CHANGED_MS = 60_000;
+/** A row held to the end-date cap counts as "at the cap" while it is within this of it (runs are hours apart, not weeks). */
+const CAPPED_END_TOLERANCE_MS = 7 * 86_400_000;
 
 export interface SeedReportInput {
   externalId: string;
@@ -68,6 +70,8 @@ export interface UpsertSeedReportsResult {
   updated: number;
   /** Seen again, nothing a client would render changed. */
   refreshed: number;
+  /** Of the rows written or seen in this request: how many had a source end date beyond SEED_REPORT_MAX_END_DAYS and were held to it. */
+  endCapped: number;
   /** Ended before it was ever seen (source end date in the past) — not created. */
   skippedEnded: number;
   /** Same externalId more than once in one request — the last occurrence wins. */
@@ -95,13 +99,20 @@ export async function upsertSeedReports(db: Queryable, env: Env, input: UpsertSe
     const existing = new Map<string, ExistingSeedRow>();
     for (const row of await findSeedReportsForUpdate(tx, input.feedId, [...byId.keys()])) existing.set(row.externalId, row);
 
-    const result: UpsertSeedReportsResult = { created: 0, reactivated: 0, updated: 0, refreshed: 0, skippedEnded: 0, duplicatesInRequest, events: [] };
+    const result: UpsertSeedReportsResult = { created: 0, reactivated: 0, updated: 0, refreshed: 0, endCapped: 0, skippedEnded: 0, duplicatesInRequest, events: [] };
+    const capMs = now + env.SEED_REPORT_MAX_END_DAYS * 86_400_000;
     /** Re-sighted rows that need only the run stamp (source-given end date) vs. also a renewed TTL, grouped by ttl. */
     const refreshedFixed: string[] = [];
+    /** Re-sighted rows whose source end date is beyond the cap: their end is the cap, which moves with every sighting. */
+    const refreshedCapped: string[] = [];
     const refreshedByTtl = new Map<number, string[]>();
 
     for (const report of byId.values()) {
-      const explicitEnd = report.endsAt ? new Date(report.endsAt) : undefined;
+      const sourceEnd = report.endsAt ? new Date(report.endsAt) : undefined;
+      // The source's end date is kept as it is — never cut to the 7-day default — except where it lies beyond the cap.
+      const endCapped = sourceEnd !== undefined && sourceEnd.getTime() > capMs;
+      const explicitEnd = endCapped ? new Date(capMs) : sourceEnd;
+      if (endCapped) result.endCapped++;
       const ttlHours = report.ttlHours ?? env.HAZARD_EXPIRY_CONSTRUCTION_DAYS * 24;
       const expiresAt = explicitEnd ?? new Date(now + ttlHours * 3_600_000);
       const regionTile = positionToRegionTile(report.lat, report.lng, env);
@@ -142,7 +153,13 @@ export async function upsertSeedReports(db: Queryable, env: Env, input: UpsertSe
 
       const reactivated = prior.status !== "active";
       const moved = metersBetween(prior.lat, prior.lng, report.lat, report.lng) > MOVED_METERS;
-      const endChanged = explicitEnd !== undefined && Math.abs(explicitEnd.getTime() - prior.expiresAt.getTime()) > END_CHANGED_MS;
+      // A capped end moves with every run (it is "now + the cap"): it is a change only when the row is far from it, so an
+      // hourly import of thousands of placeholder end dates does not emit an event per row per run.
+      const endChanged =
+        explicitEnd !== undefined &&
+        (endCapped
+          ? prior.expiresAt.getTime() < capMs - CAPPED_END_TOLERANCE_MS
+          : Math.abs(explicitEnd.getTime() - prior.expiresAt.getTime()) > END_CHANGED_MS);
 
       if (reactivated && explicitEnd && explicitEnd.getTime() <= now) {
         // Listed by the source but already over: leave it ended (the row is not active), just mark it seen.
@@ -169,11 +186,13 @@ export async function upsertSeedReports(db: Queryable, env: Env, input: UpsertSe
       }
 
       result.refreshed++;
-      if (explicitEnd) refreshedFixed.push(prior.id);
+      if (endCapped) refreshedCapped.push(prior.id);
+      else if (explicitEnd) refreshedFixed.push(prior.id);
       else refreshedByTtl.set(ttlHours, [...(refreshedByTtl.get(ttlHours) ?? []), prior.id]);
     }
 
     await touchSeedReports(tx, refreshedFixed, input.runId);
+    await touchSeedReports(tx, refreshedCapped, input.runId, new Date(capMs));
     // Rows without a source end date get their TTL renewed on every sighting (the dead-man's switch above);
     // one statement per distinct ttl — the common case is a single group.
     for (const [ttlHours, ids] of refreshedByTtl) await touchSeedReports(tx, ids, input.runId, new Date(now + ttlHours * 3_600_000));

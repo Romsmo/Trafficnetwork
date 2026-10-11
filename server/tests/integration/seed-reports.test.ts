@@ -145,6 +145,44 @@ describe("seed reports (roadworks import)", () => {
       expect(Math.abs(expires - (Date.now() + days * 86_400_000))).toBeLessThan(60_000);
     });
 
+    it("keeps the source's end date beyond the 7-day default, as it is", async () => {
+      const end = inHours(24 * 60);
+      const res = await upsert(batch("r1", [report("a", { endsAt: end })]));
+      expect(res.json()).toMatchObject({ created: 1, endCapped: 0 });
+      expect(new Date((await rows())[0]!.expires_at as string).toISOString()).toBe(end);
+    });
+
+    it("holds a placeholder end date (2099-12-31) to SEED_REPORT_MAX_END_DAYS, and an hourly re-import of it emits nothing", async () => {
+      const cap = app.deps.env.SEED_REPORT_MAX_END_DAYS;
+      const placeholder = "2099-12-31T00:00:00.000Z";
+      const first = await upsert(batch("r1", [report("a", { endsAt: placeholder })]));
+      expect(first.json()).toMatchObject({ created: 1, endCapped: 1 });
+      const expires = new Date((await rows())[0]!.expires_at as string).getTime();
+      expect(Math.abs(expires - (Date.now() + cap * 86_400_000))).toBeLessThan(60_000);
+
+      // a later run: the cap has moved on by the time between runs - not a change, no event, and the end moves with it
+      await testDb.db.execute(sql`update hazard_reports set expires_at = expires_at - interval '2 days'`);
+      const again = await upsert(batch("r2", [report("a", { endsAt: placeholder })]));
+      expect(again.json()).toMatchObject({ created: 0, updated: 0, refreshed: 1, endCapped: 1 });
+      expect((await events()).map((e) => e.type)).toEqual(["ReportCreated"]);
+      const renewed = new Date((await rows())[0]!.expires_at as string).getTime();
+      expect(Math.abs(renewed - (Date.now() + cap * 86_400_000))).toBeLessThan(60_000);
+    });
+
+    it("a row that was far from the cap is treated as changed once the source gives a placeholder", async () => {
+      await upsert(batch("r1", [report("a", { endsAt: inHours(48) })]));
+      const res = await upsert(batch("r2", [report("a", { endsAt: "2099-12-31T00:00:00.000Z" })]));
+      expect(res.json()).toMatchObject({ updated: 1, endCapped: 1 });
+      expect((await events()).map((e) => e.type)).toEqual(["ReportCreated", "ReportConfirmed"]);
+    });
+
+    it("a source end date inside the cap that has not changed emits nothing (the cap changes nothing for it)", async () => {
+      await upsert(batch("r1", [report("a", { endsAt: inHours(24 * 100) })]));
+      const again = await upsert(batch("r2", [report("a", { endsAt: inHours(24 * 100) })]));
+      expect(again.json()).toMatchObject({ refreshed: 1, endCapped: 0 });
+      expect((await events()).map((e) => e.type)).toEqual(["ReportCreated"]);
+    });
+
     it("emits a ReportConfirmed with the new state when the source's end date changes, and none for jitter", async () => {
       await upsert(batch("r1", [report("a", { endsAt: inHours(72) })]));
       await upsert(batch("r2", [report("a", { endsAt: inHours(72 + 1 / 3600) })])); // one second later: unchanged

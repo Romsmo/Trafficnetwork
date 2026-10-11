@@ -93,6 +93,7 @@ The count is in the run report (`mergedIntoOtherFeed`). If the higher-priority f
 
 * Explicit windows (a night work `21:00–06:00` on given days): active **only while a window runs** (or starts within the lookahead); the report expires at that window's end and the next pass brings the next window.
 * Overall start/end: active from start until end. No times at all: the feed's `ttlHours`, renewed at every pass.
+* An end date more than `SEED_REPORT_MAX_END_DAYS` (server setting, default 365) away is held to that by the server (placeholders like `2099-12-31`); a later run renews it. See `server/docs/operating.md`, "Roadworks from a feed".
 * Anything a reader cannot evaluate is **counted, not guessed**: DATEX II recurring patterns and suspended records are skipped with a reason; a `validPeriod` that carries only a *name* (the French feed writes "Uniquement de nuit" / "Uniquement de jour" in every one of its 120 periods) is sent on its overall dates and **counted as a caveat** in the report (`sentWithCaveat`), because the data does not say which hours that means.
 * A time without a zone offset is never given one.
 
