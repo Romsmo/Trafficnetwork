@@ -108,3 +108,52 @@ describe("mergeAcrossFeeds", () => {
     expect(result.mergedAway.get("low")).toBe(1);
   });
 });
+
+describe("selectActive — exception periods", () => {
+  it("is not active while an exception period (works paused) is running at the pass", () => {
+    const c = candidate({ start: at("2026-09-01T00:00:00Z"), end: at("2026-11-01T00:00:00Z"), exceptions: [{ start: at("2026-09-28T00:00:00Z"), end: at("2026-09-29T00:00:00Z") }] });
+    expect(selectActive(c, NOW, LOOKAHEAD)).toEqual({ skip: "an exception period (works paused) is running now" });
+  });
+
+  it("an exception that is still ahead (or already over) changes nothing: the end date stays the source's", () => {
+    const end = at("2026-11-01T00:00:00Z");
+    const ahead = candidate({ start: at("2026-09-01T00:00:00Z"), end, exceptions: [{ start: at("2026-10-03T00:00:00Z"), end: at("2026-10-05T00:00:00Z") }] });
+    const over = candidate({ start: at("2026-09-01T00:00:00Z"), end, exceptions: [{ start: at("2026-09-10T00:00:00Z"), end: at("2026-09-12T00:00:00Z") }] });
+    for (const c of [ahead, over]) expect(selectActive(c, NOW, LOOKAHEAD)).toMatchObject({ active: { endsAt: end } });
+  });
+});
+
+describe("mergeAcrossFeeds — the merge radius", () => {
+  const rwAt = (externalId: string, metersNorth: number): ActiveRoadwork => ({ externalId, lat: 50 + metersNorth / 111_194.9, lng: 10, intervalStart: at("2026-09-01T00:00:00Z"), intervalEnd: at("2026-10-01T00:00:00Z") });
+  const merged = (low: ActiveRoadwork, radius: number) => mergeAcrossFeeds([{ feedId: "high", active: [rwAt("h", 0)] }, { feedId: "low", active: [low] }], radius).mergedAway.get("low");
+
+  it("merges up to and including the radius, keeps beyond it", () => {
+    expect(merged(rwAt("l", 249), 250)).toBe(1);
+    expect(merged(rwAt("l", 251), 250)).toBe(0);
+  });
+
+  it("follows the configured radius, not a fixed one", () => {
+    expect(merged(rwAt("l", 400), 250)).toBe(0);
+    expect(merged(rwAt("l", 400), 500)).toBe(1);
+    expect(merged(rwAt("l", 80), 50)).toBe(0);
+  });
+
+  it("with three feeds, priority runs in configuration order and a left-out roadwork does not shadow a third feed's", () => {
+    const result = mergeAcrossFeeds(
+      [
+        { feedId: "a", active: [rwAt("a1", 0)] },
+        { feedId: "b", active: [rwAt("b1", 100), rwAt("b2", 5000)] },
+        { feedId: "c", active: [rwAt("c1", 150), rwAt("c2", 5100)] },
+      ],
+      250,
+    );
+    expect(result.kept.get("a")!.map((r) => r.externalId)).toEqual(["a1"]);
+    expect(result.kept.get("b")!.map((r) => r.externalId)).toEqual(["b2"]); // b1 is the same works as a1
+    expect(result.kept.get("c")!.map((r) => r.externalId)).toEqual([]); // c1 matches a1 (150 m), c2 matches b2 (100 m)
+    expect([...result.mergedAway.entries()]).toEqual([
+      ["a", 0],
+      ["b", 1],
+      ["c", 2],
+    ]);
+  });
+});

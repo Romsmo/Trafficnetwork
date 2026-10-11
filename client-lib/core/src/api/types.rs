@@ -26,6 +26,41 @@ pub struct SpeedLimitAnswer {
     pub imported_value: Option<f64>,
 }
 
+/// The answer of `lookupSpeedLimit`: always an answer, never a bare "nothing".
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(tag = "status", rename_all = "camelCase")]
+pub enum SpeedLimitLookup {
+    /// A limit applies here. `source` says where it was read: `"offline"` (the local store) or `"online"`
+    /// (the server, because this place is outside the offline area).
+    Found {
+        #[serde(flatten)]
+        answer: SpeedLimitAnswer,
+        source: &'static str,
+    },
+    /// Nothing is on record for this place — the data was looked at (locally where it is stored, on the server
+    /// otherwise) and holds no limit. Not the same as not knowing: see `OutsideOfflineArea`.
+    NotRecorded { source: &'static str },
+    /// This place is outside the offline area and there is no network, so nothing could be looked at.
+    OutsideOfflineArea,
+}
+
+/// What `submitReport` tells a host app about the duration of what it queued.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct SubmittedReport {
+    #[serde(rename = "localId")]
+    pub local_id: String,
+    /// The duration that was queued (and will be signed), if the host asked for one and the server takes it.
+    #[serde(rename = "expiresInSeconds")]
+    pub expires_in_seconds: Option<u32>,
+    /// `false`: the host asked for a duration but this server does not take one (it predates the feature); the
+    /// report was queued without it and the server's default applies. `true` otherwise.
+    #[serde(rename = "durationHonoured")]
+    pub duration_honoured: bool,
+    /// How long the report lives when nothing is asked for, if known.
+    #[serde(rename = "defaultSeconds")]
+    pub default_seconds: Option<u32>,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum OriginView {
@@ -214,6 +249,15 @@ pub struct SyncReport {
     pub rejected: usize,
     /// Still waiting to be sent.
     pub pending_writes: usize,
+    /// Offline area: packages fetched this time, let go of, and wanted but held back (a metered connection, or
+    /// the storage limit — `getStoragePlan` says which).
+    pub offline_fetched_tiles: usize,
+    pub offline_removed_tiles: usize,
+    pub offline_deferred_tiles: usize,
+    /// Automatic offline area, and the device knows neither where it is nor where home is: nothing was selected.
+    /// The host app should give a position (`updatePosition`), a home (`setAutoRegionPolicy`) or choose
+    /// regions (`setOfflineRegions`).
+    pub needs_location: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]

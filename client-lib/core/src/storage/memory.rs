@@ -10,8 +10,8 @@ use std::sync::Mutex;
 use serde::{Deserialize, Serialize};
 
 use super::{
-    boxes_intersect, query_box, segment_bbox, LocalCorrectionProposal, PendingWrite,
-    StorageFullError, Store, StoreError, StoredEntities,
+    boxes_intersect, query_box, segment_bbox, LocalCorrectionProposal, PartitionRecord,
+    PendingWrite, StorageFullError, Store, StoreError, StoredEntities,
 };
 use crate::sync::camera_policy::CameraZone;
 use crate::sync::types::{HazardReport, SpeedLimitSegment, StaticSign};
@@ -27,6 +27,13 @@ struct Inner {
     static_entity_limit: Option<usize>,
     static_partition_resolution: Option<u8>,
     camera_policy_stamp: Option<String>,
+    /// Package sizes and last use (offline-area management). `default`: a snapshot written before it existed loads.
+    #[serde(default)]
+    partition_sizes: HashMap<String, u64>,
+    #[serde(default)]
+    partition_used: HashMap<String, i64>,
+    #[serde(default)]
+    settings: HashMap<String, String>,
 }
 
 #[derive(Default)]
@@ -158,6 +165,62 @@ impl Store for InMemoryStore {
         Ok(())
     }
 
+    fn partition_records(&self) -> Result<Vec<PartitionRecord>, StoreError> {
+        let inner = self.inner.lock().unwrap();
+        let mut records: Vec<PartitionRecord> = inner
+            .partition_hashes
+            .iter()
+            .map(|(tile, hash)| PartitionRecord {
+                tile: tile.clone(),
+                hash: hash.clone(),
+                size_bytes: inner.partition_sizes.get(tile).copied().unwrap_or(0),
+                last_used_unix_ms: inner.partition_used.get(tile).copied().unwrap_or(0),
+            })
+            .collect();
+        records.sort_by(|a, b| a.tile.cmp(&b.tile));
+        Ok(records)
+    }
+
+    fn set_partition_size(&self, tile: &str, size_bytes: u64) -> Result<(), StoreError> {
+        self.inner
+            .lock()
+            .unwrap()
+            .partition_sizes
+            .insert(tile.to_string(), size_bytes);
+        Ok(())
+    }
+
+    fn record_partition_use(&self, tiles: &[String], now_unix_ms: i64) -> Result<(), StoreError> {
+        let mut inner = self.inner.lock().unwrap();
+        for tile in tiles {
+            if inner.partition_hashes.contains_key(tile) {
+                inner.partition_used.insert(tile.clone(), now_unix_ms);
+            }
+        }
+        Ok(())
+    }
+
+    fn remove_partition_record(&self, tile: &str) -> Result<(), StoreError> {
+        let mut inner = self.inner.lock().unwrap();
+        inner.partition_hashes.remove(tile);
+        inner.partition_sizes.remove(tile);
+        inner.partition_used.remove(tile);
+        Ok(())
+    }
+
+    fn get_setting(&self, key: &str) -> Result<Option<String>, StoreError> {
+        Ok(self.inner.lock().unwrap().settings.get(key).cloned())
+    }
+
+    fn set_setting(&self, key: &str, value: &str) -> Result<(), StoreError> {
+        self.inner
+            .lock()
+            .unwrap()
+            .settings
+            .insert(key.to_string(), value.to_string());
+        Ok(())
+    }
+
     fn camera_policy_stamp(&self) -> Result<Option<String>, StoreError> {
         Ok(self.inner.lock().unwrap().camera_policy_stamp.clone())
     }
@@ -187,6 +250,8 @@ impl Store for InMemoryStore {
         inner.entities.fixed_speed_cameras.clear();
         inner.entities.camera_zones.clear();
         inner.partition_hashes.clear();
+        inner.partition_sizes.clear();
+        inner.partition_used.clear();
         inner.static_partition_resolution = None;
         Ok(())
     }

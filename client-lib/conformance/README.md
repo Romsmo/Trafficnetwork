@@ -70,6 +70,11 @@ for the country policy `cameraPolicy` (`defaultLevel`, `byCountry`, …) and
 `cameraData` (`camera`, `zone`: put a camera and/or a zone near Berlin into its
 static package) — the header of `mock-server.mjs` lists them all.
 
+Since client library 1.2.0 the default offline area is *automatic* (it follows the position the client reports), so a scenario
+that expects the server's data without giving a position starts with `setOfflineRegions {"mode": "all"}`; the
+offline-area scenarios use `secondTile` (a second package, the H3 neighbour), `reportExpiry`, `communityCorrections` and
+`noRegions`.
+
 Steps:
 
 | Step | Meaning |

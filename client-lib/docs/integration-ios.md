@@ -103,6 +103,23 @@ Things an app usually wants on top of that:
 - **Finish:** let the last reference go (or set your variable to `nil`); the
   data stays on disk.
 
+## Offline area and report duration (1.2.0)
+
+From 1.2.0 the device chooses what it keeps of the static data (`offline-storage.md`): by default the surroundings of the
+position you give with `updatePosition`, a home, and places driven through lately — **a client that never gives a position
+stores nothing**. Pick regions or everything explicitly if that is what the app wants:
+
+```swift
+// the generic call is the whole surface; arguments are JSON
+_ = client.call(method: "setOfflineRegions", argsJson: #"{"mode":"all"}"#)
+_ = client.call(method: "setStorageLimits", argsJson: #"{"maxBytes":314572800,"wifiOnly":true}"#)
+_ = client.call(method: "setConnectionMetered", argsJson: #"{"metered":false}"#)
+```
+
+Also new: `getReportLimits(type)` and an optional duration on `submitReport` (`api.md`, "Writes"),
+`reportMissingSpeedLimit` for a road with no limit on record, and `lookupSpeedLimit`, which says *outside the offline area*
+instead of "no limit" where nothing could be looked at.
+
 ## How it behaves
 
 - **Calls run on the library's own threads** (8 MiB stacks), never on yours —

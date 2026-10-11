@@ -1,6 +1,6 @@
 {
   "name": "@trafficnetwork/ingestion",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "type": "module",
   "description": "Optional bulk-import client that seeds a Trafficnetwork server's database from OpenStreetMap and other sources, over the server's public bulk-import API (Phase 3).",
@@ -15,6 +15,8 @@
     "lint": "eslint src tests scripts",
     "generate:implicit-speeds": "tsx scripts/generate-implicit-speeds.mts",
     "report:quality": "tsx scripts/source-quality-report.mts",
+    "roadworks:update": "tsx src/cli.ts --roadworks",
+    "roadworks:dry-run": "tsx src/cli.ts --roadworks --dry-run",
     "test": "vitest run",
     "test:unit": "vitest run tests/unit",
     "test:integration": "vitest run tests/integration",

@@ -151,3 +151,83 @@ describe("parseDatex2 — what is deliberately not guessed", () => {
     expect((await parse(half)).skipped.find((s) => s.externalId === "NDW03_613534_MAN")?.reason).toMatch(/only one of start\/end/);
   });
 });
+
+/**
+ * Fixtures fetched 2026-10-11 (verbatim excerpts): the French feed document that FAILED the importer ("Cannot set properties of
+ * undefined (setting 'start')") because it carries `exceptionPeriod` elements, and the Luxembourg CITA feed (DATEX II 2.0, CC0 on
+ * data.public.lu), whose records locate a stretch with `locationForDisplay` only.
+ */
+describe("parseDatex2 — exception periods (French feed, 2026-10-11)", () => {
+  const parseFr = () => parse(read("fr-tipi-exceptions-excerpt.xml"));
+
+  it("reads the whole document: an exceptionPeriod used to throw and fail the entire feed", async () => {
+    const result = await parseFr();
+    expect(result.complete).toBe(true);
+    expect(result.candidates.map((c) => c.externalId)).toEqual(["260928-001439-1", "261001-001715-1", "260625-000925-1", "260122-001707-1"]);
+    expect(result.skipped.filter((s) => /could not be evaluated/.test(s.reason))).toEqual([]);
+  });
+
+  it("a concrete exceptionPeriod is an exception to the overall interval, never a window of validity", async () => {
+    const [first] = (await parseFr()).candidates;
+    expect(first!.validity.windows).toBeUndefined();
+    expect(first!.validity.start).toEqual(new Date("2026-09-28T22:01:00Z"));
+    expect(first!.validity.end).toEqual(new Date("2026-11-06T17:00:00Z"));
+    expect(first!.validity.exceptions).toEqual([{ start: new Date("2026-10-05T04:00:00Z"), end: new Date("2026-10-09T16:00:00Z") }]);
+    expect(first!.caveat).toBe("exception period ahead not applied to the end date");
+  });
+
+  it("a named exception ('week-end et jours fériés') is counted as a caveat, not evaluated and not guessed", async () => {
+    const third = (await parseFr()).candidates.find((c) => c.externalId === "260625-000925-1");
+    expect(third!.validity.exceptions).toBeUndefined();
+    expect(third!.caveat).toBe("exception period not evaluated: week-end et jours fériés; period qualifier not evaluated: Uniquement de jour");
+  });
+
+  it("a record without any period keeps no caveat", async () => {
+    const plain = (await parseFr()).candidates.find((c) => c.externalId === "260122-001707-1");
+    expect(plain!.caveat).toBeUndefined();
+    expect(plain!.validity).toEqual({ start: new Date("2026-12-03T07:30:00Z"), end: new Date("2026-12-03T15:30:00Z") });
+  });
+
+  it("an exception whose times cannot be read is reported as not evaluated; the other records are unaffected", async () => {
+    const broken = read("fr-tipi-exceptions-excerpt.xml").replace("<ns2:startOfPeriod>2026-10-05T06:00:00.000+02:00</ns2:startOfPeriod>", "<ns2:startOfPeriod>not a time</ns2:startOfPeriod>");
+    const result = await parse(broken);
+    expect(result.complete).toBe(true);
+    expect(result.candidates.map((c) => c.externalId)).toContain("260122-001707-1");
+    expect(result.candidates.find((c) => c.externalId === "260928-001439-1")!.caveat).toBe("exception period not evaluated: unnamed");
+  });
+
+  it("a startOfPeriod outside any validPeriod/exceptionPeriod is ignored instead of crashing the reader", async () => {
+    const stray = read("ndw-v3-excerpt.xml").replace("<com:validityTimeSpecification>", "<com:validityTimeSpecification><com:startOfPeriod>2026-10-01T20:00:00Z</com:startOfPeriod>");
+    const result = await parse(stray);
+    expect(result.complete).toBe(true);
+    expect(result.candidates.length).toBeGreaterThan(0);
+  });
+});
+
+describe("parseDatex2 — Luxembourg CITA excerpt (DATEX II 2.0, locationForDisplay)", () => {
+  it("places a record on its locationForDisplay point when it has no other coordinate", async () => {
+    const result = await parse(read("lu-cita-excerpt.xml"));
+    expect(result.complete).toBe(true);
+    expect(result.publishedAt).toEqual(new Date("2026-10-11T10:20:04.276Z"));
+    expect(result.candidates.map((c) => [c.externalId, c.lat, c.lng])).toEqual([
+      ["237687-1", 49.534996, 6.021889],
+      ["237687-2", 49.534836, 6.021822],
+      ["231225-1", 49.57074, 6.125748],
+    ]);
+  });
+
+  it("keeps a start without an end open-ended (the feed's ttlHours bounds it) and skips what is not roadworks, with the reason", async () => {
+    const result = await parse(read("lu-cita-excerpt.xml"));
+    expect(result.candidates[0]!.validity).toEqual({ start: new Date("2026-10-10T07:00:32Z") });
+    expect(result.skipped.map((s) => s.reason)).toEqual(["record type EquipmentOrSystemFault is not roadworks", "record type PublicEvent is not roadworks"]);
+  });
+
+  it("prefers a real coordinate of the record over its locationForDisplay", async () => {
+    const withPoint = read("lu-cita-excerpt.xml").replace(
+      "<locationForDisplay>",
+      '<tpegLinearLocation><from xsi:type="TpegNonJunctionPoint"><pointCoordinates><latitude>49.6</latitude><longitude>6.1</longitude></pointCoordinates></from></tpegLinearLocation><locationForDisplay>',
+    );
+    const [first] = (await parse(withPoint)).candidates;
+    expect(first).toMatchObject({ lat: 49.6, lng: 6.1 });
+  });
+});

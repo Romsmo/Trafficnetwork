@@ -76,6 +76,11 @@ CREATE TABLE IF NOT EXISTS pending_writes (
     data TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS local_proposals (segment_key TEXT PRIMARY KEY, data TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS partition_info (
+    tile TEXT PRIMARY KEY,
+    size_bytes INTEGER NOT NULL DEFAULT 0,
+    last_used_ms INTEGER NOT NULL DEFAULT 0
+);
 ";
 
 const SEGMENT_COLUMNS: &str = "id, segment_key, speed_limit, unit, source, source_license, \
@@ -472,7 +477,7 @@ impl Store for SqliteStore {
                 "DELETE FROM segment_rtree; DELETE FROM speed_limit_segments; \
                  DELETE FROM sign_rtree; DELETE FROM static_signs; \
                  DELETE FROM fixed_speed_cameras; DELETE FROM camera_zones; \
-                 DELETE FROM partition_hashes; \
+                 DELETE FROM partition_hashes; DELETE FROM partition_info; \
                  DELETE FROM meta WHERE key = 'static_partition_resolution';",
             )?;
             tx.commit()
@@ -497,6 +502,85 @@ impl Store for SqliteStore {
                 "INSERT INTO meta (key, value) VALUES ('static_partition_resolution', ?1) \
                  ON CONFLICT(key) DO UPDATE SET value = excluded.value",
                 [resolution.to_string()],
+            )
+            .map(|_| ())
+        })
+    }
+
+    fn partition_records(&self) -> Result<Vec<super::PartitionRecord>, StoreError> {
+        self.with_conn(|conn| {
+            let mut stmt = conn.prepare(
+                "SELECT h.tile, h.hash, COALESCE(i.size_bytes, 0), COALESCE(i.last_used_ms, 0) \
+                 FROM partition_hashes h LEFT JOIN partition_info i ON i.tile = h.tile \
+                 ORDER BY h.tile",
+            )?;
+            let rows = stmt.query_map([], |row| {
+                Ok(super::PartitionRecord {
+                    tile: row.get(0)?,
+                    hash: row.get(1)?,
+                    size_bytes: u64::try_from(row.get::<_, i64>(2)?).unwrap_or(0),
+                    last_used_unix_ms: row.get(3)?,
+                })
+            })?;
+            rows.collect()
+        })
+    }
+
+    fn set_partition_size(&self, tile: &str, size_bytes: u64) -> Result<(), StoreError> {
+        self.with_conn(|conn| {
+            conn.execute(
+                "INSERT INTO partition_info (tile, size_bytes) VALUES (?1, ?2) \
+                 ON CONFLICT(tile) DO UPDATE SET size_bytes = excluded.size_bytes",
+                params![tile, i64::try_from(size_bytes).unwrap_or(i64::MAX)],
+            )
+            .map(|_| ())
+        })
+    }
+
+    fn record_partition_use(&self, tiles: &[String], now_unix_ms: i64) -> Result<(), StoreError> {
+        self.with_conn(|conn| {
+            let tx = conn.transaction()?;
+            for tile in tiles {
+                tx.execute(
+                    "INSERT INTO partition_info (tile, last_used_ms) \
+                     SELECT ?1, ?2 WHERE EXISTS (SELECT 1 FROM partition_hashes WHERE tile = ?1) \
+                     ON CONFLICT(tile) DO UPDATE SET last_used_ms = excluded.last_used_ms",
+                    params![tile, now_unix_ms],
+                )?;
+            }
+            tx.commit()
+        })
+    }
+
+    fn remove_partition_record(&self, tile: &str) -> Result<(), StoreError> {
+        self.with_conn(|conn| {
+            let tx = conn.transaction()?;
+            tx.execute(
+                "DELETE FROM partition_hashes WHERE tile = ?1",
+                params![tile],
+            )?;
+            tx.execute("DELETE FROM partition_info WHERE tile = ?1", params![tile])?;
+            tx.commit()
+        })
+    }
+
+    fn get_setting(&self, key: &str) -> Result<Option<String>, StoreError> {
+        self.with_conn(|conn| {
+            conn.query_row(
+                "SELECT value FROM meta WHERE key = ?1",
+                params![format!("setting:{key}")],
+                |row| row.get(0),
+            )
+            .optional()
+        })
+    }
+
+    fn set_setting(&self, key: &str, value: &str) -> Result<(), StoreError> {
+        self.with_conn(|conn| {
+            conn.execute(
+                "INSERT INTO meta (key, value) VALUES (?1, ?2) \
+                 ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                params![format!("setting:{key}"), value],
             )
             .map(|_| ())
         })

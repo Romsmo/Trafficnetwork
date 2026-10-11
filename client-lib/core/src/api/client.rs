@@ -24,15 +24,18 @@ use crate::crypto::{generate_ed25519_keypair, verify_signed_envelope, Ed25519Key
 use crate::discovery::{DiscoveryConfig, DiscoveryService};
 use crate::platform::{Clock, HttpTransport, Sleep, WsTransport};
 use crate::status::OnlineStatusService;
-use crate::storage::{Store, WriteKind};
+use crate::storage::{PendingWrite, Store, WriteKind};
+use crate::sync::gaps::own_gap_proposal;
+use crate::sync::report_missing_speed_limit;
 use crate::sync::{
-    bind_device_key, confirm_hazard_report, confirm_speed_limit_correction,
-    effective_camera_policy, exchange_client_secret, fetch_corrections, flush_pending,
-    haversine_distance_meters, nearby_hazard_reports, purge_camera_data, register_device,
-    report_camera_removed, report_wrong_speed_limit, run_realtime as run_realtime_protocol,
-    speed_limit_at, submit_report, CameraLevel, CameraNotice, ClientConfig, Correction,
-    CorrectionTarget, EffectiveCameraPolicy, FlushOutcome, HazardType, NetworkConfigPayload,
-    ReportSubmission, SegmentRef, SyncEngine, WrongSpeedLimitReport,
+    bind_device_key, check_ttl, confirm_hazard_report, confirm_speed_limit_correction,
+    effective_camera_policy, exchange_client_secret, expiry_ms_for, fetch_corrections,
+    flush_pending, haversine_distance_meters, limits_for, nearby_hazard_reports, purge_camera_data,
+    register_device, report_camera_removed, report_wrong_speed_limit,
+    run_realtime as run_realtime_protocol, speed_limit_at, submit_report, CameraLevel,
+    CameraNotice, ClientConfig, Correction, CorrectionTarget, EffectiveCameraPolicy, FlushOutcome,
+    HazardType, MissingSpeedLimitReport, NetworkConfigPayload, ReportLimits, ReportSubmission,
+    SegmentRef, SyncEngine, TtlDecision, WrongSpeedLimitReport,
 };
 
 use super::error::{code, ApiError};
@@ -45,7 +48,8 @@ use super::secure_store::{
 use super::tiles::{ring_for_speed, tiles_around, DEFAULT_REGION_RESOLUTION};
 use super::types::{
     BootstrapPlanView, CameraPolicyView, NearbyCategory, NearbyItem, NetworkStatusView, NodeView,
-    PositionUpdate, ProposalView, SpeedLimitAnswer, SyncReport, SyncStatus, TickResult,
+    OriginView, PositionUpdate, ProposalView, SpeedLimitAnswer, SpeedLimitLookup, SubmittedReport,
+    SyncReport, SyncStatus, TickResult,
 };
 
 /// A token is renewed this long before it runs out.
@@ -234,14 +238,14 @@ impl CachedConfig {
 }
 
 #[derive(Default)]
-struct State {
+pub(super) struct State {
     token: Option<CachedToken>,
     config: Option<CachedConfig>,
     /// The device's signing key, once it exists and the server has bound it.
     device_key: Option<Ed25519KeyPair>,
     tiles: Vec<String>,
     /// The tiles changed since the last sync.
-    sync_due: bool,
+    pub(super) sync_due: bool,
     last_sync_at_ms: Option<i64>,
     last_sync_ok: Option<bool>,
     last_error: Option<ApiError>,
@@ -250,15 +254,30 @@ struct State {
     /// The static-data version the last sync's manifest named — when it
     /// moves, the configuration fetched before is stale.
     manifest_version: Option<u64>,
+    /// The last heading (degrees) the host app gave with a position: what "no limit here" falls back to for the
+    /// direction of the road when it is not given explicitly.
+    last_heading: Option<f64>,
+    /// Where the device last said it was — the automatic offline area follows it (api/offline.rs).
+    pub(super) last_position: Option<(f64, f64)>,
+    pub(super) last_position_tile: Option<String>,
+    pub(super) last_use_noted_ms: i64,
+    /// The host app's word that the connection is metered.
+    pub(super) metered: bool,
+    /// `GET /v1/static-data/regions`, with the static-data version it was read at.
+    pub(super) regions: Option<(u64, Vec<super::offline::ServerRegion>)>,
+}
+
+pub(super) fn check_position_public(lat: f64, lng: f64) -> Result<(), ApiError> {
+    check_position(lat, lng)
 }
 
 pub struct TrafficNetworkClient {
     options: ClientOptions,
     clock: Arc<dyn Clock>,
-    store: Arc<dyn Store>,
+    pub(super) store: Arc<dyn Store>,
     secure: Arc<dyn SecureStore>,
-    discovery: Arc<DiscoveryService>,
-    engine: SyncEngine,
+    pub(super) discovery: Arc<DiscoveryService>,
+    pub(super) engine: SyncEngine,
     online: OnlineStatusService,
     events: Arc<EventHub>,
     ws: Arc<dyn WsTransport>,
@@ -326,11 +345,11 @@ impl TrafficNetworkClient {
 
     // ------------------------------------------------------------ plumbing
 
-    fn state(&self) -> std::sync::MutexGuard<'_, State> {
+    pub(super) fn state(&self) -> std::sync::MutexGuard<'_, State> {
         self.state.lock().unwrap()
     }
 
-    fn check_open(&self) -> Result<(), ApiError> {
+    pub(super) fn check_open(&self) -> Result<(), ApiError> {
         if self.state().closed {
             Err(ApiError::new(code::CLOSED, "the client was closed"))
         } else {
@@ -338,7 +357,7 @@ impl TrafficNetworkClient {
         }
     }
 
-    fn now(&self) -> i64 {
+    pub(super) fn now(&self) -> i64 {
         self.clock.now_unix_ms()
     }
 
@@ -350,7 +369,7 @@ impl TrafficNetworkClient {
             .saturating_mul(1000)
     }
 
-    fn cached_config(&self) -> Option<ClientConfig> {
+    pub(super) fn cached_config(&self) -> Option<ClientConfig> {
         self.state().config.as_ref().map(|c| c.config.clone())
     }
 
@@ -464,7 +483,7 @@ impl TrafficNetworkClient {
 
     // ---------------------------------------------------------------- auth
 
-    async fn ensure_token(&self) -> Result<String, ApiError> {
+    pub(super) async fn ensure_token(&self) -> Result<String, ApiError> {
         self.check_open()?;
         let now = self.now();
         if let Some(token) = &self.state().token {
@@ -619,8 +638,102 @@ impl TrafficNetworkClient {
             .cached_config()
             .map(|c| c.speed_limit_lookup_max_distance_meters)
             .unwrap_or(DEFAULT_LOOKUP_METERS);
+        self.note_position(lat, lng);
         let nearest = speed_limit_at(&*self.store, lat, lng, max_distance)?;
-        Ok(nearest.map(SpeedLimitAnswer::from))
+        if let Some(nearest) = nearest {
+            return Ok(Some(SpeedLimitAnswer::from(nearest)));
+        }
+        // No segment is close: this device's own "no limit on record here" proposal for the place, if it made one.
+        let heading = _heading.or(self.state().last_heading);
+        Ok(
+            own_gap_proposal(&*self.store, lat, lng, heading)?.map(|proposal| SpeedLimitAnswer {
+                value: f64::from(proposal.value),
+                unit: proposal.unit.as_str().to_string(),
+                segment_id: proposal.segment_key.clone(),
+                segment_key: Some(proposal.segment_key),
+                distance_meters: 0.0,
+                origin: OriginView::LocallyProposed {
+                    confirmations: proposal.confirmations,
+                },
+                imported_value: None,
+            }),
+        )
+    }
+
+    /// The heading the host app last had — remembered for what needs a direction and has none given.
+    pub fn set_last_heading(&self, heading: Option<f64>) {
+        if heading.is_some_and(f64::is_finite) {
+            self.state().last_heading = heading;
+        }
+    }
+
+    /// Like [`get_speed_limit_at`](Self::get_speed_limit_at), but always an answer a host app can tell the driver:
+    /// a limit (read offline, or online when the place is outside the offline area), "nothing is on record
+    /// here", or "outside the offline area and no network". Never a silent "no limit".
+    pub async fn lookup_speed_limit(
+        &self,
+        lat: f64,
+        lng: f64,
+        heading: Option<f64>,
+    ) -> Result<SpeedLimitLookup, ApiError> {
+        self.check_open()?;
+        check_position(lat, lng)?;
+        self.set_last_heading(heading);
+        if let Some(answer) = self.get_speed_limit_at(lat, lng, heading)? {
+            return Ok(SpeedLimitLookup::Found {
+                answer,
+                source: "offline",
+            });
+        }
+        if self.covered_offline(lat, lng) {
+            return Ok(SpeedLimitLookup::NotRecorded { source: "offline" });
+        }
+        // Outside what is stored: ask a server, if there is one to ask.
+        let token = match self.ensure_token().await {
+            Ok(token) => token,
+            Err(_) => return Ok(SpeedLimitLookup::OutsideOfflineArea),
+        };
+        let result = self
+            .discovery
+            .request_with_failover(|server| {
+                let url = format!(
+                    "{}/v1/speed-limit?lat={lat}&lng={lng}",
+                    server.address.trim_end_matches('/')
+                );
+                crate::platform::HttpRequest::get(url)
+                    .with_header("Authorization", format!("Bearer {token}"))
+            })
+            .await;
+        match result {
+            Ok((_, response)) if response.status == 404 => {
+                Ok(SpeedLimitLookup::NotRecorded { source: "online" })
+            }
+            Ok((_, response)) if response.is_success() => {
+                match response.json().ok().and_then(|v| online_answer(&v)) {
+                    Some(answer) => Ok(SpeedLimitLookup::Found {
+                        answer,
+                        source: "online",
+                    }),
+                    None => Ok(SpeedLimitLookup::OutsideOfflineArea),
+                }
+            }
+            _ => Ok(SpeedLimitLookup::OutsideOfflineArea),
+        }
+    }
+
+    /// Whether the offline data covers this place: the package of its tile is stored.
+    fn covered_offline(&self, lat: f64, lng: f64) -> bool {
+        let resolution = self
+            .cached_config()
+            .map(|c| c.static_data_partition_h3_resolution)
+            .or_else(|| self.store.static_partition_resolution().ok().flatten());
+        let Some(resolution) = resolution else {
+            return false;
+        };
+        let Some(tile) = super::tiles::tile_at(lat, lng, resolution) else {
+            return false;
+        };
+        matches!(self.store.get_partition_hash(&tile), Ok(Some(_)))
     }
 
     /// What is around a position, nearest first: reports from drivers
@@ -685,7 +798,7 @@ impl TrafficNetworkClient {
                     continue;
                 }
                 if let Some(item) =
-                    pending_hazard(&write.id, &write.request_body, lat, lng, radius_meters)
+                    pending_hazard(&write, lat, lng, radius_meters, now, config.as_ref())
                 {
                     items.push(item);
                 }
@@ -771,9 +884,41 @@ impl TrafficNetworkClient {
         lng: f64,
         speed_kmh: Option<f64>,
     ) -> Result<String, ApiError> {
+        Ok(self
+            .submit_report_with_duration(hazard_type, lat, lng, speed_kmh, None)?
+            .local_id)
+    }
+
+    /// [`submit_report`](Self::submit_report) with the duration the reporter wants the report to live
+    /// (`ttl_seconds`, optional). Checked against the server's bounds *before* anything is queued
+    /// (`ttlOutOfRange`, see [`get_report_limits`](Self::get_report_limits)); the duration goes through the offline
+    /// buffer and is part of the signature. A server that predates the feature does not take it: the report is queued
+    /// without it and the answer says so (`duration_honoured: false`).
+    pub fn submit_report_with_duration(
+        &self,
+        hazard_type: &str,
+        lat: f64,
+        lng: f64,
+        speed_kmh: Option<f64>,
+        ttl_seconds: Option<u32>,
+    ) -> Result<SubmittedReport, ApiError> {
         self.check_open()?;
         check_position(lat, lng)?;
         let hazard_type = parse_hazard_type(hazard_type)?;
+        let config = self.cached_config();
+        let decision = check_ttl(hazard_type, ttl_seconds, config.as_ref()).map_err(|range| {
+            ApiError::new(
+                code::TTL_OUT_OF_RANGE,
+                format!(
+                    "a duration of {} s is not accepted for this report type: it must be between {} and {} s (default {})",
+                    range.requested_seconds, range.min_seconds, range.max_seconds, range.default_seconds
+                ),
+            )
+        })?;
+        let queued_ttl = match decision {
+            TtlDecision::Requested(seconds) => Some(seconds),
+            TtlDecision::Default | TtlDecision::NotSupported => None,
+        };
         let id = submit_report(
             &*self.store,
             &*self.clock,
@@ -782,9 +927,25 @@ impl TrafficNetworkClient {
                 lat,
                 lng,
                 speed_kmh,
+                ttl_seconds: queued_ttl,
             },
         )?;
-        Ok(id)
+        let limits = limits_for(hazard_type, config.as_ref());
+        Ok(SubmittedReport {
+            local_id: id,
+            expires_in_seconds: queued_ttl,
+            duration_honoured: decision != TtlDecision::NotSupported,
+            default_seconds: limits.default_seconds,
+        })
+    }
+
+    /// What a report of this type may be asked to live: the default and the bounds, from the server's rules. A host
+    /// app builds its "how long?" choice from this. `supported: false` means the server takes no duration (an
+    /// older server) — offer no choice, the default applies. Needs one successful sync (the configuration).
+    pub fn get_report_limits(&self, hazard_type: &str) -> Result<ReportLimits, ApiError> {
+        self.check_open()?;
+        let hazard_type = parse_hazard_type(hazard_type)?;
+        Ok(limits_for(hazard_type, self.cached_config().as_ref()))
     }
 
     /// "Still there" (`true`) or "gone" (`false`) for a report from
@@ -828,6 +989,26 @@ impl TrafficNetworkClient {
         self.check_open()?;
         let config = self.corrections_config()?;
         let proposal = report_wrong_speed_limit(&*self.store, &*self.clock, &config, report)?;
+        Ok(ProposalView::from(&proposal))
+    }
+
+    /// "There is no speed limit on record for this road, it is X" — a value for a road the import has none for
+    /// (server 1.1.0). The position and the direction of the road name the place (`bearing_degrees`, any heading
+    /// along it; the last heading the host app gave is used when none is passed). Effective for this device at
+    /// once as its own unconfirmed proposal, sent signed on the next sync; at three distinct devices the server
+    /// makes it a stretch of road everybody gets. Fails with `roadAlreadyHasLimit` when a road with a limit is
+    /// stored right there running the same way (correct that segment instead).
+    pub fn report_missing_speed_limit(
+        &self,
+        report: &MissingSpeedLimitReport,
+    ) -> Result<ProposalView, ApiError> {
+        self.check_open()?;
+        let config = self.corrections_config()?;
+        let mut report = report.clone();
+        if report.bearing_degrees.is_none() {
+            report.bearing_degrees = self.state().last_heading;
+        }
+        let proposal = report_missing_speed_limit(&*self.store, &*self.clock, &config, &report)?;
         Ok(ProposalView::from(&proposal))
     }
 
@@ -894,12 +1075,16 @@ impl TrafficNetworkClient {
             self.region_resolution(),
             ring_for_speed(speed_kmh),
         );
-        let mut state = self.state();
-        let changed = state.tiles != tiles;
-        if changed {
-            state.tiles = tiles.clone();
-            state.sync_due = true;
-        }
+        let changed = {
+            let mut state = self.state();
+            let changed = state.tiles != tiles;
+            if changed {
+                state.tiles = tiles.clone();
+                state.sync_due = true;
+            }
+            changed
+        };
+        self.note_position(lat, lng);
         Ok(PositionUpdate { tiles, changed })
     }
 
@@ -978,13 +1163,26 @@ impl TrafficNetworkClient {
             ..SyncReport::default()
         };
 
-        if let Err(error) = self.engine.sync_static_data(&token).await {
-            let error = ApiError::from(error);
-            if error.code == code::STORAGE_FULL {
-                return Err(error);
+        let request = self.static_request(&token).await;
+        match self.engine.sync_static_data_for(&token, &request).await {
+            Ok(outcome) => {
+                report.offline_fetched_tiles = outcome.fetched_tiles;
+                if outcome.fetched_tiles > 0 {
+                    // a package that was not there before has not been used yet: note its first lookup at once
+                    self.state().last_use_noted_ms = 0;
+                }
+                report.offline_removed_tiles = outcome.removed_tiles;
+                report.offline_deferred_tiles = outcome.deferred.len();
+                report.needs_location = outcome.needs_location;
             }
-            report.ok = false;
-            report.static_data_error = Some(error.code);
+            Err(error) => {
+                let error = ApiError::from(error);
+                if error.code == code::STORAGE_FULL {
+                    return Err(error);
+                }
+                report.ok = false;
+                report.static_data_error = Some(error.code);
+            }
         }
         // The server rebuilt its packages (a change of the camera policy
         // always does): what the configuration says may be out of date, so it
@@ -995,7 +1193,8 @@ impl TrafficNetworkClient {
                 cached.fetched_at_ms = 0;
             }
             if self.ensure_config(&token).await.is_ok() {
-                let _ = self.engine.sync_static_data(&token).await;
+                let request = self.static_request(&token).await;
+                let _ = self.engine.sync_static_data_for(&token, &request).await;
             }
         }
         if let Err(error) = self.engine.sync_dynamic(&token, &tiles).await {
@@ -1021,7 +1220,9 @@ impl TrafficNetworkClient {
                 for outcome in outcomes {
                     match outcome {
                         FlushOutcome::Submitted { .. } => report.submitted += 1,
-                        FlushOutcome::Rejected { .. } => report.rejected += 1,
+                        FlushOutcome::Rejected { .. } | FlushOutcome::Ended { .. } => {
+                            report.rejected += 1
+                        }
                         FlushOutcome::Failed { .. } => {}
                     }
                 }
@@ -1313,29 +1514,99 @@ fn is_camera_type(hazard_type: HazardType) -> bool {
     )
 }
 
+/// `GET /v1/speed-limit` (`server/docs/api.md`) as a [`SpeedLimitAnswer`].
+fn online_answer(body: &serde_json::Value) -> Option<SpeedLimitAnswer> {
+    let value = body.get("speedLimit")?.as_f64()?;
+    let unit = body.get("speedLimitUnit")?.as_str()?.to_string();
+    let origin = if body.get("correctedBy").and_then(|v| v.as_str()) == Some("community") {
+        let correction = body.get("correction");
+        OriginView::CommunityCorrected {
+            confirmations: correction
+                .and_then(|c| c.get("confirmations"))
+                .and_then(|n| n.as_u64())
+                .and_then(|n| u32::try_from(n).ok())
+                .unwrap_or(0),
+            needs_review: correction
+                .and_then(|c| c.get("needsReview"))
+                .and_then(|b| b.as_bool())
+                .unwrap_or(false),
+        }
+    } else {
+        OriginView::Imported
+    };
+    Some(SpeedLimitAnswer {
+        value,
+        unit,
+        segment_id: body
+            .get("segmentId")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default()
+            .to_string(),
+        segment_key: body
+            .get("segmentKey")
+            .and_then(|v| v.as_str())
+            .map(str::to_string),
+        distance_meters: body
+            .get("distanceMeters")
+            .and_then(|v| v.as_f64())
+            .unwrap_or(0.0),
+        origin,
+        imported_value: body.get("importedSpeedLimit").and_then(|v| v.as_f64()),
+    })
+}
+
 /// A report still in the write buffer, as it would appear once delivered.
+///
+/// Its end is worked out at once, from what the reporter asked for (`expiresInSeconds`) or the server's default for
+/// the type, counted from when it was made — so it disappears when it should even if it never gets sent, and the
+/// server's own `expiresAt` replaces this one as soon as it has been delivered.
 fn pending_hazard(
-    id: &str,
-    body: &serde_json::Value,
+    write: &PendingWrite,
     lat: f64,
     lng: f64,
     radius_meters: f64,
+    now_unix_ms: i64,
+    config: Option<&ClientConfig>,
 ) -> Option<NearbyItem> {
-    let hazard_type = body.get("type")?.as_str()?.to_string();
+    let body = &write.request_body;
+    let hazard_type_name = body.get("type")?.as_str()?.to_string();
     let report_lat = body.get("lat")?.as_f64()?;
     let report_lng = body.get("lng")?.as_f64()?;
+
+    let requested_ms = body
+        .get("expiresInSeconds")
+        .and_then(|v| v.as_i64())
+        .map(|seconds| seconds * 1000);
+    let default_ms = config.and_then(|c| {
+        serde_json::from_value::<HazardType>(serde_json::Value::String(hazard_type_name.clone()))
+            .ok()
+            .and_then(|t| expiry_ms_for(t, c))
+    });
+    let expires_at_ms = requested_ms
+        .or(default_ms)
+        .map(|ttl| write.created_at_unix_ms + ttl);
+    if expires_at_ms.is_some_and(|end| end <= now_unix_ms) {
+        return None;
+    }
+
     let distance = haversine_distance_meters(lat, lng, report_lat, report_lng);
     (distance <= radius_meters).then(|| NearbyItem::Hazard {
-        id: id.to_string(),
-        hazard_type,
+        id: write.id.clone(),
+        hazard_type: hazard_type_name,
         lat: report_lat,
         lng: report_lng,
         distance_meters: distance,
-        expires_at: None,
+        expires_at: expires_at_ms.map(unix_ms_to_rfc3339_utc),
         confirm_count: 0,
         deny_count: 0,
         pending: true,
     })
+}
+
+fn unix_ms_to_rfc3339_utc(unix_ms: i64) -> String {
+    chrono::DateTime::from_timestamp_millis(unix_ms)
+        .map(|dt| dt.to_rfc3339_opts(chrono::SecondsFormat::Millis, true))
+        .unwrap_or_default()
 }
 
 /// The same event can reach a device through two servers with two different

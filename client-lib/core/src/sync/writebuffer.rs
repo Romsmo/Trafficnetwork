@@ -48,6 +48,9 @@ pub struct ReportSubmission {
     pub lat: f64,
     pub lng: f64,
     pub speed_kmh: Option<f64>,
+    /// How long the reporter wants the report to live, already checked against the server's bounds
+    /// ([`super::report_ttl::check_ttl`]). Left out of the request when `None`: the server's default applies.
+    pub ttl_seconds: Option<u32>,
 }
 
 /// Builds the plain (unsigned) `POST /v1/hazard-reports` body and enqueues
@@ -71,6 +74,9 @@ pub fn submit_report(
     });
     if let Some(speed_kmh) = submission.speed_kmh {
         body["speedKmh"] = serde_json::json!(speed_kmh);
+    }
+    if let Some(ttl_seconds) = submission.ttl_seconds {
+        body["expiresInSeconds"] = serde_json::json!(ttl_seconds);
     }
 
     let id = local_write_id(&body, now);
@@ -159,6 +165,9 @@ pub enum FlushOutcome {
     /// DUPLICATE_FEDERATION_EVENT` for a signed submission the server
     /// already had — either way, nothing left to retry.
     Submitted { local_id: String, merged: bool },
+    /// The duration the reporter asked for ran out while the report waited in the queue: there is nothing left
+    /// worth sending (a report is counted from when it is sent), so it was dropped.
+    Ended { local_id: String },
     /// A permanent rejection (any `4xx` other than `409`) — retrying the
     /// identical body would just fail again, so it's dropped rather than
     /// retried forever.
@@ -212,6 +221,24 @@ async fn flush_hazard_report(
     item: PendingWrite,
 ) -> Result<FlushOutcome, WriteBufferError> {
     let mut body = item.request_body.clone();
+    // The server counts the requested duration from the moment this is signed and sent, which may be long after the
+    // report was made (offline). Send what is left of it, so the report ends when its reporter meant it to.
+    if let Some(requested) = body.get("expiresInSeconds").and_then(|v| v.as_u64()) {
+        let requested = u32::try_from(requested).unwrap_or(u32::MAX);
+        match super::report_ttl::remaining_seconds(
+            requested,
+            item.created_at_unix_ms,
+            clock.now_unix_ms(),
+        ) {
+            Some(left) => body["expiresInSeconds"] = serde_json::json!(left),
+            None => {
+                store
+                    .remove_pending_write(&item.id)
+                    .map_err(WriteBufferError::Store)?;
+                return Ok(FlushOutcome::Ended { local_id: item.id });
+            }
+        }
+    }
     if let Some(key) = device_key {
         let assertion = build_device_assertion(&body, clock.now_unix_ms(), key)
             .map_err(|e| WriteBufferError::Signing(e.to_string()))?;
@@ -291,6 +318,9 @@ struct DeviceCreateEventPayload {
     lng: f64,
     #[serde(rename = "speedKmh", skip_serializing_if = "Option::is_none")]
     speed_kmh: Option<f64>,
+    /// Signed with the rest, so every node derives the same end (`server/docs/report-expiry.md`).
+    #[serde(rename = "expiresInSeconds", skip_serializing_if = "Option::is_none")]
+    expires_in_seconds: Option<u32>,
     #[serde(rename = "devicePublicKey")]
     device_public_key: String,
     timestamp: String,
@@ -312,6 +342,10 @@ fn build_device_assertion(
             .as_f64()
             .expect("submit_report always writes a numeric lng"),
         speed_kmh: body.get("speedKmh").and_then(|v| v.as_f64()),
+        expires_in_seconds: body
+            .get("expiresInSeconds")
+            .and_then(|v| v.as_u64())
+            .and_then(|v| u32::try_from(v).ok()),
         device_public_key: key.public_key_raw.clone(),
         timestamp: unix_ms_to_rfc3339(now_unix_ms),
     };
@@ -396,6 +430,7 @@ mod tests {
 
     fn submission() -> ReportSubmission {
         ReportSubmission {
+            ttl_seconds: None,
             hazard_type: HazardType::Ice,
             lat: 52.5,
             lng: 13.4,
@@ -413,6 +448,115 @@ mod tests {
         assert_eq!(pending.len(), 1);
         assert_eq!(pending[0].id, id);
         assert!(pending[0].request_body.get("deviceAssertion").is_none());
+    }
+
+    #[test]
+    fn a_requested_duration_is_queued_as_expires_in_seconds() {
+        let store = InMemoryStore::new();
+        let clock = FixedClock(AtomicI64::new(1000));
+        let mut with_ttl = submission();
+        with_ttl.ttl_seconds = Some(7_200);
+        submit_report(&store, &clock, &with_ttl).unwrap();
+        submit_report(&store, &clock, &submission()).unwrap();
+        let pending = store.pending_writes().unwrap();
+        let bodies: Vec<_> = pending
+            .iter()
+            .map(|p| p.request_body.get("expiresInSeconds").cloned())
+            .collect();
+        assert!(bodies.contains(&Some(serde_json::json!(7_200))));
+        assert!(
+            bodies.contains(&None),
+            "no duration asked for: the field is left out entirely"
+        );
+    }
+
+    #[tokio::test]
+    async fn the_signed_payload_carries_the_duration_and_only_what_is_left_of_it() {
+        let transport = Arc::new(MockTransport::new());
+        transport.set(
+            "https://a.example/v1/hazard-reports",
+            201,
+            serde_json::json!({ "report": {}, "merged": false }),
+        );
+        let discovery = discovery_with_one_server(transport.clone());
+        let store = InMemoryStore::new();
+        let created = FixedClock(AtomicI64::new(1_000_000));
+        let mut with_ttl = submission();
+        with_ttl.ttl_seconds = Some(7_200);
+        submit_report(&store, &created, &with_ttl).unwrap();
+
+        // sent 30 minutes later
+        let later = FixedClock(AtomicI64::new(1_000_000 + 30 * 60 * 1000));
+        let key = generate_ed25519_keypair().unwrap();
+        flush_pending(&store, &discovery, &later, "token", Some(&key))
+            .await
+            .unwrap();
+
+        let seen = transport.seen_bodies.lock().unwrap();
+        let sent: serde_json::Value = serde_json::from_slice(&seen[0]).unwrap();
+        assert_eq!(sent["expiresInSeconds"], 5_400);
+        // the request field and the signed one are the same, as the server insists
+        assert_eq!(
+            sent["deviceAssertion"]["payload"]["expiresInSeconds"],
+            5_400
+        );
+        let envelope: crate::crypto::SignedEnvelope<serde_json::Value> =
+            serde_json::from_value(sent["deviceAssertion"].clone()).unwrap();
+        assert!(crate::crypto::verify_signed_envelope(
+            &envelope,
+            &key.public_key_raw
+        ));
+    }
+
+    #[tokio::test]
+    async fn a_report_whose_duration_ran_out_while_queued_is_dropped_not_sent() {
+        let transport = Arc::new(MockTransport::new());
+        transport.set(
+            "https://a.example/v1/hazard-reports",
+            201,
+            serde_json::json!({ "report": {}, "merged": false }),
+        );
+        let discovery = discovery_with_one_server(transport.clone());
+        let store = InMemoryStore::new();
+        let created = FixedClock(AtomicI64::new(0));
+        let mut short = submission();
+        short.ttl_seconds = Some(600);
+        submit_report(&store, &created, &short).unwrap();
+
+        let much_later = FixedClock(AtomicI64::new(11 * 60 * 1000));
+        let outcomes = flush_pending(&store, &discovery, &much_later, "token", None)
+            .await
+            .unwrap();
+        assert!(matches!(outcomes.as_slice(), [FlushOutcome::Ended { .. }]));
+        assert!(store.pending_writes().unwrap().is_empty());
+        assert!(
+            transport.seen_bodies.lock().unwrap().is_empty(),
+            "nothing was sent"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_report_without_a_duration_is_sent_exactly_as_before() {
+        let transport = Arc::new(MockTransport::new());
+        transport.set(
+            "https://a.example/v1/hazard-reports",
+            201,
+            serde_json::json!({ "report": {}, "merged": false }),
+        );
+        let discovery = discovery_with_one_server(transport.clone());
+        let store = InMemoryStore::new();
+        let clock = FixedClock(AtomicI64::new(1000));
+        submit_report(&store, &clock, &submission()).unwrap();
+        let key = generate_ed25519_keypair().unwrap();
+        flush_pending(&store, &discovery, &clock, "token", Some(&key))
+            .await
+            .unwrap();
+        let seen = transport.seen_bodies.lock().unwrap();
+        let sent: serde_json::Value = serde_json::from_slice(&seen[0]).unwrap();
+        assert!(sent.get("expiresInSeconds").is_none());
+        assert!(sent["deviceAssertion"]["payload"]
+            .get("expiresInSeconds")
+            .is_none());
     }
 
     #[tokio::test]

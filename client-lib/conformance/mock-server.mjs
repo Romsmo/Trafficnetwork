@@ -23,6 +23,15 @@
 //   cameraData: { camera, zone }   put a camera and/or a zone near (52.0, 13.0) into the package
 //   peers: [url]              other servers listed in the directory
 //   nodeId: string
+//   reportExpiry: { <hazardType>: { defaultSeconds, minSeconds, maxSeconds } }
+//                             the server's `reportExpiry` in `GET /v1/config` (server 1.1.0)
+//   communityCorrections: true  offer speed-limit corrections and gap proposals (`communityCorrections.enabled`)
+//   secondTile: bool          a second static-data package, the H3 neighbour of the first (offline-area scenarios)
+//   noRegions: bool           the server predates `GET /v1/static-data/regions` (answers 404)
+//
+// Besides the data of the first package (a road at (52.0, 13.0) with 50 km/h) there is a second road at the
+// Berlin position (52.52, 13.405) with 30 km/h, and `GET /v1/speed-limit` answers 80 km/h for any position
+// south of 49° N (the "outside the offline area" lookup) and 404 elsewhere.
 //
 // Everything a real server would sign or verify is done with real Ed25519 and
 // RFC 8785 canonical JSON (node:crypto), independently of the Rust library.
@@ -86,6 +95,8 @@ const impostorKey = generateKey();
 // (52.52, 13.405) — the library works out which package held a camera from the
 // camera's position, so the package has to carry the id such a position gives.
 const PARTITION_TILE = "841f1d5ffffffff";
+// Its H3 neighbour — the second package some scenarios offer (`secondTile`).
+const SECOND_TILE = "841f1c3ffffffff";
 
 function buildPackage(config) {
   const data = config.cameraData ?? {};
@@ -102,6 +113,22 @@ function buildPackage(config) {
           ],
         },
         speedLimit: 50,
+        speedLimitUnit: "kmh",
+        source: "osm",
+        sourceLicense: "ODbL",
+        importedAt: "2027-01-01T00:00:00Z",
+        lastConfirmedAt: null,
+      },
+      {
+        id: "seg-berlin",
+        geometry: {
+          type: "LineString",
+          coordinates: [
+            [13.4, 52.52],
+            [13.41, 52.52],
+          ],
+        },
+        speedLimit: 30,
         speedLimitUnit: "kmh",
         source: "osm",
         sourceLicense: "ODbL",
@@ -161,6 +188,64 @@ function buildPackage(config) {
   }
   const text = JSON.stringify(pkg);
   return { text, hash: crypto.createHash("sha256").update(text).digest("hex") };
+}
+
+/** The second package: one road of its own, nothing else. */
+function buildSecondPackage() {
+  const pkg = {
+    tile: SECOND_TILE,
+    speedLimitSegments: [
+      {
+        id: "seg-second",
+        geometry: {
+          type: "LineString",
+          coordinates: [
+            [13.0, 52.9],
+            [13.01, 52.9],
+          ],
+        },
+        speedLimit: 70,
+        speedLimitUnit: "kmh",
+        source: "osm",
+        sourceLicense: "ODbL",
+        importedAt: "2027-01-01T00:00:00Z",
+        lastConfirmedAt: null,
+      },
+    ],
+    staticSigns: [],
+    fixedSpeedCameras: [],
+  };
+  const text = JSON.stringify(pkg);
+  return { text, hash: crypto.createHash("sha256").update(text).digest("hex") };
+}
+
+const SECOND = buildSecondPackage();
+
+/** What the server's manifest lists for this instance. */
+function partitionList(instance) {
+  const list = [
+    { tile: PARTITION_TILE, hash: instance.packageHash, sizeBytes: Buffer.byteLength(instance.packageText) },
+  ];
+  if (instance.config.secondTile) {
+    list.push({ tile: SECOND_TILE, hash: SECOND.hash, sizeBytes: Buffer.byteLength(SECOND.text) });
+  }
+  return list;
+}
+
+/** `GET /v1/static-data/regions`: one region per package, all in Germany. */
+function regionList(instance) {
+  const regions = partitionList(instance).map((p, index) => ({
+    id: index === 0 ? "DE-berlin" : "DE-north",
+    country: "DE",
+    tileCount: 1,
+    sizeBytes: p.sizeBytes,
+    gzipBytes: Math.round(p.sizeBytes * 0.4),
+    brotliBytes: Math.round(p.sizeBytes * 0.3),
+    complete: true,
+    bbox: [12.9, 52.4, 13.6, 52.9],
+    tiles: [p.tile],
+  }));
+  return { staticDataVersion: instance.staticVersion, regions };
 }
 
 function createInstance(config) {
@@ -249,6 +334,18 @@ function clientConfig(instance) {
     staticDataVersion: instance.staticVersion,
     federationEnabled: false,
     networkConfig,
+    ...(instance.config.reportExpiry ? { reportExpiry: instance.config.reportExpiry } : {}),
+    ...(instance.config.communityCorrections
+      ? {
+          communityCorrections: {
+            enabled: true,
+            confirmationsRequired: 3,
+            valueRange: { kmh: { min: 5, max: 130 }, mph: { min: 5, max: 85 } },
+            valueStep: 5,
+            rateLimit: { max: 10, windowMinutes: 60 },
+          },
+        }
+      : {}),
     cameraPolicy: policy
       ? {
           version: policy.version ?? "mock-policy",
@@ -384,12 +481,33 @@ function handleInstance(instance, req, res, path, query, body) {
         staticDataVersion: instance.staticVersion,
         generatedAt: "2027-01-01T00:00:00.000Z",
         partitionResolution: 4,
-        partitions: [
-          { tile: PARTITION_TILE, hash: instance.packageHash, sizeBytes: Buffer.byteLength(instance.packageText) },
-        ],
+        partitions: partitionList(instance),
       });
+    case "GET /v1/static-data/regions":
+      if (instance.config.noRegions) {
+        return json(res, 404, { error: { code: "NOT_FOUND", message: key } });
+      }
+      return json(res, 200, regionList(instance));
     case `GET /v1/static-data/partitions/${PARTITION_TILE}`:
       return json(res, 200, instance.packageText);
+    case `GET /v1/static-data/partitions/${SECOND_TILE}`:
+      return instance.config.secondTile
+        ? json(res, 200, SECOND.text)
+        : json(res, 404, { error: { code: "NOT_FOUND", message: key } });
+    case "GET /v1/speed-limit": {
+      const lat = Number(query.get("lat"));
+      if (Number.isFinite(lat) && lat < 49) {
+        return json(res, 200, {
+          speedLimit: 80,
+          speedLimitUnit: "kmh",
+          segmentId: "online-seg",
+          distanceMeters: 4,
+        });
+      }
+      return json(res, 404, { error: { code: "NOT_FOUND", message: "no speed limit here" } });
+    }
+    case "POST /v1/speed-limit-gaps":
+      return json(res, 201, { correction: { id: "gap-1", state: "open", confirmations: 1 } });
     case "GET /v1/snapshot":
       return json(res, 200, {
         snapshotSequence: instance.sequence,

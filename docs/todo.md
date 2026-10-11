@@ -32,7 +32,7 @@ Ausgeliefert ist: Kategorien freigeschaltet, Standard `full` in jedem Land, Filt
 - [ ] NVDB Schweden nur, wenn ein Lastkajen-Zugang samt Beispieldatei vorliegt
 - [ ] Entscheiden, ob „alles auf jedem Gerät" für Europa so bleibt (Messung in `client-lib/docs/bootstrap-measurements.md` und `server/docs/europe-scale.md`)
 - [ ] Entscheiden: Mapillary/KartaView einbinden? (nur nach belegter Lizenzprüfung, wäre standardmäßig aus)
-- [ ] Baustellen-Dauerbetrieb einrichten: der Import ist gebaut, läuft aber nicht als wiederkehrender Lauf (`ingestion/docs/roadworks.md`; Frankreich an, Niederlande/Deutschland aus)
+- [ ] Baustellen: bewusst **kein** Dauerbetrieb (Betriebsentscheidung Oktober 2026: einmal importieren, Wiederholung manuell mit `npm run roadworks:update`, `ingestion/docs/roadworks.md`). Baustellen ohne erneuten Lauf laufen zum Enddatum bzw. zur Obergrenze (ohne Enddatum 168 h, mit Enddatum höchstens `SEED_REPORT_MAX_END_DAYS`) ab. Der produktive erste Lauf liegt beim Betreiber; Deutschland (`de-autobahn`) bleibt aus, bis Bedingungen vorliegen
 
 ## 4. Entwicklung — bewusst zurückgestellt oder nie zugesagt
 
@@ -43,9 +43,9 @@ Server und Weboberfläche:
 - [ ] Weboberfläche: Startansicht Europa, nur den sichtbaren Ausschnitt laden, Cluster bei kleiner Zoomstufe
 - [ ] Weboberfläche: Quellen-Attribution aus `ingestion/docs/attribution.md` anzeigen (braucht `source_feed` in der Hazard-API)
 - [ ] Weboberfläche: in sehr großen Ausschnitten (Hinweis „Ausschnitt sehr groß") kommen neue Meldungen erst mit dem Minutentakt statt live, weil die Push-Abos begrenzt sind (`WEB_WS_MAX_TILES_PER_CONNECTION`) — in `server/docs/web-ui.md` vermerkt, nicht behoben
-- [ ] Eigene Ablaufzeit: Anbindung in der Client-Bibliothek (`ttlSeconds`, `getReportLimits`) und in der Weboberfläche (Auswahl der Dauer) — Server ab 1.1.0 fertig, Client 1.2.0 und Web folgen (Blöcke 4 und 5 des Oktober-Auftrags)
+- [ ] Eigene Ablaufzeit: Anbindung in der Weboberfläche (Auswahl der Dauer) — Server ab 1.1.0 und Client-Bibliothek 1.2.0 (`ttlSeconds`, `getReportLimits`) fertig, Web folgt (Block 5 des Oktober-Auftrags)
 - [ ] Eigene Ablaufzeit: ob Geräte mit geringer Reputation nur bis zum Standard dürfen — bewusst nicht gebaut (Reputation ist knotenlokal, ein Tor würde Knoten auseinanderlaufen lassen); nach echten Daten neu bewerten
-- [ ] Tempolimit nachreichen (D13): Vorschläge über Zellgrenzen hinweg zusammenführen; Straßen länger als 120 m brauchen je Stück drei Geräte; Anbindung Client-Bibliothek (`reportMissingSpeedLimit`) und Weboberfläche — Server ab 1.1.0 fertig, Client 1.2.0 und Web folgen (Blöcke 4 und 5)
+- [ ] Tempolimit nachreichen (D13): Vorschläge über Zellgrenzen hinweg zusammenführen; Straßen länger als 120 m brauchen je Stück drei Geräte; Anbindung Weboberfläche — Server ab 1.1.0 und Client-Bibliothek 1.2.0 (`reportMissingSpeedLimit`, `lookupSpeedLimit`) fertig, Web folgt (Block 5)
 - [ ] Tempolimit-Korrekturen: temporäre Korrekturen (Baustelle) automatisch auslaufen lassen; `deviceAssertion` bei Meldungen an den gebundenen Schlüssel knüpfen; Stimmen nach Ruf des weiterleitenden Knotens gewichten
 - [ ] Dauerhafte Anlagen: Abschnittskontrolle (`enforcement=average_speed`) — erst entscheiden, dann bauen; ob Nutzer eine Meldung „dauerhaft" machen können (Schwelle) oder Nutzermeldungen immer verfallen; die acht Standardwerte aus `server/docs/persistent-enforcement-devices.md` §10 bestätigen oder ändern
 - [ ] Blitzer nach Land: `GET /v1/config` nennt `staticDataVersion` sofort, das Manifest aber erst nach dem Neubau der Pakete — bei einem Knoten ohne statische Daten bewegt sich die Manifest-Version bei einem Politikwechsel nie (die Bibliothek fragt deshalb zusätzlich in kurzem Takt)

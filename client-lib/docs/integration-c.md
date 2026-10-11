@@ -91,6 +91,23 @@ tn_client_free(client);                        /* the data stays on disk */
   may be called from any thread. Without one, secrets live in a file
   (`secure-store.json`, mode 0600 on Unix) in `storagePath`.
 
+## Offline area and report duration (1.2.0)
+
+From 1.2.0 the device chooses what it keeps of the static data (`offline-storage.md`): by default the surroundings of the
+position you give with `updatePosition`, a home, and places driven through lately — **a client that never gives a position
+stores nothing**. Pick regions or everything explicitly if that is what the app wants:
+
+```c
+char *r = tn_client_call(client, "setOfflineRegions", "{\"mode\":\"all\"}");
+tn_free_string(r);
+r = tn_client_call(client, "setStorageLimits", "{\"maxBytes\":314572800,\"wifiOnly\":true}");
+tn_free_string(r);
+```
+
+Also new: `getReportLimits(type)` and an optional duration on `submitReport` (`api.md`, "Writes"),
+`reportMissingSpeedLimit` for a road with no limit on record, and `lookupSpeedLimit`, which says *outside the offline area*
+instead of "no limit" where nothing could be looked at.
+
 ## How it behaves
 
 - **TLS** trusts the Mozilla root certificates bundled in the library, not the
