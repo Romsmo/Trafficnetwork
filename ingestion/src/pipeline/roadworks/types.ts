@@ -17,6 +17,8 @@ export interface Validity {
   start?: Date;
   end?: Date;
   windows?: TimeWindow[];
+  /** Concrete times in which the roadwork is NOT in force although `start`/`end` say so (DATEX II `exceptionPeriod`). Honoured only for "now"; see selectActive. */
+  exceptions?: TimeWindow[];
   /** The source describes the times in a form this reader does not evaluate (e.g. recurring daily periods). Such a record is skipped, never guessed. */
   unevaluated?: string;
 }

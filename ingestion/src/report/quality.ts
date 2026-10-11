@@ -45,6 +45,20 @@ async function readJson<T>(file: string): Promise<T | undefined> {
   }
 }
 
+/** Reasons that are timing, not data quality: the roadwork exists and is usable, it is only not in force at this pass. */
+const NOT_IN_FORCE_NOW = new Set(["starts later", "already ended", "no validity window is running now", "all validity windows are over", "an exception period (works paused) is running now"]);
+
+/** Splits the per-reason counts of a roadworks pass into what an operator wants to read: other record types / not in force now / not usable. */
+export function groupRoadworksReasons(reasons: Record<string, number>): { otherRecordTypes: number; notInForceNow: number; notUsable: number } {
+  const groups = { otherRecordTypes: 0, notInForceNow: 0, notUsable: 0 };
+  for (const [reason, count] of Object.entries(reasons)) {
+    if (/^record type .* is not roadworks$/.test(reason)) groups.otherRecordTypes += count;
+    else if (NOT_IN_FORCE_NOW.has(reason)) groups.notInForceNow += count;
+    else groups.notUsable += count;
+  }
+  return groups;
+}
+
 async function roadworksQuality(stateDir: string): Promise<SourceQuality[]> {
   const dir = path.join(stateDir, "roadworks");
   if (!existsSync(dir)) return [];
@@ -53,7 +67,17 @@ async function roadworksQuality(stateDir: string): Promise<SourceQuality[]> {
     const report = await readJson<FeedReport>(path.join(dir, name));
     if (!report) continue;
     const notes: string[] = [];
-    if (report.server) notes.push(`server: ${report.server.created} created, ${report.server.reactivated} reactivated, ${report.server.updated} changed, ${report.server.refreshed} unchanged, ${report.server.skippedEnded} already ended`);
+    if (report.status !== "skipped-too-soon" && report.status !== "failed") {
+      const g = groupRoadworksReasons(report.notImported);
+      notes.push(
+        `of ${report.fetched} records in the document: ${report.sent} ${report.status === "dry-run" ? "would be sent" : "sent"}, ${report.mergedIntoOtherFeed} merged into another feed, ${g.otherRecordTypes} are not roadworks (accompanying measures, events, faults), ${g.notInForceNow} roadworks not in force at this pass, ${g.notUsable} roadworks not usable (no position, times unreadable or not evaluated)`,
+      );
+    }
+    if (report.server) {
+      notes.push(
+        `server: ${report.server.created} created, ${report.server.reactivated} reactivated, ${report.server.updated} changed, ${report.server.refreshed} unchanged, ${report.server.skippedEnded} already ended${report.server.endCapped !== undefined ? `, ${report.server.endCapped} with an end date held to the server's cap` : ""}`,
+      );
+    }
     if (report.retired !== undefined) notes.push(`${report.retired} roadworks no longer in the feed were ended on the server`);
     if (report.retireSkippedBecause) notes.push(`nothing ended on the server this pass: ${report.retireSkippedBecause}`);
     for (const [caveat, count] of Object.entries(report.sentWithCaveat)) notes.push(`${count} sent with a timing detail not evaluated (${caveat})`);

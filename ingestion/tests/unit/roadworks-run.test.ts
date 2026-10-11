@@ -246,3 +246,40 @@ describe("runRoadworks — the same roadwork in two feeds", () => {
     expect(poster.posts.map((p) => [p.feedId, p.reports.length])).toEqual([["operator", 1]]);
   });
 });
+
+describe("runRoadworks — idempotence and the server's end-date cap", () => {
+  it("a second pass over the same feed sends exactly the same rows (same ids, same ends), so the server has nothing new to do", async () => {
+    const end = new Date("2026-10-20T00:00:00Z");
+    const doc = result([candidate("a", 50, 10, { start: hoursAgo(48), end }), candidate("b", 51, 10, { start: hoursAgo(24), end: new Date("2026-11-01T06:00:00Z") }), candidate("c", 52, 10)]);
+    await run([feed("a", { ttlHours: 168 })], { a: doc });
+    clock = new Date(T0.getTime() + 2 * 3_600_000); // past minIntervalMinutes
+    await run([feed("a", { ttlHours: 168 })], { a: doc });
+    expect(poster.posts).toHaveLength(2);
+    expect(poster.posts[1]!.reports).toEqual(poster.posts[0]!.reports);
+    expect(poster.posts[0]!.reports).toEqual([
+      { externalId: "a", type: "construction", lat: 50, lng: 10, endsAt: "2026-10-20T00:00:00.000Z" },
+      { externalId: "b", type: "construction", lat: 51, lng: 10, endsAt: "2026-11-01T06:00:00.000Z" },
+      { externalId: "c", type: "construction", lat: 52, lng: 10, ttlHours: 168 },
+    ]);
+    expect(poster.posts[1]!.runId).not.toBe(poster.posts[0]!.runId); // a new run each time; the rows are what stay stable
+  });
+
+  it("passes a source end date on untouched, however far away — capping is the server's job (a client-side cap would move the end on every pass)", async () => {
+    await run([feed("a")], { a: result([candidate("placeholder", 50, 10, { start: hoursAgo(1), end: new Date("2099-12-31T23:59:00Z") })]) });
+    expect(poster.posts[0]!.reports[0]).toMatchObject({ externalId: "placeholder", endsAt: "2099-12-31T23:59:00.000Z" });
+  });
+
+  it("adds up the server's endCapped count over the batches of a pass (servers before 1.1.0 do not send it)", async () => {
+    poster.postSeedReports = async (request) => {
+      poster.posts.push(request);
+      return { created: request.reports.length, reactivated: 0, updated: 0, refreshed: 0, skippedEnded: 0, duplicatesInRequest: 0, endCapped: 1 };
+    };
+    const [report] = await run([feed("a")], { a: result([candidate("r1", 50, 10), candidate("r2", 51, 10), candidate("r3", 52, 10)]) }, { batchSize: 2 });
+    expect(report!.server).toMatchObject({ created: 3, endCapped: 2 });
+
+    const old = new FakePoster();
+    poster = old;
+    const [oldReport] = await run([feed("b")], { b: result([candidate("r1", 50, 10)]) });
+    expect(oldReport!.server!.endCapped).toBeUndefined();
+  });
+});

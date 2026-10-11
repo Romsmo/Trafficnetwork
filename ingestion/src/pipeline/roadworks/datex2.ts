@@ -36,7 +36,15 @@ interface Coordinate {
   lat?: number;
   lng?: number;
   underFrom: boolean;
+  /** `locationForDisplay`: the publisher's own "show it here" point. Used only when the record has no coordinate of its own. */
+  forDisplay?: boolean;
   unsupportedAxis?: string;
+}
+
+interface PeriodState {
+  start?: string;
+  end?: string;
+  name?: string;
 }
 
 interface RecordState {
@@ -45,7 +53,10 @@ interface RecordState {
   validityStatus?: string;
   overallStart?: string;
   overallEnd?: string;
-  periods: { start?: string; end?: string; name?: string }[];
+  /** `validPeriod`s: when the record IS in force. */
+  periods: PeriodState[];
+  /** `exceptionPeriod`s: when the record is NOT in force although the overall interval says so. */
+  exceptions: PeriodState[];
   recurring: boolean;
   coordinates: Coordinate[];
   comments: { type?: string; text: string }[];
@@ -53,6 +64,14 @@ interface RecordState {
 
 function parentChain(path: string[], ancestor: string): boolean {
   return path.includes(ancestor);
+}
+
+/** The period element the reader is currently inside (the innermost of `exceptionPeriod` / `validPeriod`), or undefined when it is inside neither. */
+function currentPeriod(record: RecordState, path: string[]): PeriodState | undefined {
+  const exception = path.lastIndexOf("exceptionPeriod");
+  const valid = path.lastIndexOf("validPeriod");
+  if (exception < 0 && valid < 0) return undefined;
+  return exception > valid ? record.exceptions[record.exceptions.length - 1] : record.periods[record.periods.length - 1];
 }
 
 export async function parseDatex2(source: AsyncIterable<string | Uint8Array>): Promise<ParseResult> {
@@ -84,12 +103,12 @@ export async function parseDatex2(source: AsyncIterable<string | Uint8Array>): P
     if ((r.overallStart && !start) || (r.overallEnd && !end)) return skip(r.id, "validity time without a zone offset (not guessed)");
 
     const windows: TimeWindow[] = [];
-    let caveat: string | undefined;
+    const caveats = new Set<string>();
     for (const period of r.periods) {
       if (!period.start && !period.end) {
         // Real data (French feed: all 120 validPeriods) has periods that only carry a name such as "Uniquement de jour": a qualifier of the
         // overall interval, not a time window. The overall interval stays authoritative; the qualifier is reported, not evaluated.
-        caveat ??= `period qualifier not evaluated: ${period.name ?? "unnamed"}`;
+        caveats.add(`period qualifier not evaluated: ${period.name ?? "unnamed"}`);
         continue;
       }
       const ps = parseIsoWithOffset(period.start);
@@ -98,15 +117,31 @@ export async function parseDatex2(source: AsyncIterable<string | Uint8Array>): P
       windows.push({ start: ps, end: pe });
     }
 
+    // Exception periods (French feed, 58 of them on 2026-10-11: "week-end et jours fériés" or a concrete start/end) are the times the works are
+    // NOT in force although the overall interval says so. A concrete one is honoured when it runs at import time (selectActive); a named one,
+    // and every concrete one still ahead, is reported as a caveat — never turned into a window of validity, which they are the opposite of.
+    const exceptions: TimeWindow[] = [];
+    for (const exception of r.exceptions) {
+      const es = parseIsoWithOffset(exception.start);
+      const ee = parseIsoWithOffset(exception.end);
+      if (es && ee && ee.getTime() > es.getTime()) {
+        exceptions.push({ start: es, end: ee });
+        caveats.add("exception period ahead not applied to the end date");
+      } else {
+        caveats.add(`exception period not evaluated: ${exception.name ?? "unnamed"}`);
+      }
+    }
+    const caveat = caveats.size > 0 ? [...caveats].sort().join("; ") : undefined;
+
     const usable = r.coordinates.filter((c) => c.lat !== undefined && c.lng !== undefined);
-    const point = usable.find((c) => c.underFrom) ?? usable[0];
+    const point = usable.find((c) => c.underFrom) ?? usable.find((c) => !c.forDisplay) ?? usable[0];
     if (!point) {
       const unsupported = r.coordinates.find((c) => c.unsupportedAxis)?.unsupportedAxis;
       return skip(r.id, unsupported ? `unsupported coordinate system ${unsupported}` : "no coordinates");
     }
     if (!Number.isFinite(point.lat) || !Number.isFinite(point.lng) || Math.abs(point.lat!) > 90 || Math.abs(point.lng!) > 180) return skip(r.id, "coordinates out of range");
 
-    const validity: Validity = { start, end, ...(windows.length > 0 ? { windows } : {}) };
+    const validity: Validity = { start, end, ...(windows.length > 0 ? { windows } : {}), ...(exceptions.length > 0 ? { exceptions } : {}) };
     const description = r.comments.find((c) => c.type === "description")?.text ?? r.comments[0]?.text;
     candidates.push({ externalId: r.id, lat: point.lat!, lng: point.lng!, validity, description, ...(caveat ? { caveat } : {}) });
   };
@@ -122,11 +157,13 @@ export async function parseDatex2(source: AsyncIterable<string | Uint8Array>): P
       const attrs = Object.values(tag.attributes);
       const xsiType = attrs.find((a) => a.local === "type" && a.uri === "http://www.w3.org/2001/XMLSchema-instance")?.value ?? "";
       const id = attrs.find((a) => a.local === "id" && a.uri === "")?.value ?? "";
-      record = { id, type: xsiType.includes(":") ? xsiType.slice(xsiType.indexOf(":") + 1) : xsiType, periods: [], recurring: false, coordinates: [], comments: [] };
+      record = { id, type: xsiType.includes(":") ? xsiType.slice(xsiType.indexOf(":") + 1) : xsiType, periods: [], exceptions: [], recurring: false, coordinates: [], comments: [] };
     } else if (record) {
       if (tag.local === "validPeriod") record.periods.push({});
+      else if (tag.local === "exceptionPeriod") record.exceptions.push({});
       else if (tag.local === "recurringTimePeriodOfDay" || tag.local === "recurringDayWeekMonthPeriod") record.recurring = true;
       else if (tag.local === "pointCoordinates") record.coordinates.push({ underFrom: path.includes("from") });
+      else if (tag.local === "locationForDisplay") record.coordinates.push({ underFrom: false, forDisplay: true });
       else if (tag.local === "generalPublicComment") currentComment = { text: "" };
       else if (tag.local === "gmlLineString" || tag.local === "posList") {
         const name = Object.values(tag.attributes).find((a) => a.local === "srsName")?.value;
@@ -148,12 +185,17 @@ export async function parseDatex2(source: AsyncIterable<string | Uint8Array>): P
       if (name === "validityStatus") record.validityStatus = value;
       else if (name === "overallStartTime") record.overallStart = value;
       else if (name === "overallEndTime") record.overallEnd = value;
-      else if (name === "startOfPeriod") record.periods[record.periods.length - 1]!.start = value;
-      else if (name === "endOfPeriod") record.periods[record.periods.length - 1]!.end = value;
-      else if (name === "value" && parentChain(path, "periodName") && record.periods.length > 0) record.periods[record.periods.length - 1]!.name ??= value;
-      else if (name === "latitude" && parent === "pointCoordinates") record.coordinates[record.coordinates.length - 1]!.lat = Number(value);
-      else if (name === "longitude" && parent === "pointCoordinates") record.coordinates[record.coordinates.length - 1]!.lng = Number(value);
-      else if (name === "posList") {
+      else if (name === "startOfPeriod" || name === "endOfPeriod") {
+        // `startOfPeriod` is used by `validPeriod` AND `exceptionPeriod`; which one it belongs to decides whether it opens a window or a gap.
+        const period = currentPeriod(record, path);
+        if (period) period[name === "startOfPeriod" ? "start" : "end"] = value;
+      } else if (name === "value" && parentChain(path, "periodName")) {
+        const period = currentPeriod(record, path);
+        if (period) period.name ??= value;
+      } else if ((name === "latitude" || name === "longitude") && (parent === "pointCoordinates" || parent === "locationForDisplay")) {
+        const coordinate = record.coordinates[record.coordinates.length - 1];
+        if (coordinate) coordinate[name === "latitude" ? "lat" : "lng"] = Number(value);
+      } else if (name === "posList") {
         const [first, second] = value.split(/\s+/).map(Number);
         const axis = axisOf(srsName);
         if (axis === "unsupported") record.coordinates.push({ underFrom: path.includes("from"), unsupportedAxis: srsName });
@@ -164,8 +206,15 @@ export async function parseDatex2(source: AsyncIterable<string | Uint8Array>): P
         record.comments.push(currentComment);
         currentComment = undefined;
       } else if (name === "situationRecord") {
-        finish(record);
+        // One record the reader cannot make sense of must cost that record, never the whole feed (a throw here used to fail the French feed
+        // on 2026-10-11 because of an `exceptionPeriod`).
+        const finished = record;
         record = undefined;
+        try {
+          finish(finished);
+        } catch (err) {
+          skip(finished.id, `record could not be evaluated: ${err instanceof Error ? err.message : String(err)}`);
+        }
       }
     } else if (name === "publicationTime" && path[path.length - 2] === "payloadPublication") {
       const parsed = parseIsoWithOffset(value);

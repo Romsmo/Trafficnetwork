@@ -174,9 +174,11 @@ export async function runRoadworks(options: RoadworksRunOptions): Promise<FeedRe
     try {
       const runId = randomUUID();
       const totals: SeedReportsResponse = { created: 0, reactivated: 0, updated: 0, refreshed: 0, skippedEnded: 0, duplicatesInRequest: 0 };
+      const COUNTERS = ["created", "reactivated", "updated", "refreshed", "skippedEnded", "duplicatesInRequest"] as const;
       for (let i = 0; i < rows.length; i += batchSize) {
         const response = await apiClient.postSeedReports({ feedId: feed.id, runId, sourceLicense: feed.sourceLicense, reports: rows.slice(i, i + batchSize) });
-        for (const key of Object.keys(totals) as (keyof SeedReportsResponse)[]) totals[key] += response[key];
+        for (const key of COUNTERS) totals[key] += response[key];
+        if (typeof response.endCapped === "number") totals.endCapped = (totals.endCapped ?? 0) + response.endCapped;
         report.sent += Math.min(batchSize, rows.length - i);
       }
       report.server = totals;
