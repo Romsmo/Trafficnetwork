@@ -54,6 +54,17 @@ pub enum CorrectionError {
     /// The proposed value is the imported one. To dispute an existing
     /// correction, confirm it with `agrees: false` instead.
     NoChange,
+    /// A road with a limit on record runs here in this direction: the road is not missing, correct that
+    /// segment instead (`reportWrongSpeedLimit` with this id).
+    RoadAlreadyHasLimit {
+        segment_id: String,
+        speed_limit: f64,
+    },
+    /// "No limit here" needs the direction of the road (a heading along it, either way) to place the
+    /// stretch it is about; none was given and none is known.
+    BearingRequired,
+    /// The position is not a position.
+    InvalidPosition,
     Store(String),
 }
 
@@ -81,6 +92,18 @@ impl std::fmt::Display for CorrectionError {
                 write!(f, "value must be a multiple of {step}")
             }
             CorrectionError::NoChange => write!(f, "the value equals the imported one"),
+            CorrectionError::RoadAlreadyHasLimit {
+                segment_id,
+                speed_limit,
+            } => write!(
+                f,
+                "a road with a limit of {speed_limit} is on record here (segment {segment_id}); correct that segment instead"
+            ),
+            CorrectionError::BearingRequired => write!(
+                f,
+                "the direction of the road is needed: give a bearing, or a position update with a heading first"
+            ),
+            CorrectionError::InvalidPosition => write!(f, "the position is not valid"),
             CorrectionError::Store(msg) => write!(f, "storage error: {msg}"),
         }
     }
@@ -278,6 +301,134 @@ pub fn report_wrong_speed_limit(
         reason: report.reason,
         state: ProposalState::Queued,
         correction_id: Some(proposal_id),
+        confirmations: 0,
+        proposed_at_unix_ms: now,
+    };
+    store
+        .upsert_local_proposal(&proposal)
+        .map_err(store_error)?;
+    Ok(proposal)
+}
+
+/// "There is no speed limit on record for this road" (server 1.1.0, D13): a value for a road the import has
+/// none for, named by position and direction.
+#[derive(Debug, Clone, PartialEq)]
+pub struct MissingSpeedLimitReport {
+    pub lat: f64,
+    pub lng: f64,
+    /// A heading along the road, either direction of travel (0..360).
+    pub bearing_degrees: Option<f64>,
+    pub value: u32,
+    pub unit: SpeedLimitUnit,
+    pub reason: Option<CorrectionReason>,
+}
+
+/// The same range/step rules as for a correction, without a segment to compare with.
+fn validate_range_and_step(
+    rules: &CommunityCorrectionsConfig,
+    value: u32,
+    unit: SpeedLimitUnit,
+) -> Result<(), CorrectionError> {
+    let range = match unit {
+        SpeedLimitUnit::Kmh => rules.value_range.kmh,
+        SpeedLimitUnit::Mph => rules.value_range.mph,
+    };
+    if !(range.min..=range.max).contains(&value) {
+        return Err(CorrectionError::ValueOutOfRange {
+            min: range.min,
+            max: range.max,
+        });
+    }
+    if rules.value_step > 0 && !value.is_multiple_of(rules.value_step) {
+        return Err(CorrectionError::ValueNotOnStep {
+            step: rules.value_step,
+        });
+    }
+    Ok(())
+}
+
+/// Queues "no speed limit is recorded here, it is X" and records it as this device's own
+/// [`LocalCorrectionProposal`] — shown for this place at once (as the device's own, unconfirmed), sent on the next
+/// sync with the device signature. A device supports one value per place: a newer report for the same cell and
+/// direction replaces a still-queued older one.
+///
+/// Refused locally, before anything is queued, when the stored data already has a road with a limit there
+/// running the same way (the server would refuse it too, and the host should correct that segment).
+pub fn report_missing_speed_limit(
+    store: &dyn Store,
+    clock: &dyn Clock,
+    config: &ClientConfig,
+    report: &MissingSpeedLimitReport,
+) -> Result<LocalCorrectionProposal, CorrectionError> {
+    let rules = config
+        .community_corrections
+        .filter(|c| c.enabled)
+        .ok_or(CorrectionError::NotOffered)?;
+    let bearing = report
+        .bearing_degrees
+        .ok_or(CorrectionError::BearingRequired)?;
+    let place = super::gaps::place_of(report.lat, report.lng, bearing)
+        .ok_or(CorrectionError::InvalidPosition)?;
+    validate_range_and_step(&rules, report.value, report.unit)?;
+
+    let nearby = store
+        .speed_limit_segments_near(
+            report.lat,
+            report.lng,
+            super::gaps::ROAD_ALREADY_THERE_RADIUS_METERS * 2.0,
+        )
+        .map_err(store_error)?;
+    if let Some(road) =
+        super::gaps::road_already_there(&nearby, report.lat, report.lng, place.axis_degrees())
+    {
+        return Err(CorrectionError::RoadAlreadyHasLimit {
+            segment_id: road.id,
+            speed_limit: road.speed_limit,
+        });
+    }
+
+    let reference = place.reference();
+    let now = clock.now_unix_ms();
+    let mut body = serde_json::json!({
+        "lat": report.lat,
+        "lng": report.lng,
+        "bearingDegrees": bearing,
+        "value": report.value,
+        "unit": report.unit,
+    });
+    if let Some(reason) = report.reason {
+        body["reason"] = serde_json::json!(reason);
+    }
+
+    drop_queued_writes(
+        store,
+        |kind| matches!(kind, WriteKind::SpeedLimitGap { gap_ref } if gap_ref == &reference),
+    )?;
+
+    let id = local_write_id(
+        &serde_json::json!({ "gap": reference, "request": body }),
+        now,
+    );
+    store
+        .enqueue_write(&PendingWrite {
+            id,
+            request_body: body,
+            created_at_unix_ms: now,
+            attempts: 0,
+            kind: WriteKind::SpeedLimitGap {
+                gap_ref: reference.clone(),
+            },
+        })
+        .map_err(store_error)?;
+
+    let proposal = LocalCorrectionProposal {
+        segment_key: reference,
+        segment_id: String::new(),
+        value: report.value,
+        unit: report.unit,
+        reason: report.reason,
+        state: ProposalState::Queued,
+        correction_id: None,
         confirmations: 0,
         proposed_at_unix_ms: now,
     };
@@ -559,6 +710,21 @@ fn vote_payload(
             let vote = if *agrees { "support" } else { "deny" };
             (vote, segment_key.clone(), *value, *unit, None)
         }
+        WriteKind::SpeedLimitGap { gap_ref } => {
+            let unit_json = item.request_body.get("unit")?.clone();
+            let unit = serde_json::from_value::<SpeedLimitUnit>(unit_json).ok()?;
+            let reason = item
+                .request_body
+                .get("reason")
+                .and_then(|r| serde_json::from_value::<CorrectionReason>(r.clone()).ok());
+            (
+                "support",
+                gap_ref.clone(),
+                queued_value(item)?,
+                unit,
+                reason,
+            )
+        }
         // Not votes on a segment (and not signed: the server takes these
         // unsigned, they are not replicated between servers).
         WriteKind::HazardReport
@@ -649,6 +815,16 @@ async fn send_to_server(
                 _ => Ok(first),
             }
         }
+        WriteKind::SpeedLimitGap { .. } => {
+            post(
+                discovery,
+                server,
+                bearer_token,
+                "/v1/speed-limit-gaps",
+                body,
+            )
+            .await
+        }
         WriteKind::SpeedLimitConfirmation { correction_id, .. } => {
             let path = format!("/v1/speed-limit-corrections/{correction_id}/confirmations");
             post(discovery, server, bearer_token, &path, body).await
@@ -701,13 +877,15 @@ fn record_accepted(
     item: &PendingWrite,
     response: &HttpResponse,
 ) -> Result<(), WriteBufferError> {
-    let WriteKind::SpeedLimitCorrection { segment_key, .. } = &item.kind else {
-        return Ok(());
+    let segment_key = match &item.kind {
+        WriteKind::SpeedLimitCorrection { segment_key, .. } => segment_key,
+        WriteKind::SpeedLimitGap { gap_ref } => gap_ref,
+        _ => return Ok(()),
     };
     let proposals = store.local_proposals().map_err(WriteBufferError::Store)?;
     let Some(mut proposal) = proposals
         .into_iter()
-        .find(|p| &p.segment_key == segment_key && Some(p.value) == queued_value(item))
+        .find(|p| p.segment_key == *segment_key && Some(p.value) == queued_value(item))
     else {
         return Ok(());
     };
@@ -732,13 +910,15 @@ fn record_accepted(
 /// The server permanently refused a proposal: its overlay must not go on
 /// showing a value nobody accepted.
 fn drop_rejected_proposal(store: &dyn Store, item: &PendingWrite) -> Result<(), WriteBufferError> {
-    let WriteKind::SpeedLimitCorrection { segment_key, .. } = &item.kind else {
-        return Ok(());
+    let segment_key = match &item.kind {
+        WriteKind::SpeedLimitCorrection { segment_key, .. } => segment_key,
+        WriteKind::SpeedLimitGap { gap_ref } => gap_ref,
+        _ => return Ok(()),
     };
     let proposals = store.local_proposals().map_err(WriteBufferError::Store)?;
     let is_this_one = proposals
         .iter()
-        .any(|p| &p.segment_key == segment_key && Some(p.value) == queued_value(item));
+        .any(|p| p.segment_key == *segment_key && Some(p.value) == queued_value(item));
     if is_this_one {
         store
             .remove_local_proposal(segment_key)

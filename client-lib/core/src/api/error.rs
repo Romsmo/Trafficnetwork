@@ -38,6 +38,9 @@ pub mod code {
     /// The duration asked for a report is outside what the server accepts for that type. Nothing was
     /// queued; `getReportLimits` gives the bounds.
     pub const TTL_OUT_OF_RANGE: &str = "ttlOutOfRange";
+    /// "No limit on record here" was reported for a place where a road with a limit is on record running the
+    /// same way: correct that segment instead (`reportWrongSpeedLimit`).
+    pub const ROAD_ALREADY_HAS_LIMIT: &str = "roadAlreadyHasLimit";
     /// The client was closed.
     pub const CLOSED: &str = "closed";
     pub const INTERNAL: &str = "internal";
@@ -132,7 +135,7 @@ impl From<WriteBufferError> for ApiError {
 
 impl From<CorrectionError> for ApiError {
     fn from(error: CorrectionError) -> Self {
-        match error {
+        match &error {
             CorrectionError::NotOffered => ApiError::new(
                 code::NOT_OFFERED,
                 "the server does not offer speed-limit corrections",
@@ -141,6 +144,9 @@ impl From<CorrectionError> for ApiError {
                 ApiError::new(code::UNKNOWN_SEGMENT, "no speed-limit segment matches")
             }
             CorrectionError::Store(message) => ApiError::new(code::STORAGE, message),
+            CorrectionError::RoadAlreadyHasLimit { .. } => {
+                ApiError::new(code::ROAD_ALREADY_HAS_LIMIT, error.to_string())
+            }
             other => ApiError::invalid(other.to_string()),
         }
     }

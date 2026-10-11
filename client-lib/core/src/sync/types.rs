@@ -136,6 +136,8 @@ pub enum CorrectionReason {
     LimitLifted,
     SignMissingOrNew,
     Other,
+    /// The road has no limit on record at all (server 1.1.0); the reason of a "no limit here" report.
+    Missing,
 }
 
 /// Set on a segment whose `speedLimit` is a community correction

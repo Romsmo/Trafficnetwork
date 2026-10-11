@@ -1248,3 +1248,234 @@ async fn without_a_duration_nothing_changes_for_the_host_app() {
         .get("expiresInSeconds")
         .is_none());
 }
+
+// ------------------------------------------------ "no speed limit on record here" (server 1.1.0)
+
+fn config_with_corrections() -> Value {
+    let mut config = config_json(false);
+    config["communityCorrections"] = json!({
+        "enabled": true, "confirmationsRequired": 3,
+        "valueRange": { "kmh": { "min": 5, "max": 150 }, "mph": { "min": 5, "max": 85 } },
+        "valueStep": 5, "rateLimit": { "max": 5, "windowMinutes": 60 }
+    });
+    config
+}
+
+/// A server like `working_server`, but whose one package is stored under its real H3 tile, so the position lookup
+/// knows which places the offline data covers.
+fn covered_server() -> Arc<ScriptedServer> {
+    let server = working_server(false);
+    server.route("GET", "/v1/config", 200, config_with_corrections());
+    let tile = crate::api::tiles::tile_at(52.0, 13.0, 4).unwrap();
+    let package = json!({
+        "tile": tile, "speedLimitSegments": [segment_json("seg1")],
+        "staticSigns": [], "fixedSpeedCameras": []
+    });
+    let hash = hex::encode(Sha256::digest(serde_json::to_vec(&package).unwrap()));
+    server.route(
+        "GET",
+        "/v1/static-data/manifest",
+        200,
+        json!({
+            "staticDataVersion": 7, "generatedAt": "2027-01-01T00:00:00Z",
+            "partitionResolution": 4,
+            "partitions": [{ "tile": tile, "hash": hash, "sizeBytes": 100 }]
+        }),
+    );
+    server.route(
+        "GET",
+        &format!("/v1/static-data/partitions/{tile}"),
+        200,
+        package,
+    );
+    server
+}
+
+#[tokio::test]
+async fn a_road_without_a_limit_is_proposed_by_place_and_direction_and_shown_at_once() {
+    let server = covered_server();
+    let client = client(server.clone());
+    client.sync().await.unwrap();
+
+    // 52.01 / 13.005 is 1 km north of the stored road: nothing on record there
+    let proposal = client
+        .call(
+            "reportMissingSpeedLimit",
+            json!({ "lat": 52.01, "lng": 13.005, "bearing": 90, "value": 30, "unit": "kmh", "reason": "missing" }),
+        )
+        .await
+        .unwrap();
+    assert_eq!(proposal["value"], json!(30));
+    assert_eq!(proposal["state"], json!("queued"));
+
+    // the device's own proposal answers for that place, marked as its own
+    let here = client
+        .call("getSpeedLimitAt", json!({ "lat": 52.01, "lng": 13.005 }))
+        .await
+        .unwrap();
+    assert_eq!(here["value"], json!(30.0));
+    assert_eq!(here["origin"]["kind"], json!("locallyProposed"));
+    assert!(here["segmentKey"].as_str().unwrap().starts_with("gap:"));
+
+    client.sync().await.unwrap();
+    let sent = server.bodies_to("POST", "/v1/speed-limit-gaps");
+    assert_eq!(sent.len(), 1);
+    assert_eq!(sent[0]["bearingDegrees"], json!(90.0));
+    let place = crate::sync::gaps::place_of(52.01, 13.005, 90.0).unwrap();
+    let signed = &sent[0]["deviceAssertion"]["payload"];
+    assert_eq!(signed["segmentKey"], json!(place.reference()));
+    assert_eq!(signed["vote"], json!("support"));
+    assert_eq!(signed["value"], json!(30));
+}
+
+#[tokio::test]
+async fn a_gap_is_refused_where_a_road_with_a_limit_runs_the_same_way() {
+    let server = covered_server();
+    let client = client(server.clone());
+    client.sync().await.unwrap();
+    // on the stored road (east-west along latitude 52.0)
+    let error = client
+        .call(
+            "reportMissingSpeedLimit",
+            json!({ "lat": 52.0, "lng": 13.005, "bearing": 90, "value": 30, "unit": "kmh" }),
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(error.code, "roadAlreadyHasLimit");
+    assert!(error.message.contains("seg1"));
+    // a side street leaving it (north-south) is still missing
+    let side = client
+        .call(
+            "reportMissingSpeedLimit",
+            json!({ "lat": 52.0, "lng": 13.005, "bearing": 0, "value": 30, "unit": "kmh" }),
+        )
+        .await;
+    assert!(side.is_ok());
+}
+
+#[tokio::test]
+async fn the_direction_falls_back_to_the_last_heading_and_is_otherwise_required() {
+    let server = covered_server();
+    let client = client(server.clone());
+    client.sync().await.unwrap();
+
+    let error = client
+        .call(
+            "reportMissingSpeedLimit",
+            json!({ "lat": 52.01, "lng": 13.005, "value": 30, "unit": "kmh" }),
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(error.code, "invalidArgument");
+
+    client
+        .call(
+            "updatePosition",
+            json!({ "lat": 52.01, "lng": 13.005, "heading": 270 }),
+        )
+        .await
+        .unwrap();
+    client
+        .call(
+            "reportMissingSpeedLimit",
+            json!({ "lat": 52.01, "lng": 13.005, "value": 30, "unit": "kmh" }),
+        )
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+async fn implausible_values_are_refused_before_anything_is_queued() {
+    let server = covered_server();
+    let client = client(server.clone());
+    client.sync().await.unwrap();
+    for value in [33, 400] {
+        let error = client
+            .call(
+                "reportMissingSpeedLimit",
+                json!({ "lat": 52.01, "lng": 13.005, "bearing": 90, "value": value, "unit": "kmh" }),
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(error.code, "invalidArgument");
+    }
+    client.sync().await.unwrap();
+    assert_eq!(server.count("POST", "/v1/speed-limit-gaps"), 0);
+}
+
+#[tokio::test]
+async fn a_lookup_always_says_what_it_found_and_where_it_looked() {
+    let server = covered_server();
+    let client = client(server.clone());
+    client.sync().await.unwrap();
+
+    // a limit, from the local store
+    let found = client
+        .call("lookupSpeedLimit", json!({ "lat": 52.0, "lng": 13.005 }))
+        .await
+        .unwrap();
+    assert_eq!(found["status"], json!("found"));
+    assert_eq!(found["source"], json!("offline"));
+    assert_eq!(found["value"], json!(50.0));
+
+    // inside a stored tile but nothing close: the data was looked at and holds no limit - and that is said
+    let none = client
+        .call("lookupSpeedLimit", json!({ "lat": 52.2, "lng": 13.005 }))
+        .await
+        .unwrap();
+    assert_eq!(
+        none,
+        json!({ "status": "notRecorded", "source": "offline" })
+    );
+
+    // outside every stored tile: the server is asked ...
+    server.route(
+        "GET",
+        "/v1/speed-limit",
+        200,
+        json!({ "speedLimit": 70, "speedLimitUnit": "kmh", "distanceMeters": 3.5, "segmentId": "far1", "segmentKey": "abc" }),
+    );
+    let online = client
+        .call("lookupSpeedLimit", json!({ "lat": 10.0, "lng": 10.0 }))
+        .await
+        .unwrap();
+    assert_eq!(online["status"], json!("found"));
+    assert_eq!(online["source"], json!("online"));
+    assert_eq!(online["value"], json!(70.0));
+    assert_eq!(online["origin"]["kind"], json!("imported"));
+
+    // ... and when it knows nothing there, that is "not recorded", not an error
+    server.route(
+        "GET",
+        "/v1/speed-limit",
+        404,
+        json!({ "error": { "code": "NOT_FOUND", "message": "no" } }),
+    );
+    let empty = client
+        .call("lookupSpeedLimit", json!({ "lat": 10.0, "lng": 10.0 }))
+        .await
+        .unwrap();
+    assert_eq!(
+        empty,
+        json!({ "status": "notRecorded", "source": "online" })
+    );
+}
+
+#[tokio::test]
+async fn outside_the_offline_area_without_a_network_is_said_not_silently_no_limit() {
+    let server = covered_server();
+    let client = client(server.clone());
+    client.sync().await.unwrap();
+    // no route for GET /v1/speed-limit: the scripted server answers like a dead network
+    let unreachable = client
+        .call("lookupSpeedLimit", json!({ "lat": 10.0, "lng": 10.0 }))
+        .await
+        .unwrap();
+    assert_eq!(unreachable, json!({ "status": "outsideOfflineArea" }));
+    // and inside the area nothing needs the network
+    let covered = client
+        .call("lookupSpeedLimit", json!({ "lat": 52.2, "lng": 13.005 }))
+        .await
+        .unwrap();
+    assert_eq!(covered["status"], json!("notRecorded"));
+}

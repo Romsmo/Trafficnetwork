@@ -10,7 +10,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 use crate::sync::{
-    Correction, CorrectionReason, CorrectionTarget, SpeedLimitUnit, WrongSpeedLimitReport,
+    Correction, CorrectionReason, CorrectionTarget, MissingSpeedLimitReport, SpeedLimitUnit,
+    WrongSpeedLimitReport,
 };
 
 use super::client::{segment_ref, TrafficNetworkClient};
@@ -94,6 +95,18 @@ struct WrongLimitArgs {
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
+struct MissingLimitArgs {
+    lat: f64,
+    lng: f64,
+    /// A heading along the road, either direction (0..360); the last heading given is used when absent.
+    bearing: Option<f64>,
+    value: u32,
+    unit: SpeedLimitUnit,
+    reason: Option<CorrectionReason>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct ConfirmCorrectionArgs {
     /// The segment whose current community correction is voted on…
     segment_id: Option<String>,
@@ -116,6 +129,7 @@ impl TrafficNetworkClient {
             })),
             "getSpeedLimitAt" => {
                 let a: PositionArgs = parse(method, args)?;
+                self.set_last_heading(a.heading);
                 to_json(self.get_speed_limit_at(a.lat, a.lng, a.heading)?)
             }
             "getNearby" => {
@@ -157,6 +171,21 @@ impl TrafficNetworkClient {
                 })?;
                 to_json(proposal)
             }
+            "reportMissingSpeedLimit" => {
+                let a: MissingLimitArgs = parse(method, args)?;
+                to_json(self.report_missing_speed_limit(&MissingSpeedLimitReport {
+                    lat: a.lat,
+                    lng: a.lng,
+                    bearing_degrees: a.bearing,
+                    value: a.value,
+                    unit: a.unit,
+                    reason: a.reason,
+                })?)
+            }
+            "lookupSpeedLimit" => {
+                let a: PositionArgs = parse(method, args)?;
+                to_json(self.lookup_speed_limit(a.lat, a.lng, a.heading).await?)
+            }
             "confirmSpeedLimitCorrection" => {
                 let a: ConfirmCorrectionArgs = parse(method, args)?;
                 let target = match (a.correction, a.segment_id) {
@@ -177,6 +206,7 @@ impl TrafficNetworkClient {
             }
             "updatePosition" => {
                 let a: PositionArgs = parse(method, args)?;
+                self.set_last_heading(a.heading);
                 to_json(self.update_position(a.lat, a.lng, a.speed_kmh)?)
             }
             "sync" => to_json(self.sync().await?),

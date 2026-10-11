@@ -26,6 +26,24 @@ pub struct SpeedLimitAnswer {
     pub imported_value: Option<f64>,
 }
 
+/// The answer of `lookupSpeedLimit`: always an answer, never a bare "nothing".
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(tag = "status", rename_all = "camelCase")]
+pub enum SpeedLimitLookup {
+    /// A limit applies here. `source` says where it was read: `"offline"` (the local store) or `"online"`
+    /// (the server, because this place is outside the offline area).
+    Found {
+        #[serde(flatten)]
+        answer: SpeedLimitAnswer,
+        source: &'static str,
+    },
+    /// Nothing is on record for this place — the data was looked at (locally where it is stored, on the server
+    /// otherwise) and holds no limit. Not the same as not knowing: see `OutsideOfflineArea`.
+    NotRecorded { source: &'static str },
+    /// This place is outside the offline area and there is no network, so nothing could be looked at.
+    OutsideOfflineArea,
+}
+
 /// What `submitReport` tells a host app about the duration of what it queued.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct SubmittedReport {

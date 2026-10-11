@@ -25,6 +25,8 @@ use crate::discovery::{DiscoveryConfig, DiscoveryService};
 use crate::platform::{Clock, HttpTransport, Sleep, WsTransport};
 use crate::status::OnlineStatusService;
 use crate::storage::{PendingWrite, Store, WriteKind};
+use crate::sync::gaps::own_gap_proposal;
+use crate::sync::report_missing_speed_limit;
 use crate::sync::{
     bind_device_key, check_ttl, confirm_hazard_report, confirm_speed_limit_correction,
     effective_camera_policy, exchange_client_secret, expiry_ms_for, fetch_corrections,
@@ -32,8 +34,8 @@ use crate::sync::{
     register_device, report_camera_removed, report_wrong_speed_limit,
     run_realtime as run_realtime_protocol, speed_limit_at, submit_report, CameraLevel,
     CameraNotice, ClientConfig, Correction, CorrectionTarget, EffectiveCameraPolicy, FlushOutcome,
-    HazardType, NetworkConfigPayload, ReportLimits, ReportSubmission, SegmentRef, SyncEngine,
-    TtlDecision, WrongSpeedLimitReport,
+    HazardType, MissingSpeedLimitReport, NetworkConfigPayload, ReportLimits, ReportSubmission,
+    SegmentRef, SyncEngine, TtlDecision, WrongSpeedLimitReport,
 };
 
 use super::error::{code, ApiError};
@@ -46,8 +48,8 @@ use super::secure_store::{
 use super::tiles::{ring_for_speed, tiles_around, DEFAULT_REGION_RESOLUTION};
 use super::types::{
     BootstrapPlanView, CameraPolicyView, NearbyCategory, NearbyItem, NetworkStatusView, NodeView,
-    PositionUpdate, ProposalView, SpeedLimitAnswer, SubmittedReport, SyncReport, SyncStatus,
-    TickResult,
+    OriginView, PositionUpdate, ProposalView, SpeedLimitAnswer, SpeedLimitLookup, SubmittedReport,
+    SyncReport, SyncStatus, TickResult,
 };
 
 /// A token is renewed this long before it runs out.
@@ -252,6 +254,9 @@ struct State {
     /// The static-data version the last sync's manifest named — when it
     /// moves, the configuration fetched before is stale.
     manifest_version: Option<u64>,
+    /// The last heading (degrees) the host app gave with a position: what "no limit here" falls back to for the
+    /// direction of the road when it is not given explicitly.
+    last_heading: Option<f64>,
 }
 
 pub struct TrafficNetworkClient {
@@ -622,7 +627,100 @@ impl TrafficNetworkClient {
             .map(|c| c.speed_limit_lookup_max_distance_meters)
             .unwrap_or(DEFAULT_LOOKUP_METERS);
         let nearest = speed_limit_at(&*self.store, lat, lng, max_distance)?;
-        Ok(nearest.map(SpeedLimitAnswer::from))
+        if let Some(nearest) = nearest {
+            return Ok(Some(SpeedLimitAnswer::from(nearest)));
+        }
+        // No segment is close: this device's own "no limit on record here" proposal for the place, if it made one.
+        let heading = _heading.or(self.state().last_heading);
+        Ok(
+            own_gap_proposal(&*self.store, lat, lng, heading)?.map(|proposal| SpeedLimitAnswer {
+                value: f64::from(proposal.value),
+                unit: proposal.unit.as_str().to_string(),
+                segment_id: proposal.segment_key.clone(),
+                segment_key: Some(proposal.segment_key),
+                distance_meters: 0.0,
+                origin: OriginView::LocallyProposed {
+                    confirmations: proposal.confirmations,
+                },
+                imported_value: None,
+            }),
+        )
+    }
+
+    /// The heading the host app last had — remembered for what needs a direction and has none given.
+    pub fn set_last_heading(&self, heading: Option<f64>) {
+        if heading.is_some_and(f64::is_finite) {
+            self.state().last_heading = heading;
+        }
+    }
+
+    /// Like [`get_speed_limit_at`](Self::get_speed_limit_at), but always an answer a host app can tell the driver:
+    /// a limit (read offline, or online when the place is outside the offline area), "nothing is on record
+    /// here", or "outside the offline area and no network". Never a silent "no limit".
+    pub async fn lookup_speed_limit(
+        &self,
+        lat: f64,
+        lng: f64,
+        heading: Option<f64>,
+    ) -> Result<SpeedLimitLookup, ApiError> {
+        self.check_open()?;
+        check_position(lat, lng)?;
+        self.set_last_heading(heading);
+        if let Some(answer) = self.get_speed_limit_at(lat, lng, heading)? {
+            return Ok(SpeedLimitLookup::Found {
+                answer,
+                source: "offline",
+            });
+        }
+        if self.covered_offline(lat, lng) {
+            return Ok(SpeedLimitLookup::NotRecorded { source: "offline" });
+        }
+        // Outside what is stored: ask a server, if there is one to ask.
+        let token = match self.ensure_token().await {
+            Ok(token) => token,
+            Err(_) => return Ok(SpeedLimitLookup::OutsideOfflineArea),
+        };
+        let result = self
+            .discovery
+            .request_with_failover(|server| {
+                let url = format!(
+                    "{}/v1/speed-limit?lat={lat}&lng={lng}",
+                    server.address.trim_end_matches('/')
+                );
+                crate::platform::HttpRequest::get(url)
+                    .with_header("Authorization", format!("Bearer {token}"))
+            })
+            .await;
+        match result {
+            Ok((_, response)) if response.status == 404 => {
+                Ok(SpeedLimitLookup::NotRecorded { source: "online" })
+            }
+            Ok((_, response)) if response.is_success() => {
+                match response.json().ok().and_then(|v| online_answer(&v)) {
+                    Some(answer) => Ok(SpeedLimitLookup::Found {
+                        answer,
+                        source: "online",
+                    }),
+                    None => Ok(SpeedLimitLookup::OutsideOfflineArea),
+                }
+            }
+            _ => Ok(SpeedLimitLookup::OutsideOfflineArea),
+        }
+    }
+
+    /// Whether the offline data covers this place: the package of its tile is stored.
+    fn covered_offline(&self, lat: f64, lng: f64) -> bool {
+        let resolution = self
+            .cached_config()
+            .map(|c| c.static_data_partition_h3_resolution)
+            .or_else(|| self.store.static_partition_resolution().ok().flatten());
+        let Some(resolution) = resolution else {
+            return false;
+        };
+        let Some(tile) = super::tiles::tile_at(lat, lng, resolution) else {
+            return false;
+        };
+        matches!(self.store.get_partition_hash(&tile), Ok(Some(_)))
     }
 
     /// What is around a position, nearest first: reports from drivers
@@ -878,6 +976,26 @@ impl TrafficNetworkClient {
         self.check_open()?;
         let config = self.corrections_config()?;
         let proposal = report_wrong_speed_limit(&*self.store, &*self.clock, &config, report)?;
+        Ok(ProposalView::from(&proposal))
+    }
+
+    /// "There is no speed limit on record for this road, it is X" — a value for a road the import has none for
+    /// (server 1.1.0). The position and the direction of the road name the place (`bearing_degrees`, any heading
+    /// along it; the last heading the host app gave is used when none is passed). Effective for this device at
+    /// once as its own unconfirmed proposal, sent signed on the next sync; at three distinct devices the server
+    /// makes it a stretch of road everybody gets. Fails with `roadAlreadyHasLimit` when a road with a limit is
+    /// stored right there running the same way (correct that segment instead).
+    pub fn report_missing_speed_limit(
+        &self,
+        report: &MissingSpeedLimitReport,
+    ) -> Result<ProposalView, ApiError> {
+        self.check_open()?;
+        let config = self.corrections_config()?;
+        let mut report = report.clone();
+        if report.bearing_degrees.is_none() {
+            report.bearing_degrees = self.state().last_heading;
+        }
+        let proposal = report_missing_speed_limit(&*self.store, &*self.clock, &config, &report)?;
         Ok(ProposalView::from(&proposal))
     }
 
@@ -1363,6 +1481,47 @@ fn is_camera_type(hazard_type: HazardType) -> bool {
             | HazardType::RedLightCamera
             | HazardType::DistanceControl
     )
+}
+
+/// `GET /v1/speed-limit` (`server/docs/api.md`) as a [`SpeedLimitAnswer`].
+fn online_answer(body: &serde_json::Value) -> Option<SpeedLimitAnswer> {
+    let value = body.get("speedLimit")?.as_f64()?;
+    let unit = body.get("speedLimitUnit")?.as_str()?.to_string();
+    let origin = if body.get("correctedBy").and_then(|v| v.as_str()) == Some("community") {
+        let correction = body.get("correction");
+        OriginView::CommunityCorrected {
+            confirmations: correction
+                .and_then(|c| c.get("confirmations"))
+                .and_then(|n| n.as_u64())
+                .and_then(|n| u32::try_from(n).ok())
+                .unwrap_or(0),
+            needs_review: correction
+                .and_then(|c| c.get("needsReview"))
+                .and_then(|b| b.as_bool())
+                .unwrap_or(false),
+        }
+    } else {
+        OriginView::Imported
+    };
+    Some(SpeedLimitAnswer {
+        value,
+        unit,
+        segment_id: body
+            .get("segmentId")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default()
+            .to_string(),
+        segment_key: body
+            .get("segmentKey")
+            .and_then(|v| v.as_str())
+            .map(str::to_string),
+        distance_meters: body
+            .get("distanceMeters")
+            .and_then(|v| v.as_f64())
+            .unwrap_or(0.0),
+        origin,
+        imported_value: body.get("importedSpeedLimit").and_then(|v| v.as_f64()),
+    })
 }
 
 /// A report still in the write buffer, as it would appear once delivered.

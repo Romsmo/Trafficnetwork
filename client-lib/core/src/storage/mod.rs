@@ -154,6 +154,9 @@ pub enum WriteKind {
         unit: SpeedLimitUnit,
         agrees: bool,
     },
+    /// `POST /v1/speed-limit-gaps` — a limit for a road the import has none for (server 1.1.0). `gap_ref` is the
+    /// `gap:<cell>:<axis>` reference the signed vote names; the request body carries the position and direction.
+    SpeedLimitGap { gap_ref: String },
     /// `POST /v1/hazard-reports/:id/confirmations` — "still there" or "gone".
     HazardConfirmation { report_id: String },
     /// `POST /v1/speed-cameras/:id/removal-reports` — "this camera is gone".

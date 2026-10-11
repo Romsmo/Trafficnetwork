@@ -13,6 +13,7 @@ pub mod camera_policy;
 pub mod corrections;
 pub mod engine;
 pub mod expiry;
+pub mod gaps;
 pub mod matching;
 pub mod realtime;
 pub mod report_ttl;
@@ -30,8 +31,9 @@ pub use camera_policy::{
     CameraZone, EffectiveCameraPolicy, ZoneBoundary,
 };
 pub use corrections::{
-    confirm_speed_limit_correction, correction_id, fetch_corrections, report_wrong_speed_limit,
-    Correction, CorrectionError, CorrectionTarget, SegmentRef, WrongSpeedLimitReport,
+    confirm_speed_limit_correction, correction_id, fetch_corrections, report_missing_speed_limit,
+    report_wrong_speed_limit, Correction, CorrectionError, CorrectionTarget,
+    MissingSpeedLimitReport, SegmentRef, WrongSpeedLimitReport,
 };
 pub use engine::{BootstrapPlan, BootstrapProgress, SyncEngine, SyncError, SyncObserver};
 pub use expiry::{expires_at_unix_ms, expiry_ms_for, is_expired};
