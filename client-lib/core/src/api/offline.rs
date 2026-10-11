@@ -130,14 +130,14 @@ pub struct CoverageView {
 
 #[derive(Debug, Clone, Deserialize, Default)]
 #[serde(rename_all = "camelCase", default)]
-pub(super) struct OfflineSettingsPatch {
+pub struct OfflineSettingsPatch {
     pub mode: Option<OfflineMode>,
     pub regions: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]
 #[serde(rename_all = "camelCase", default)]
-pub(super) struct AutoPolicyPatch {
+pub struct AutoPolicyPatch {
     pub home_radius_tiles: Option<u32>,
     pub current_radius_tiles: Option<u32>,
     pub recent_places: Option<u32>,
@@ -157,7 +157,7 @@ impl TrafficNetworkClient {
 
     /// Chooses what is kept: `auto` (default), `regions` (with the ids from `listOfflineRegions`) or `all`.
     /// Takes effect with the next sync (`tick`/`sync`); what is no longer wanted is let go of then.
-    pub(super) fn apply_offline_regions(
+    pub fn set_offline_regions(
         &self,
         patch: &OfflineSettingsPatch,
     ) -> Result<OfflineSettings, ApiError> {
@@ -178,7 +178,7 @@ impl TrafficNetworkClient {
     }
 
     /// How the automatic area is cut, and where home is.
-    pub(super) fn apply_auto_region_policy(
+    pub fn set_auto_region_policy(
         &self,
         patch: &AutoPolicyPatch,
     ) -> Result<OfflineSettings, ApiError> {
@@ -518,8 +518,8 @@ impl TrafficNetworkClient {
         })
     }
 
-    /// Whether the offline data answers for a position: `stored`, `wanted` (chosen, not here yet) or `outside`
-    /// (a lookup there goes to the server). No network.
+    /// Whether the offline data answers for a position: `stored`, `wanted` (chosen — in the area as it is cut now —
+    /// but not here yet) or `outside` (a lookup there goes to the server). No network.
     pub fn get_coverage(&self, lat: f64, lng: f64) -> Result<CoverageView, ApiError> {
         self.check_open()?;
         super::client::check_position_public(lat, lng)?;
@@ -550,14 +550,17 @@ impl TrafficNetworkClient {
             OfflineMode::Regions => false, // which tiles the regions hold is the server's to say
             OfflineMode::Auto => {
                 let visited = load_visited(&*self.store);
+                // What the automatic area holds *now*: around where the device last said it was, not around
+                // the place asked about (that would call every place "wanted").
+                let current = self.state().last_position;
                 let auto = crate::sync::offline::auto_selection(
                     &settings.auto,
                     resolution,
                     settings.home,
-                    Some((lat, lng)),
+                    current,
                     &visited,
                 );
-                auto.current.contains(&tile)
+                auto.all().contains(&tile)
             }
         };
         Ok(CoverageView {

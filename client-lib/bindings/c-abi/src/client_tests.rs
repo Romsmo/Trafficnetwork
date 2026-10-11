@@ -230,6 +230,9 @@ fn a_client_syncs_reads_and_reports_through_the_c_functions() {
     let server = start_server(working_routes());
     let dir = temp_dir("basic");
     let client = new_client(&options(&server, &dir, device_credentials()));
+    // The default offline area follows the device's position; this test never gives one.
+    let all = call(client, "setOfflineRegions", json!({ "mode": "all" }));
+    assert_eq!(all["ok"]["mode"], "all", "{all}");
 
     let sync = call(client, "sync", json!({}));
     assert_eq!(sync["ok"]["ok"], true, "{sync}");

@@ -237,11 +237,11 @@ impl TrafficNetworkClient {
             "getOfflineSettings" => to_json(self.get_offline_settings()?),
             "setOfflineRegions" => {
                 let patch: super::offline::OfflineSettingsPatch = parse(method, args)?;
-                to_json(self.apply_offline_regions(&patch)?)
+                to_json(self.set_offline_regions(&patch)?)
             }
             "setAutoRegionPolicy" => {
                 let patch: super::offline::AutoPolicyPatch = parse(method, args)?;
-                to_json(self.apply_auto_region_policy(&patch)?)
+                to_json(self.set_auto_region_policy(&patch)?)
             }
             "setStorageLimits" => {
                 let a: StorageLimitsArgs = parse(method, args)?;
