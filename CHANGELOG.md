@@ -27,6 +27,7 @@ Baustellen **einmal jetzt importieren, Wiederholung manuell** (Betriebsentscheid
 - **Leser:** DATEX-II-`exceptionPeriod` (Zeiten, in denen die Arbeiten *nicht* gelten) wird erkannt; eine laufende Ausnahme beendet die Sichtung dieses Laufs, die übrigen werden gezählt, nicht auf das Enddatum angewendet. `locationForDisplay` wird nur genutzt, wenn ein Satz keine eigene Koordinate hat. Ein nicht auswertbarer Satz kostet nur diesen Satz, nie den ganzen Feed (der französische Feed scheiterte am 2026-10-11 an einer Ausnahmeperiode).
 - **Qualitätsbericht** je Quelle gruppiert: andere Satztypen / gerade nicht in Kraft / nicht nutzbar; dazu `endCapped` des Servers (Enddatum auf `SEED_REPORT_MAX_END_DAYS` begrenzt).
 - **Belegt:** 292 Unit-Tests, Integrationstest `roadworks-cycle` gegen einen echten Server (8 Tests: Erstlauf ohne Doppelte, zweiter Lauf ohne Neues, abgeschnittener/fehlender Feed beendet nichts, verschwundene Baustelle endet, Kill-Switch); `--dry-run` gegen die echten Feeds am 2026-10-11: FR 98 von 607, LU 22 von 34, NL 4.152 von 62.604 Sätzen in Kraft. **Nicht belegt:** ein Lauf gegen den produktiven Server.
+
 ## client-lib — Unreleased (1.2.0)
 
 Rein additiv auf der Aufrufseite: `apiVersion` bleibt `1`, bestehende Aufrufe und Ergebnisformate ändern sich nicht. **Eine Verhaltensänderung:** das Standardverhalten der Offline-Daten ist jetzt „automatisch" (siehe unten) — ein Client, der nie eine Position nennt, lädt keine Statikdaten mehr. Wer wie bisher alles will: `setOfflineRegions({ mode: "all" })`.
