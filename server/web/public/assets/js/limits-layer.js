@@ -83,6 +83,13 @@ export class LimitsLayer {
     this.#abort = null;
   }
 
+  /** What is drawn may be out of date (a vote or proposal changed a limit): load the view again. */
+  invalidate() {
+    if (!this.#enabled) return;
+    this.#loaded = null;
+    this.schedule(400);
+  }
+
   schedule(delay = DEBOUNCE_MS) {
     if (!this.#enabled) return;
     window.clearTimeout(this.#timer);

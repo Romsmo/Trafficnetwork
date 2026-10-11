@@ -16,9 +16,17 @@ export interface Instance {
   policy?: Record<string, "off" | "zones">;
 }
 
+/** Obviously fake operator details, so the imprint and the privacy notice have something to show (and example.org owns the address). */
+export const OPERATOR_TEST_DETAILS: Record<string, string> = {
+  OPERATOR_NAME: "Beispiel-Betreiber (Testdaten)",
+  OPERATOR_ADDRESS: "Teststraße 1;12345 Teststadt;Deutschland",
+  OPERATOR_EMAIL: "betreiber@example.org",
+  OPERATOR_PHONE: "+49 30 0000000",
+};
+
 export const INSTANCES = {
   /** Default node: web UI on, the camera emergency brake pulled (SPEED_CAMERA_NAMESPACE_ENABLED=false): no camera category at all. */
-  main: { port: PORT_BASE, env: {} as Record<string, string> } as Instance,
+  main: { port: PORT_BASE, env: OPERATOR_TEST_DETAILS } as Instance,
   /** Brake released, no country restricted (the default level is `full`); also runs with a different project link. */
   cameras: { port: PORT_BASE + 1, env: { SPEED_CAMERA_NAMESPACE_ENABLED: "true", PROJECT_REPO_URL: REPO_URL_OVERRIDE } as Record<string, string> } as Instance,
   /** One report per web session, to see the honest "limit reached" feedback. */

@@ -1,0 +1,214 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<title>Datenschutz – Trafficnetwork</title>
+<link rel="icon" href="/web/img/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/web/css/app.css">
+</head>
+<body class="page-legal" data-legal="privacy">
+<a class="skip-link" href="#main" data-i18n="a11y.skip">Zum Inhalt springen</a>
+<header id="site-header"></header>
+<div id="safety-banner" class="safety-banner" role="note"></div>
+<noscript><p class="safety-banner" data-i18n="noscript">Diese Seite braucht JavaScript. This page needs JavaScript.</p></noscript>
+
+<main id="main" class="page legal">
+  <!-- German -->
+  <div class="lang-block" lang="de">
+    <h1>Datenschutzhinweise</h1>
+    <p class="draft-note" role="note"><strong>Entwurf.</strong> Dieser Text beschreibt, was diese Software tatsächlich mit Daten tut. Er ist <strong>nicht rechtlich geprüft</strong> und noch nicht vom Betreiber freigegeben; er ersetzt keine Rechtsberatung.</p>
+
+    <section class="card">
+      <h2>1. Wer verantwortlich ist</h2>
+      <div data-if="operator.complete">
+        <p><span data-fill="operator.name"></span><br><span data-fill="operator.address"></span><br>E-Mail: <span data-fill="operator.email"></span></p>
+      </div>
+      <p data-if="operator.missing" class="result bad" role="status">Der Betreiber dieses Knotens hat seine Angaben noch nicht hinterlegt. Bis dahin ist nicht erkennbar, wer verantwortlich ist.</p>
+    </section>
+
+    <section class="card">
+      <h2>2. Das Wichtigste</h2>
+      <ul>
+        <li>Kein Konto, keine Anmeldung, <strong>keine Cookies</strong>.</li>
+        <li>Keine Reichweitenmessung, keine Werbung, keine Zählpixel, keine fremden Skripte, Schriften oder Symbole – die Seite lädt ihren gesamten Code vom Knoten selbst.</li>
+        <li data-if="tiles"><span>Die einzige Verbindung zu einem Dritten: die Kartenkacheln kommen direkt von <strong data-fill="tiles.host"></strong> (siehe 8).</span></li>
+        <li data-if="no-tiles">Dieser Knoten zeigt keinen Kartenhintergrund; die Seite spricht mit niemandem außer dem Knoten.</li>
+        <li>Dein Standort wird nur verwendet, wenn du ihn per Knopfdruck freigibst.</li>
+      </ul>
+    </section>
+
+    <section class="card">
+      <h2>3. Beim Aufruf der Seite</h2>
+      <p>Dein Browser holt die Seite und ihre Dateien von diesem Knoten. Dabei sieht der Knoten technisch zwingend deine IP-Adresse.</p>
+      <p data-if="logging.privacy">Das Zugriffsprotokoll dieses Knotens enthält nur Methode, Pfad und Host – <strong>weder die Adresse der Anfrage (Query) noch deine IP-Adresse</strong>, also auch keine Koordinaten.</p>
+      <p data-if="logging.full" class="result bad" role="status">Der Betreiber hat die Datenschutz-Protokollierung abgeschaltet: Das Zugriffsprotokoll kann IP-Adressen und Koordinaten enthalten.</p>
+      <p>Zur Begrenzung von Missbrauch zählt der Knoten Anfragen je IP-Adresse <strong>im Arbeitsspeicher</strong> (gleitendes Zeitfenster). Das wird nicht in die Datenbank geschrieben und beim Neustart vergessen.</p>
+    </section>
+
+    <section class="card">
+      <h2>4. Anonyme Sitzung</h2>
+      <p>Damit die Seite Daten lesen und melden darf, fordert dein Browser eine zufällige, anonyme Sitzung an. Sie liegt nur im Arbeitsspeicher der Seite (kein Cookie, kein Browser-Speicher), gilt etwa <span data-fill="session.minutes"></span> Minuten und wird dann erneuert – <strong>jede Erneuerung ist eine neue, nicht verknüpfbare Kennung</strong>. Beim Schließen des Tabs ist sie weg.</p>
+    </section>
+
+    <section class="card">
+      <h2>5. Karte und Standort</h2>
+      <ul>
+        <li>Damit der Knoten die Meldungen und Tempolimits deines Kartenausschnitts liefern kann, bekommt er den <strong>Mittelpunkt und den Umkreis des Ausschnitts</strong>. Verschiebst du die Karte, werden diese Angaben neu gesendet.</li>
+        <li>Deinen <strong>Standort</strong> fragt die Seite nur ab, wenn du „Auf mich zentrieren“ oder „Meinen Standort verwenden“ drückst; dann fragt der Browser um Erlaubnis. Der Standort wird zum Zeichnen des Pfeils und als Stelle einer Meldung verwendet und <strong>nicht gespeichert</strong>.</li>
+        <li><strong>Folgt die Karte dir</strong> („folgt“-Zustand), ist der Kartenausschnitt – und damit die an den Knoten gesendete Mitte – dein ungefährer Standort. Schalte „folgt“ aus, wenn du das nicht willst.</li>
+      </ul>
+    </section>
+
+    <section class="card">
+      <h2>6. Meldungen und Tempolimit-Angaben</h2>
+      <ul>
+        <li>Eine <strong>Meldung</strong> besteht aus Art, Stelle, Zeitpunkt, Gültigkeitsdauer und der zufälligen Sitzungskennung. Sie ist <strong>für alle Besucher dieses Knotens sichtbar</strong>; die Sitzungskennung wird dabei nicht mitgeliefert.</li>
+        <li>Eine Meldung bleibt, solange sie gilt, und wird nach Ablauf noch kurz für Abgleich und Moderation vorgehalten (<span data-fill="retention.days"></span> Tage, vom Betreiber einstellbar) und dann gelöscht.</li>
+        <li>Eine <strong>Tempolimit-Angabe</strong> („Stimmt nicht?“ / „Tempolimit nachreichen“) besteht aus einer auf wenige Dutzend Meter gerundeten Stelle, der Straßenrichtung (eine von acht Gruppen), Wert, Einheit, Grund und der Sitzungskennung. Zustimmungen und Widersprüche werden auf diesem Knoten gezählt.</li>
+        <li>Meldungen aus dem Browser werden <strong>nicht an andere Knoten weitergegeben</strong>.</li>
+      </ul>
+    </section>
+
+    <section class="card">
+      <h2>7. Was im Browser gespeichert wird</h2>
+      <p>Nur im lokalen Speicher deines Browsers (<code>localStorage</code>), nur auf deinem Gerät, nichts davon wird gesendet; du löschst es mit den Browser-Einstellungen:</p>
+      <table class="legal-table">
+        <thead><tr><th>Schlüssel</th><th>Zweck</th><th>Dauer</th></tr></thead>
+        <tbody>
+          <tr><td><code>tn-lang</code></td><td>deine Sprachwahl (Deutsch/Englisch), wenn du sie umschaltest</td><td>bis du es löschst</td></tr>
+          <tr><td><code>tn.filters.v1</code></td><td>welche Kategorien du eingeschaltet hast</td><td>bis du es löschst</td></tr>
+          <tr><td><code>tn.cameraNotice.v1</code></td><td>dass du den Blitzer-Hinweis gesehen hast (damit er nicht jedes Mal erscheint)</td><td>bis du es löschst</td></tr>
+        </tbody>
+      </table>
+      <p>Es gibt keine Cookies, kein <code>sessionStorage</code> und keine IndexedDB.</p>
+    </section>
+
+    <section class="card">
+      <h2 id="tiles">8. Kartenkacheln (Dritte)</h2>
+      <p data-if="tiles">Die Kacheln lädt <strong>dein Browser direkt von <span data-fill="tiles.host"></span></strong>. Dieser Anbieter sieht deine IP-Adresse, den angezeigten Kartenausschnitt (über die Kachelnummern) und die Adresse dieses Knotens als Herkunft. Es gelten seine eigenen Datenschutz- und Nutzungsbedingungen. Mit der Einstellung <code>MAP_TILE_URL=none</code> kann der Betreiber das abstellen.</p>
+      <p data-if="no-tiles">Dieser Knoten lädt keine Karten von Dritten.</p>
+    </section>
+
+    <section class="card">
+      <h2>9. „Online“-Anzeige</h2>
+      <p>Die kleine Anzeige unten rechts zählt nur offene Verbindungen. Dafür werden keine Personen, Adressen oder Standorte gespeichert.</p>
+    </section>
+
+    <section class="card">
+      <h2>10. Rechtsgrundlagen (Entwurf)</h2>
+      <ul>
+        <li>Betrieb der Seite, Schutz vor Missbrauch, Anzeige der Meldungen: berechtigtes Interesse, Art. 6 Abs. 1 lit. f DSGVO.</li>
+        <li>Standort: deine Einwilligung durch Knopfdruck und Browser-Erlaubnis, Art. 6 Abs. 1 lit. a DSGVO; jederzeit durch erneutes Drücken beendbar.</li>
+        <li>Speicherung im Browser (siehe 7): nur, was du ausdrücklich gewählt hast – Sprache, Filter, gesehener Hinweis; § 25 Abs. 2 Nr. 2 TDDDG.</li>
+      </ul>
+    </section>
+
+    <section class="card">
+      <h2>11. Deine Rechte</h2>
+      <p>Du hast das Recht auf Auskunft, Berichtigung, Löschung, Einschränkung, Widerspruch (Art. 15–21 DSGVO) und auf Beschwerde bei einer Datenschutz-Aufsichtsbehörde. Da diese Seite keine Identität speichert, kann der Betreiber eine Meldung nicht dir zuordnen; schreib trotzdem an die Adresse in Abschnitt 1, wenn etwas gelöscht werden soll.</p>
+    </section>
+  </div>
+
+  <!-- English -->
+  <div class="lang-block" lang="en">
+    <h1>Privacy notice</h1>
+    <p class="draft-note" role="note"><strong>Draft.</strong> This text describes what this software actually does with data. It is <strong>not legally reviewed</strong> and not yet approved by the operator; it is not legal advice.</p>
+
+    <section class="card">
+      <h2>1. Who is responsible</h2>
+      <div data-if="operator.complete">
+        <p><span data-fill="operator.name"></span><br><span data-fill="operator.address"></span><br>E-mail: <span data-fill="operator.email"></span></p>
+      </div>
+      <p data-if="operator.missing" class="result bad" role="status">The operator of this node has not entered their details yet. Until then it is not apparent who is responsible.</p>
+    </section>
+
+    <section class="card">
+      <h2>2. In short</h2>
+      <ul>
+        <li>No account, no sign-in, <strong>no cookies</strong>.</li>
+        <li>No analytics, no advertising, no tracking pixels, no third-party scripts, fonts or icons – the page loads all its code from the node itself.</li>
+        <li data-if="tiles"><span>The only connection to a third party: map tiles come straight from <strong data-fill="tiles.host"></strong> (see 8).</span></li>
+        <li data-if="no-tiles">This node shows no map background; the page talks to nobody but the node.</li>
+        <li>Your location is used only when you release it with a button.</li>
+      </ul>
+    </section>
+
+    <section class="card">
+      <h2>3. When you open the page</h2>
+      <p>Your browser fetches the page and its files from this node. The node necessarily sees your IP address while it does.</p>
+      <p data-if="logging.privacy">The node's access log keeps only method, path and host – <strong>neither the query string nor your IP address</strong>, so no coordinates either.</p>
+      <p data-if="logging.full" class="result bad" role="status">The operator has switched privacy logging off: the access log can contain IP addresses and coordinates.</p>
+      <p>To limit abuse the node counts requests per IP address <strong>in memory</strong> (sliding window). That is not written to the database and is forgotten on restart.</p>
+    </section>
+
+    <section class="card">
+      <h2>4. Anonymous session</h2>
+      <p>So the page may read data and report, your browser asks for a random, anonymous session. It lives in the page's memory only (no cookie, no browser storage), lasts about <span data-fill="session.minutes"></span> minutes and is then renewed – <strong>every renewal is a new identifier that cannot be linked to the last</strong>. Closing the tab ends it.</p>
+    </section>
+
+    <section class="card">
+      <h2>5. Map and location</h2>
+      <ul>
+        <li>So the node can deliver the reports and speed limits of your view, it receives the <strong>centre and radius of the view</strong>. When you move the map, these are sent again.</li>
+        <li>The page asks for your <strong>location</strong> only when you press "Centre on me" or "Use my location"; the browser then asks for permission. The location is used to draw the arrow and as the spot of a report and is <strong>not stored</strong>.</li>
+        <li><strong>While the map follows you</strong> ("following" state), the view – and with it the centre sent to the node – is your approximate location. Switch "following" off if you do not want that.</li>
+      </ul>
+    </section>
+
+    <section class="card">
+      <h2>6. Reports and speed-limit entries</h2>
+      <ul>
+        <li>A <strong>report</strong> consists of category, spot, time, duration and the random session identifier. It is <strong>visible to every visitor of this node</strong>; the session identifier is not delivered with it.</li>
+        <li>A report stays while it applies and is kept briefly after it ends for matching and moderation (<span data-fill="retention.days"></span> days, adjustable by the operator), then deleted.</li>
+        <li>A <strong>speed-limit entry</strong> ("Not right?" / "Add a speed limit") consists of a spot rounded to a few dozen metres, the road direction (one of eight groups), value, unit, reason and the session identifier. Agreements and objections are counted on this node.</li>
+        <li>Reports from the browser are <strong>not passed on to other nodes</strong>.</li>
+      </ul>
+    </section>
+
+    <section class="card">
+      <h2>7. What is stored in your browser</h2>
+      <p>Only in your browser's local storage (<code>localStorage</code>), only on your device, none of it is sent; you remove it with the browser's settings:</p>
+      <table class="legal-table">
+        <thead><tr><th>Key</th><th>Purpose</th><th>Duration</th></tr></thead>
+        <tbody>
+          <tr><td><code>tn-lang</code></td><td>your language choice (German/English), when you switch it</td><td>until you delete it</td></tr>
+          <tr><td><code>tn.filters.v1</code></td><td>which categories you switched on</td><td>until you delete it</td></tr>
+          <tr><td><code>tn.cameraNotice.v1</code></td><td>that you have seen the speed-camera notice (so it does not appear every time)</td><td>until you delete it</td></tr>
+        </tbody>
+      </table>
+      <p>There are no cookies, no <code>sessionStorage</code> and no IndexedDB.</p>
+    </section>
+
+    <section class="card">
+      <h2 id="tiles-en">8. Map tiles (third party)</h2>
+      <p data-if="tiles">The tiles are loaded <strong>by your browser directly from <span data-fill="tiles.host"></span></strong>. That provider sees your IP address, the area shown (through the tile numbers) and this node's address as the origin. Its own privacy and usage terms apply. The operator can switch this off with <code>MAP_TILE_URL=none</code>.</p>
+      <p data-if="no-tiles">This node loads no maps from third parties.</p>
+    </section>
+
+    <section class="card">
+      <h2>9. "Online" display</h2>
+      <p>The small display at the bottom right only counts open connections. No persons, addresses or locations are stored for it.</p>
+    </section>
+
+    <section class="card">
+      <h2>10. Legal bases (draft)</h2>
+      <ul>
+        <li>Running the page, protection against abuse, showing the reports: legitimate interest, Art. 6(1)(f) GDPR.</li>
+        <li>Location: your consent by pressing the button and the browser's permission, Art. 6(1)(a) GDPR; you end it by pressing again.</li>
+        <li>Storage in the browser (see 7): only what you explicitly chose – language, filters, notice seen; § 25(2) no. 2 TDDDG.</li>
+      </ul>
+    </section>
+
+    <section class="card">
+      <h2>11. Your rights</h2>
+      <p>You have the right of access, rectification, erasure, restriction and objection (Art. 15–21 GDPR) and to lodge a complaint with a data-protection authority. As this page stores no identity, the operator cannot attribute a report to you; write to the address in section 1 anyway if something should be deleted.</p>
+    </section>
+  </div>
+</main>
+
+<footer id="site-footer"></footer>
+<script type="module" src="/web/js/legal-page.js"></script>
+</body>
+</html>

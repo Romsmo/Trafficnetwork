@@ -47,6 +47,7 @@ export function mountLayout(config, pageId) {
       ),
     );
 
+    // The pages carry the (empty) banner so its place is reserved before this runs and nothing below it moves.
     let banner = document.getElementById("safety-banner");
     if (!banner) {
       banner = h("div", { id: "safety-banner", class: "safety-banner", role: "note" });
@@ -62,7 +63,9 @@ export function mountLayout(config, pageId) {
         externalLink(config.repoUrl, t("footer.github")),
         externalLink(`${config.repoUrl}/blob/main/LICENSE`, t("footer.license")),
         h("span", null, t("footer.version", { version: config.version })),
-        externalLink(`${config.repoUrl}/blob/main/docs/privacy.md`, t("footer.privacy")),
+        h("a", { href: "/privacy" }, t("footer.privacy")),
+        h("a", { href: "/terms" }, t("footer.terms")),
+        h("a", { href: "/imprint" }, t("footer.imprint")),
         h("a", { href: "/about" }, t("nav.about")),
       ),
       online.element,

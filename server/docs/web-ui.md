@@ -50,11 +50,43 @@ The Docker image contains the UI (`server/web` is copied into it); `docker-compo
   not every tile is subscribed, and a new report shows up with the page's once-a-minute refresh instead of at once (measured: about
   45 s in a country-sized view, a few seconds when zoomed in).
 * **Speed-limit layer** — road colours by limit (zoomed in far enough). Only roads that have a recorded limit exist in the
-  data (OpenStreetMap `maxspeed`); other roads stay uncoloured and the legend says so ("no limit recorded" — the general legal
-  rule applies there). The page never claims completeness.
+  data; other roads stay uncoloured and the legend says so ("no limit recorded" — the general legal rule applies there).
+  The page never claims completeness. The hint names the zoom level this screen needs (14 at the least; a larger screen needs
+  more to stay inside the node's area limit), so it can read "ab Stufe 15" on a phone and "ab Stufe 16" on a desktop.
 * **Report** — choose a category, then the spot: the map centre, a spot picked on the map, or "use my location". The
   position is used **only after the visitor presses that button** (the browser then asks for permission), once, and is not
   kept. Everything works without location permission.
+* **Phone layout** (from the October 2026 release) — on a phone held upright the map fills the screen (`100dvh`, safe-area
+  insets for notch and home indicator, no side panel). The controls are round, slightly blurred buttons floating at the right
+  edge, within thumb reach: **my position**, **categories and layers**, zoom in/out (all at least 44 × 44 px). Everything else —
+  the category filters, layers, the list of reports, "Report a hazard", the details of a tapped road or marker, the footer —
+  lives in a **bottom sheet** that rests at three heights (small / half / full). It is moved by dragging the handle, by tap
+  (cycles), or with the keyboard on the handle (arrows step, Home/End jump, Escape collapses); while it is small, its content
+  is inert (not in the Tab order or the accessibility tree). Wide screens, and a phone on its side, keep the side panel. Colours
+  follow the system's light/dark setting. Nothing is added to the page for this: no framework, no font, no external file.
+* **Location arrow** — after "my position" is pressed (and permitted), the visitor is drawn as a navigation arrow in the
+  direction of travel inside a light circle of the position's accuracy. The direction is the device's own heading when it
+  gives one, otherwise the direction of movement (jitter below 6 m is ignored); without a known direction it is a plain dot —
+  never an arrow pointing nowhere in particular. The arrow is outlined in white and ringed in dark blue so it reads on every
+  map colour in light and dark mode. The button has three states: off → **centred** → **following** → off; dragging the map
+  yourself drops "following" back to "centred". A screen reader gets the state and a description ("Your position, heading E,
+  accurate to about 25 m"). The position is not stored or sent anywhere.
+* **Own duration** — in the report form, every category with an expiry shows "Standard (25 minutes)" preselected and "Own
+  duration" next to it: quick choices (only those inside the category's bounds) and free input with a unit. The bounds come from
+  `GET /v1/config` → `reportExpiry`; a value outside them is explained in words before anything is sent, and when the node
+  itself refuses (`400 EXPIRY_OUT_OF_RANGE`) the page quotes the bounds the node named — nothing is cut short silently. The
+  answer states the end the node set ("It stays until Sat, 11/10/2026, 15:30"; a report merged into an existing one keeps the
+  later end). A category without bounds (an older node, fixed cameras) shows no duration field.
+* **Speed limit: correct it, or add one** — a tap on the map shows the limit there **with its origin** (from the node's map
+  data / corrected by the community, with confirmations and objections / added by the community) and the open proposals, which
+  the visitor can confirm or dispute. "Stimmt nicht?" opens a form with quick values (inside the node's range and step) plus free
+  input, unit (fixed to the road's own) and reason. Where nothing is recorded: "Kein Tempolimit erfasst" and **"Tempolimit
+  nachreichen"**: the visitor chooses which of four directions the road runs (drawn on the map before sending, because the node
+  needs a direction and a visitor cannot know a bearing), unit, value and reason. If the node knows a road there after all
+  (`422 ROAD_ALREADY_HAS_LIMIT`), the page moves the visitor to correcting that one. Every answer is told as it is — new /
+  merged into an existing proposal / nothing changed / refused and why — together with how many confirmations it still needs;
+  a safety note says to enter only what the signs on the spot show. On a phone this happens in the bottom sheet, on wide
+  screens in the map popup. Both need `COMMUNITY_CORRECTIONS_ENABLED` (default on) and a node from 1.1.0 for the gap form.
 * **Confirm** — "still there" / "gone" on a marker. The page tells the truth about the outcome: counted, not counted (own
   report or already voted), or which limit was hit and when to retry.
 * **Camera categories** (fixed/mobile speed cameras, trailer, red-light, distance control) are ordinary categories with a
@@ -87,6 +119,34 @@ The Docker image contains the UI (`server/web` is copied into it); `docker-compo
 * **Online display** — a small "N online" at the bottom right of every page once the node offers the counter, see below.
 * German and English (browser language, switchable, remembered in `localStorage` together with the category selection), mobile
   friendly, keyboard operable, WCAG 2 A/AA checked automatically (light and dark mode).
+
+## Legal pages
+
+The node serves three more pages besides the map, the connect guide and "About": `/privacy` (privacy notice), `/terms` (terms
+of use) and `/imprint` (provider identification). They are in German and English in the same HTML (the one that is not the
+page's language is hidden), are linked from the footer of **every** page (on a phone the footer is the last thing in the bottom
+sheet) and from the report form. `privacy` and `terms` are **drafts** and say so on the page: they describe what the software
+does, they are not legally reviewed, and the operator has to review and release them (`docs/web-compliance.md` has the findings,
+the inventories and the open legal questions).
+
+What they fill in from the node's own configuration (`/web-config.json`): the operator, the tile host (or "no map background"),
+the session lifetime (`WEB_SESSION_TTL_SECONDS`), how long an ended report is kept (`EVENT_LOG_RETENTION_DAYS_DYNAMIC`) and
+whether the access log is in privacy mode (`LOG_PRIVACY_MODE`). Nothing is invented.
+
+| Variable | Needed for a public node | Shown on |
+|---|---|---|
+| `OPERATOR_NAME` | yes | imprint, privacy notice |
+| `OPERATOR_ADDRESS` (lines separated by `;`) | yes | imprint, privacy notice |
+| `OPERATOR_EMAIL` | yes | imprint (as a `mailto:` link), privacy notice |
+| `OPERATOR_PHONE`, `OPERATOR_REPRESENTATIVE`, `OPERATOR_REGISTER`, `OPERATOR_VAT_ID` | depends on who runs the node (ask a lawyer) | imprint, only when set |
+
+While name, address or e-mail is missing, the imprint and the privacy notice say that the operator has not entered their details
+yet — they do not show a made-up provider — and **the node logs a warning at start** naming the missing variables. Setting them is
+the operator's job; this repository ships none.
+
+There is no cookie banner on purpose: the page sets no cookie and stores only three `localStorage` keys, each written on the
+visitor's explicit action (language switch, category choice, "notice seen"); the reasoning and its open point are in
+`docs/web-compliance.md`. If a later change stored anything non-essential, a banner with an equal "reject" would be needed.
 
 ## "N online" display (add-on O-B)
 

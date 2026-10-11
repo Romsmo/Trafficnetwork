@@ -107,6 +107,67 @@ test.describe("phone", () => {
     await tilesLoaded(page);
     await page.screenshot(photo("map-mobile"));
   });
+
+  test("phone: location arrow and the sheet half open", async ({ page }) => {
+    await page.addInitScript(() => {
+      let deliver: ((position: unknown) => void) | null = null;
+      Object.defineProperty(navigator, "geolocation", {
+        configurable: true,
+        value: {
+          watchPosition(success: (position: unknown) => void) {
+            deliver = success;
+            setTimeout(() => deliver?.({ coords: { latitude: 48.1385, longitude: 11.5765, accuracy: 60, heading: 60, speed: 10 }, timestamp: Date.now() }), 100);
+            return 1;
+          },
+          clearWatch() {},
+          getCurrentPosition() {},
+        },
+      });
+    });
+    await watchTraffic(page, node, { fakeTiles: false });
+    await openMap(page, node);
+    await tilesLoaded(page);
+    await page.locator("#locate").click();
+    await expect(page.locator(".me-arrow")).toBeVisible();
+    await page.waitForTimeout(600);
+    await page.screenshot(photo("map-mobile-arrow"));
+    await page.locator("#sheet-handle").click();
+    await page.waitForTimeout(500);
+    await page.screenshot(photo("map-mobile-sheet"));
+  });
+
+  test("phone: a tapped road in the sheet, and the correction form", async ({ page }) => {
+    await watchTraffic(page, node, { fakeTiles: false });
+    await openMap(page, node);
+    await tilesLoaded(page);
+    await page.locator("#filters input[type=checkbox]").evaluateAll((boxes) =>
+      boxes.forEach((box) => {
+        (box as HTMLInputElement).checked = false;
+        box.dispatchEvent(new Event("change", { bubbles: true }));
+      }),
+    );
+    await page.locator("#map").click();
+    await expect(page.locator("#detail-content")).toContainText("Tempolimit hier");
+    await page.waitForTimeout(600);
+    await page.screenshot(photo("map-mobile-road"));
+    await page.locator("#detail-content").getByRole("button", { name: "Stimmt nicht?" }).click();
+    await expect(page.locator("#detail-content").getByRole("heading", { name: "Tempolimit korrigieren" })).toBeVisible();
+    await page.waitForTimeout(400);
+    await page.screenshot(photo("map-mobile-correction"));
+  });
+
+  test("phone: report with an own duration", async ({ page }) => {
+    await watchTraffic(page, node, { fakeTiles: false });
+    await openMap(page, node);
+    await tilesLoaded(page);
+    await page.locator("#report-open").click();
+    const dialog = page.locator("#report-dialog");
+    await dialog.getByRole("radio", { name: "Baustelle", exact: true }).check();
+    await dialog.getByRole("radio", { name: "Eigene Dauer" }).check();
+    await dialog.getByRole("button", { name: "3 Tage" }).click();
+    await page.waitForTimeout(300);
+    await page.screenshot(photo("report-duration-mobile"));
+  });
 });
 
 test("online display (mocked figures)", async ({ page }) => {

@@ -43,11 +43,12 @@ function render() {
         h("li", null, t("about.privacy.noAccount")),
         h("li", null, t("about.privacy.session")),
         h("li", null, t("about.privacy.location")),
+        h("li", null, t("about.privacy.following")),
         h("li", null, t("about.privacy.ip")),
         h("li", null, config.privacyLogging === false ? t("about.privacy.logs.off") : t("about.privacy.logs.on")),
         h("li", null, host ? t("about.privacy.tiles", { host }) : t("about.privacy.tiles.none")),
       ),
-      h("p", null, t("about.privacy.more"), " ", externalLink(`${config.repoUrl.replace(/\/+$/, "")}/blob/main/docs/privacy.md`, t("about.privacy.link"))),
+      h("p", null, t("about.privacy.more"), " ", h("a", { href: "/privacy" }, t("about.privacy.link")), " · ", h("a", { href: "/terms" }, t("about.terms.link"))),
     ),
   );
   applyTranslations(document);

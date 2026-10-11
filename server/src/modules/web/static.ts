@@ -146,7 +146,14 @@ export function preparePage(html: string, known: ReadonlySet<string>, graph: Rea
 }
 
 export function loadAssets(sources: AssetSources): AssetTable {
-  const PAGE_ROUTES: Record<string, string> = { "index.html": "/", "connect.html": "/connect", "about.html": "/about" };
+  const PAGE_ROUTES: Record<string, string> = {
+    "index.html": "/",
+    "connect.html": "/connect",
+    "about.html": "/about",
+    "privacy.html": "/privacy",
+    "terms.html": "/terms",
+    "imprint.html": "/imprint",
+  };
   const pageSources = new Map<string, { body: Buffer; ext: string }>();
   const pagesDir = join(sources.publicDir, "pages");
   for (const rel of listFiles(pagesDir)) {
