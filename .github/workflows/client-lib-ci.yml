@@ -628,7 +628,8 @@ jobs:
           gradle-version: "8.10.2"
 
       - name: Install cargo-ndk
-        run: cargo install --locked cargo-ndk
+        # a runner image may already carry cargo-ndk ("binary already exists"): install only when it is missing
+        run: command -v cargo-ndk >/dev/null 2>&1 || cargo install --locked cargo-ndk
 
       - name: Build the native library for every Android ABI
         run: |
@@ -1002,7 +1003,8 @@ jobs:
 
       - name: Install cargo-ndk
         if: steps.ndk-cache.outputs.cache-hit != 'true'
-        run: cargo install --locked cargo-ndk
+        # a runner image may already carry cargo-ndk ("binary already exists"): install only when it is missing
+        run: command -v cargo-ndk >/dev/null 2>&1 || cargo install --locked cargo-ndk
 
       - name: Build the native library into the plugin
         run: bash bindings/flutter/build-native.sh android
@@ -1122,7 +1124,8 @@ jobs:
 
       - name: Install cargo-ndk
         if: steps.ndk-cache.outputs.cache-hit != 'true'
-        run: cargo install --locked cargo-ndk
+        # a runner image may already carry cargo-ndk ("binary already exists"): install only when it is missing
+        run: command -v cargo-ndk >/dev/null 2>&1 || cargo install --locked cargo-ndk
 
       - name: Scaffold the React Native library
         run: node bindings/react-native/scaffold.mjs
@@ -1230,7 +1233,8 @@ jobs:
 
       - name: Install cargo-ndk
         if: steps.ndk-cache.outputs.cache-hit != 'true'
-        run: cargo install --locked cargo-ndk
+        # a runner image may already carry cargo-ndk ("binary already exists"): install only when it is missing
+        run: command -v cargo-ndk >/dev/null 2>&1 || cargo install --locked cargo-ndk
 
       # Only the emulator's own ABI: this job is about running, not packaging.
       - name: Build the native library into the plugin (x86_64 only)
