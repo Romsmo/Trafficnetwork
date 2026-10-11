@@ -55,10 +55,17 @@ export class HazardLayer {
   #enabled = new Set();
   #cameraEnabled = false;
 
-  constructor({ map, onVote, onChange = () => {} }) {
+  /**
+   * `presenter` ({ active(): boolean, show(element, report) }) lets the page show a report's details somewhere else than in a
+   * popup — in the bottom sheet on a phone. While it is inactive, a popup at the marker is used.
+   */
+  constructor({ map, onVote, onChange = () => {}, presenter = null }) {
     this.map = map;
     this.onVote = onVote;
     this.onChange = onChange;
+    this.presenter = presenter;
+    this.popup = window.L.popup({ autoPanPadding: [30, 60], offset: [0, -16] });
+    this.openId = null;
     this.group = window.L.layerGroup().addTo(map);
     this.timer = window.setInterval(() => this.pruneExpired(), 30_000);
   }
@@ -107,7 +114,20 @@ export class HazardLayer {
     const marker = this.#markers.get(id);
     if (!marker) return;
     this.map.setView(marker.getLatLng(), Math.max(this.map.getZoom(), 15));
-    marker.openPopup();
+    this.#openDetails(id);
+  }
+
+  /** The details of a report: in the page's presenter (the sheet) when it is active, otherwise in a popup at the marker. */
+  #openDetails(id) {
+    const marker = this.#markers.get(id);
+    if (!marker) return;
+    this.openId = id;
+    if (this.presenter?.active()) {
+      this.map.closePopup(this.popup);
+      this.presenter.show(this.buildPopup(id), this.#reports.get(id));
+      return;
+    }
+    this.popup.setLatLng(marker.getLatLng()).setContent(this.buildPopup(id)).openOn(this.map);
   }
 
   render() {
@@ -117,6 +137,10 @@ export class HazardLayer {
       if (!wanted.has(id)) {
         this.group.removeLayer(marker);
         this.#markers.delete(id);
+        if (this.openId === id) {
+          this.openId = null;
+          this.map.closePopup(this.popup);
+        }
       }
     }
     for (const report of visible) {
@@ -148,7 +172,7 @@ export class HazardLayer {
       popupAnchor: [0, -16],
     });
     const marker = window.L.marker(latlng, { icon, title: label, alt: label, keyboard: true, riseOnHover: true });
-    marker.bindPopup(() => this.buildPopup(marker.reportId ?? report.id), { autoPanPadding: [30, 60] });
+    marker.on("click", () => this.#openDetails(marker.reportId ?? report.id));
     return marker;
   }
 
@@ -194,6 +218,7 @@ export class HazardLayer {
 
   dispose() {
     window.clearInterval(this.timer);
+    this.map.closePopup(this.popup);
     this.group.remove();
   }
 }

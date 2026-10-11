@@ -2,7 +2,7 @@
 <html lang="de">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="color-scheme" content="light dark">
 <title>Trafficnetwork</title>
 <link rel="icon" href="/web/img/favicon.svg" type="image/svg+xml">
@@ -12,9 +12,11 @@
 <body class="page-map">
 <a class="skip-link" href="#main" data-i18n="a11y.skip">Zum Inhalt springen</a>
 <header id="site-header"></header>
+<div id="safety-banner" class="safety-banner" role="note"></div>
 <noscript><p class="safety-banner" data-i18n="noscript">Diese Seite braucht JavaScript. This page needs JavaScript.</p></noscript>
 
 <main id="main" class="map-layout">
+  <h1 class="visually-hidden" data-i18n="map.h1">Trafficnetwork – Karte</h1>
   <section id="map-panel">
     <div id="map"></div>
     <div class="map-overlay">
@@ -22,21 +24,48 @@
       <span id="area-chip" class="chip" hidden></span>
       <span id="pick-chip" class="chip" hidden></span>
       <button id="pick-cancel" type="button" class="small" hidden data-i18n="reportDialog.cancel">Abbrechen</button>
-      <button id="locate" type="button" class="small" data-i18n="map.locate" data-i18n-attr="title:map.locate.title">Mein Standort</button>
     </div>
-    <button id="report-open" type="button" class="fab" data-i18n="map.report.open">Gefahr melden</button>
+    <div class="map-controls" role="group" data-i18n-attr="aria-label:map.controls.label">
+      <button id="locate" type="button" class="round" data-state="off" aria-label="Auf mich zentrieren" title="Auf mich zentrieren">
+        <svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true" focusable="false"><path class="icon-fill" d="M3.5 11 20.5 3.5 13 20.5 11.2 12.8Z"/></svg>
+      </button>
+      <button id="layers-open" type="button" class="round" aria-label="Kategorien und Ebenen" title="Kategorien und Ebenen" aria-controls="sheet-body">
+        <svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true" focusable="false"><path class="icon-line" d="M12 3 3 8l9 5 9-5-9-5Z"/><path class="icon-line" d="m3 12.5 9 5 9-5"/><path class="icon-line" d="m3 17 9 5 9-5"/></svg>
+      </button>
+    </div>
     <div id="map-status" class="visually-hidden" role="status" aria-live="polite"></div>
   </section>
 
-  <aside class="side-panel" data-i18n-attr="aria-label:map.list.title">
-    <fieldset id="filters" class="filters"></fieldset>
-    <h2 data-i18n="map.layers.title">Karten-Ebenen</h2>
-    <label class="layer-toggle"><input id="layer-limits" type="checkbox"><span data-i18n="map.layer.speedlimits">Tempolimits als Straßenfarben zeigen</span></label>
-    <p id="limits-hint" class="hint" aria-live="polite"></p>
-    <p id="limits-note" class="hint" data-i18n="map.layer.speedlimits.note" hidden></p>
-    <h2 data-i18n="map.list.title">Meldungen in diesem Ausschnitt</h2>
-    <p id="list-status" class="hint" role="status" aria-live="polite"></p>
-    <ul id="report-list" class="report-list"></ul>
+  <aside id="sheet" class="side-panel sheet" data-mode="panel" data-detent="small" data-i18n-attr="aria-label:sheet.label">
+    <div class="sheet-top">
+      <button id="sheet-handle" type="button" class="sheet-handle" aria-controls="sheet-body" aria-expanded="true">
+        <span class="grip" aria-hidden="true"></span>
+        <span id="sheet-handle-text" class="visually-hidden"></span>
+      </button>
+      <div class="sheet-head">
+        <button id="report-open" type="button" class="primary report-button" data-i18n="map.report.open">Gefahr melden</button>
+        <p id="sheet-summary" class="sheet-summary"></p>
+      </div>
+    </div>
+    <div id="sheet-body" class="sheet-body">
+      <div id="sheet-detail" class="sheet-detail" hidden>
+        <button id="detail-back" type="button" class="small back-button" data-i18n="sheet.back">Zurück zur Übersicht</button>
+        <div id="detail-content" class="detail-content"></div>
+      </div>
+      <div id="sheet-browse" class="sheet-browse">
+        <fieldset id="filters" class="filters"></fieldset>
+        <h2 id="layers-heading" tabindex="-1" data-i18n="map.layers.title">Karten-Ebenen</h2>
+        <label class="layer-toggle"><input id="layer-limits" type="checkbox"><span data-i18n="map.layer.speedlimits">Tempolimits als Straßenfarben zeigen</span></label>
+        <p id="limits-hint" class="hint" aria-live="polite"></p>
+        <p id="limits-note" class="hint" data-i18n="map.layer.speedlimits.note" hidden></p>
+        <button id="query-center" type="button" class="small" data-i18n="map.queryCenter">Tempolimit an der Kartenmitte abfragen</button>
+        <h2 data-i18n="map.list.title">Meldungen in diesem Ausschnitt</h2>
+        <p id="list-status" class="hint" role="status" aria-live="polite"></p>
+        <ul id="report-list" class="report-list"></ul>
+        <p class="connect-link"><a href="/connect" data-i18n="map.connect.link">Verbinden: App, eigener Knoten oder API</a></p>
+      </div>
+      <div id="sheet-footer-slot"></div>
+    </div>
   </aside>
 </main>
 

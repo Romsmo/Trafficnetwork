@@ -5,13 +5,17 @@ import { readCameraPolicy } from "./camera-policy.js";
 import { CameraNotice } from "./camera-notice.js";
 import { anyCameraEnabled, isCameraType, selectableTypes, sortNewestFirst, zoneLatLngs } from "./filter.js";
 import { formatAge, formatKm, formatRemaining } from "./format.js";
+import { lineThrough, tapToleranceMeters } from "./geo.js";
 import { HazardLayer, reportLatLng } from "./hazard-layer.js";
 import { applyTranslations, currentTranslator, initI18n, onLangChange, t } from "./i18n.js";
 import { mountLayout } from "./layout.js";
+import { LimitDetail } from "./limit-detail.js";
 import { LimitsLayer, limitsStateText } from "./limits-layer.js";
 import { LiveConnection } from "./live.js";
+import { LocateController } from "./location.js";
 import { initialSelection, loadFilterPrefs, markNoticeSeen, noticeSeen, saveFilterPref } from "./prefs.js";
 import { describeSubmitFailure, ReportDialog } from "./report-dialog.js";
+import { BottomSheet } from "./sheet.js";
 import { ZoneLayer } from "./zone-layer.js";
 
 const L = window.L;
@@ -20,6 +24,8 @@ const REFRESH_MS = 60_000;
 /** Ask for a bit more than the view needs, so small pans and zooming in are answered from what is already loaded. */
 const HAZARD_MARGIN = 1.5;
 const DEFAULT_VIEW = { center: [51.16, 10.45], zoom: 6 };
+/** Cells (H3 resolution 9, about 170 m an edge) used to discover open "no speed limit" proposals around a tap. */
+const GAP_DISCOVERY_RESOLUTION = 9;
 
 initI18n();
 const $ = (id) => document.getElementById(id);
@@ -36,6 +42,8 @@ let cameraAvailable = false;
 let zonesSomewhere = false;
 let noticeVersion = 1;
 let tileResolution = 7;
+/** The node's GET /v1/config answer (null until it arrives): report durations, correction settings. */
+let serverConfig = null;
 let types = selectableTypes(false);
 const filterPrefs = loadFilterPrefs();
 const enabledTypes = initialSelection(types, filterPrefs);
@@ -56,7 +64,10 @@ const map = L.map("map", {
   maxZoom: config.tiles?.maxZoom ?? 19,
   bounceAtZoomLimits: false,
 });
-L.control.zoom({ position: "topright" }).addTo(map);
+// The zoom buttons live in the floating control stack with the other round buttons (a phone is zoomed by pinching, but
+// a screen reader, a keyboard or one hand still need them).
+const zoomControl = L.control.zoom({ position: "topright", zoomInTitle: t("map.zoomIn"), zoomOutTitle: t("map.zoomOut") }).addTo(map);
+document.querySelector(".map-controls").append(zoomControl.getContainer());
 // The panel's size settles after the header/footer are built and after orientation changes: keep Leaflet in step (only on a real change).
 const panel = $("map-panel");
 let panelSize = "";
@@ -95,8 +106,78 @@ if (config.region) {
 }
 $("map").setAttribute("aria-label", t("map.aria"));
 
+// ---- the sheet (phone) / side panel (wide screens) -------------------------------------------------------------
+const mapLayout = document.querySelector(".map-layout");
+const sheet = new BottomSheet({
+  root: $("sheet"),
+  handle: $("sheet-handle"),
+  top: document.querySelector(".sheet-top"),
+  body: $("sheet-body"),
+  container: mapLayout,
+  onChange: (detent, mode) => {
+    labelSheet(detent);
+    placeFooter(mode);
+  },
+});
+
+/** On a phone the footer is the last thing in the sheet (the map owns the screen); elsewhere it is the page's footer. */
+function placeFooter(mode) {
+  const footer = $("site-footer");
+  if (mode === "sheet") {
+    if (footer.parentElement !== $("sheet-footer-slot")) $("sheet-footer-slot").append(footer);
+  } else if (footer.parentElement !== document.body) {
+    mapLayout.after(footer);
+  }
+}
+
+function labelSheet(detent = sheet.detent) {
+  $("sheet-handle-text").textContent = t("sheet.handle", { state: t(`sheet.state.${detent}`) });
+}
+
+/** Opens the sheet to at least `detent` (nothing on wide screens: the panel is always open). */
+function raiseSheet(detent = "half") {
+  if (sheet.mode !== "sheet") return;
+  const order = ["small", "half", "full"];
+  if (order.indexOf(sheet.detent) < order.indexOf(detent)) sheet.setDetent(detent);
+}
+
+let detailOpen = false;
+
+/** Shows `node` as the sheet's detail view (a tapped road, a report), with a way back. */
+function showSheetDetail(node) {
+  $("detail-content").replaceChildren(node);
+  $("sheet-detail").hidden = false;
+  $("sheet-browse").hidden = true;
+  detailOpen = true;
+  raiseSheet("half");
+  $("sheet-body").scrollTop = 0;
+}
+
+function closeSheetDetail({ focus = true } = {}) {
+  if (!detailOpen) return;
+  detailOpen = false;
+  limitDetail.reset();
+  $("detail-content").replaceChildren();
+  $("sheet-detail").hidden = true;
+  $("sheet-browse").hidden = false;
+  if (focus) $("sheet-handle").focus();
+}
+$("detail-back").addEventListener("click", () => closeSheetDetail());
+
 // ---- hazards ---------------------------------------------------------------------------------------------------
-const hazards = new HazardLayer({ map, onVote: vote, onChange: () => renderList() });
+const hazards = new HazardLayer({
+  map,
+  onVote: vote,
+  onChange: () => renderList(),
+  presenter: {
+    active: () => sheet.mode === "sheet",
+    show: (node) => {
+      limitDetail.reset();
+      map.closePopup();
+      showSheetDetail(node);
+    },
+  },
+});
 // Where a country shows cameras only as areas, the node delivers zones; they are drawn as areas, never as pins.
 const zones = new ZoneLayer({ map, onChange: () => renderList() });
 hazards.setFilter(enabledTypes, cameraAvailable);
@@ -196,6 +277,7 @@ async function subscribeAroundCenter() {
 async function loadServerConfig() {
   try {
     const { data } = await api.get("/v1/config");
+    serverConfig = data;
     const policy = readCameraPolicy(data);
     cameraAvailable = policy.available;
     zonesSomewhere = policy.hasZones;
@@ -214,25 +296,60 @@ async function loadServerConfig() {
   }
 }
 
-// ---- speed limit on click ---------------------------------------------------------------------------------------
+// ---- the speed limit of a road (tap, or "at the map centre") ---------------------------------------------------
 let pendingPick = null;
+let previewLine = null;
+let limits = null;
 
-map.on("click", async (event) => {
+const limitDetail = new LimitDetail({
+  api,
+  getServerConfig: () => serverConfig,
+  getCells: async (latlng) => {
+    const { latLngToCell, gridDisk } = await (h3 ??= import("/web/vendor/h3/h3-js.es.js"));
+    return gridDisk(latLngToCell(latlng.lat, latlng.lng, GAP_DISCOVERY_RESOLUTION), 1);
+  },
+  onPreview: (latlng, bearing) => {
+    previewLine?.remove();
+    previewLine = null;
+    if (!latlng) return;
+    // The node rounds the spot to a cell and the stretch to 120 m: the line shows what is meant, not an exact place.
+    const [a, b] = lineThrough(latlng, bearing, 120);
+    previewLine = L.polyline([[a.lat, a.lng], [b.lat, b.lng]], { className: "axis-preview", color: "#0b5cd5", weight: 6, opacity: 0.9, dashArray: "8 8", interactive: false }).addTo(map);
+  },
+  onChanged: () => limits?.invalidate(),
+  onLayout: () => {
+    if (limitPopup.isOpen()) limitPopup.update();
+  },
+});
+
+// Popup (wide screens): kept open on map clicks so a half-filled form is not lost; a new tap shows the new place.
+const limitPopup = L.popup({ autoPanPadding: [30, 60], minWidth: 270, maxWidth: 380, closeOnClick: false, autoClose: true });
+limitPopup.on("remove", () => {
+  if (!detailOpen) limitDetail.reset();
+});
+
+function openLimitAt(latlng) {
+  const tolerance = tapToleranceMeters(map.getZoom(), latlng.lat);
+  if (sheet.mode === "sheet") {
+    map.closePopup();
+    void limitDetail.show(latlng, tolerance);
+    showSheetDetail(limitDetail.element);
+  } else {
+    void limitDetail.show(latlng, tolerance);
+    limitPopup.setLatLng(latlng).setContent(limitDetail.element).openOn(map);
+  }
+}
+
+map.on("click", (event) => {
   if (pendingPick) {
     const { resolve } = pendingPick;
     endPick();
     resolve(event.latlng);
     return;
   }
-  const popup = L.popup({ autoPanPadding: [30, 60] }).setLatLng(event.latlng).setContent(h("p", null, "…")).openOn(map);
-  const tr = currentTranslator();
-  try {
-    const { data } = await api.get("/v1/speed-limit", { lat: event.latlng.lat.toFixed(6), lng: event.latlng.lng.toFixed(6) });
-    popup.setContent(h("div", null, h("h3", null, tr.t("limit.here", { value: data.speedLimit, unit: tr.t(`unit.${data.speedLimitUnit}`) })), h("div", null, tr.t("limit.distance", { m: Math.round(data.distanceMeters) }))));
-  } catch (error) {
-    popup.setContent(h("p", null, error.status === 404 ? tr.t("limit.none") : error.status === 429 ? tr.t("limit.rateLimited") : tr.t("limit.error")));
-  }
+  openLimitAt(event.latlng);
 });
+$("query-center").addEventListener("click", () => openLimitAt(map.getCenter()));
 
 // ---- filters, layer toggle, list --------------------------------------------------------------------------------
 function renderFilters() {
@@ -278,7 +395,7 @@ function onFilterChange(type, on) {
 }
 
 let limitsState = { kind: "off" };
-const limits = new LimitsLayer({
+limits = new LimitsLayer({
   map,
   api,
   maxRadiusM: config.limits.maxSegmentRadiusM,
@@ -292,6 +409,14 @@ $("layer-limits").addEventListener("change", (event) => {
   $("limits-note").hidden = !event.target.checked;
 });
 
+// The round "categories and layers" button: opens the sheet (or just goes to the filters in the panel).
+$("layers-open").addEventListener("click", () => {
+  closeSheetDetail({ focus: false });
+  raiseSheet("half");
+  $("sheet-body").scrollTop = 0;
+  $("filters").querySelector("input")?.focus();
+});
+
 function renderList() {
   const tr = currentTranslator();
   const list = $("report-list");
@@ -302,6 +427,7 @@ function renderList() {
     return ll && bounds.contains(ll);
   }));
   const areas = zones.visible.filter((zone) => zoneInView(zone, bounds));
+  $("sheet-summary").textContent = tr.tn("map.summary", items.length + areas.length);
   clear(list);
   if (items.length === 0 && areas.length === 0) {
     list.append(h("li", null, h("span", { class: "hint" }, tr.t("map.list.empty"))));
@@ -348,9 +474,11 @@ async function vote(id, kind) {
   }
 }
 
-async function submitReport({ type, lat, lng }) {
+async function submitReport({ type, lat, lng, expiresInSeconds }) {
   try {
-    const { data } = await api.post("/v1/hazard-reports", { type, lat, lng });
+    // The own duration goes along only when the visitor chose one; without it the category's default applies on the node.
+    const body = { type, lat, lng, ...(expiresInSeconds !== undefined ? { expiresInSeconds } : {}) };
+    const { data } = await api.post("/v1/hazard-reports", body);
     // A camera the node does not show individually is answered "accepted" (202) — the same for a new and a merged one — with the
     // area it falls in where the node shows areas. Nothing about it is drawn as a pin, and nothing says whether it was merged.
     const hiddenByFilter = isCameraType(type) && !enabledTypes.has(type) ? { filterOffType: type } : {};
@@ -360,7 +488,8 @@ async function submitReport({ type, lat, lng }) {
     }
     const created = data.report ?? data.camera;
     if (created) hazards.upsert(created);
-    return { kind: data.merged ? "merged" : "created", ...hiddenByFilter };
+    // `expiresAt` is what the node set (a merge keeps the later end), so the visitor is told the real end, not the one they asked for.
+    return { kind: data.merged ? "merged" : "created", expiresAt: data.report?.expiresAt, ...hiddenByFilter };
   } catch (error) {
     return describeSubmitFailure(error);
   }
@@ -371,6 +500,8 @@ function beginPick(resolve, cancel) {
   $("map").classList.add("picking");
   setChip("pick-chip", t("reportDialog.pick.hint"));
   $("pick-cancel").hidden = false;
+  // The sheet gets out of the way while a spot is picked.
+  if (sheet.mode === "sheet") sheet.setDetent("small", { announce: false });
 }
 
 function endPick() {
@@ -387,28 +518,29 @@ $("pick-cancel").addEventListener("click", () => {
 });
 
 const dialog = new ReportDialog({ dialog: $("report-dialog"), onSubmit: submitReport, onPickRequested: beginPick });
-$("report-open").addEventListener("click", () => dialog.open({ types, center: map.getCenter() }));
+$("report-open").addEventListener("click", () => dialog.open({ types, center: map.getCenter(), expiry: serverConfig?.reportExpiry ?? null }));
 
 // ---- own location (only when the visitor presses the button) ---------------------------------------------------
-let hereMarker = null;
-$("locate").addEventListener("click", () => {
-  if (!("geolocation" in navigator)) {
-    $("map-status").textContent = t("map.locate.unsupported");
-    return;
-  }
-  navigator.geolocation.getCurrentPosition(
-    (pos) => {
-      const latlng = [pos.coords.latitude, pos.coords.longitude];
-      hereMarker?.remove();
-      hereMarker = L.marker(latlng, { icon: L.divIcon({ className: "here-icon", html: h("span", { class: "dot" }), iconSize: [24, 24], iconAnchor: [12, 12] }), interactive: false, keyboard: false }).addTo(map);
-      map.setView(latlng, Math.max(map.getZoom(), 15));
-    },
-    () => {
-      $("map-status").textContent = t("map.locate.denied");
-    },
-    { enableHighAccuracy: true, timeout: 10_000, maximumAge: 0 },
-  );
+const locateButton = $("locate");
+const locate = new LocateController({
+  map,
+  onState: (state) => {
+    renderLocateButton(state);
+    $("map-status").textContent = t(`locate.status.${state}`);
+  },
+  onProblem: (kind) => {
+    $("map-status").textContent = kind === "waiting" ? t("locate.status.waiting") : kind === "unsupported" ? t("map.locate.unsupported") : t("map.locate.denied");
+  },
+  describe: ({ accuracy, compass }) => (compass ? t("locate.arrow.heading", { accuracy, compass }) : t("locate.arrow.noHeading", { accuracy })),
 });
+
+function renderLocateButton(state = locate.state) {
+  locateButton.dataset.state = state;
+  const label = t(`locate.state.${state}`);
+  locateButton.setAttribute("aria-label", label);
+  locateButton.setAttribute("title", label);
+}
+locateButton.addEventListener("click", () => locate.press());
 
 // ---- chips / status ---------------------------------------------------------------------------------------------
 function setChip(id, text) {
@@ -422,6 +554,22 @@ function renderLiveChip(connected = live.connected) {
   chip.textContent = connected ? `● ${t("map.live.on")}` : t("map.live.off");
   chip.className = `chip ${connected ? "ok" : "bad"}`;
 }
+
+// Leaflet's own labels (zoom buttons, popup close button) come in English: say them in the page's language.
+function labelMapControls() {
+  const inButton = zoomControl.getContainer().querySelector(".leaflet-control-zoom-in");
+  const outButton = zoomControl.getContainer().querySelector(".leaflet-control-zoom-out");
+  inButton?.setAttribute("title", t("map.zoomIn"));
+  inButton?.setAttribute("aria-label", t("map.zoomIn"));
+  outButton?.setAttribute("title", t("map.zoomOut"));
+  outButton?.setAttribute("aria-label", t("map.zoomOut"));
+  const layers = $("layers-open");
+  layers.setAttribute("aria-label", t("map.layersButton"));
+  layers.setAttribute("title", t("map.layersButton"));
+  const close = document.querySelector(".leaflet-popup-close-button");
+  close?.setAttribute("aria-label", t("map.popup.close"));
+}
+map.on("popupopen", () => labelMapControls());
 
 // ---- wiring -----------------------------------------------------------------------------------------------------
 let moveTimer = null;
@@ -443,6 +591,10 @@ onLangChange(() => {
   $("limits-hint").textContent = limitsStateText(limitsState);
   if (pendingPick) setChip("pick-chip", t("reportDialog.pick.hint"));
   applyTranslations(document);
+  labelMapControls();
+  labelSheet();
+  renderLocateButton();
+  locate.refreshLabel();
 });
 
 setInterval(() => void loadHazards({ force: true }), REFRESH_MS);
