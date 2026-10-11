@@ -51,9 +51,16 @@ describe("speed camera namespace stays closed although cameras were imported", (
   }
 
   async function get<T>(serverUrl: string, pathAndQuery: string): Promise<T> {
-    const res = await fetch(new URL(pathAndQuery, serverUrl), { headers: { authorization: `Bearer ${token}` } });
-    if (!res.ok) throw new Error(`GET ${pathAndQuery} failed: ${res.status}`);
-    return (await res.json()) as T;
+    // The static-data endpoints answer 503 PACKAGES_BUILDING (with Retry-After) while the node builds its packages after a start or an
+    // import; that is the documented way of saying "not yet", and on a slow machine the first request can land in that window.
+    const deadline = Date.now() + 60_000;
+    for (;;) {
+      const res = await fetch(new URL(pathAndQuery, serverUrl), { headers: { authorization: `Bearer ${token}` } });
+      if (res.ok) return (await res.json()) as T;
+      const building = res.status === 503 && ((await res.text()).includes("PACKAGES_BUILDING"));
+      if (!building || Date.now() > deadline) throw new Error(`GET ${pathAndQuery} failed: ${res.status}`);
+      await new Promise((resolve) => setTimeout(resolve, 500));
+    }
   }
 
   const nearby = "/v1/speed-cameras/nearby?lat=48.15&lng=11.58&radiusM=20000";

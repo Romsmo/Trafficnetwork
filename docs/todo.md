@@ -13,6 +13,9 @@ Der Code gibt von sich aus nichts frei, was rechtlich entschieden werden muss: W
 - [ ] Mindestens zwei Seed-Server bei unterschiedlichen Anbietern bereitstellen
 - [ ] Backups mit belegtem Wiederherstellungstest, Überwachung und Update-Weg für den öffentlichen Knoten einrichten
 - [ ] Entscheiden, ab wann Repository und Container-Images (GHCR) öffentlich sind (beides ist derzeit privat)
+- [ ] **Betreiberangaben fürs Impressum** eintragen (`OPERATOR_NAME`, `OPERATOR_ADDRESS`, `OPERATOR_EMAIL`, was zutrifft von `OPERATOR_PHONE`, `OPERATOR_REPRESENTATIVE`, `OPERATOR_REGISTER`, `OPERATOR_VAT_ID`; `server/docs/web-ui.md`, „Legal pages“) — ohne sie sagt die Seite es und der Knoten warnt beim Start
+- [ ] Die Entwürfe `/privacy` und `/terms` (Weboberfläche) rechtlich prüfen lassen, dann den Entwurfshinweis streichen; offene Rechtsfragen: `docs/web-compliance.md`
+- [ ] Screenreader-Test der Weboberfläche (NVDA/VoiceOver/TalkBack) oder Prüfung durch eine Fachstelle; Wahl der Kartenquelle und eigene Kacheln/PMTiles
 
 ## 2. Beim Betreiber — Blitzer-Politik
 
@@ -26,7 +29,7 @@ Ausgeliefert ist: Kategorien freigeschaltet, Standard `full` in jedem Land, Filt
 ## 3. Beim Betreiber — Daten und Quellen
 
 - [ ] Autobahn-API-Lizenz bei der Autobahn GmbH/BMV erfragen; die Quelle (`de-autobahn`) bleibt bis dahin aus
-- [ ] Lizenz von NDW (Niederlande) klären, danach `nl-ndw` einschalten
+- [ ] NDW (Niederlande): die Quelle steht seit Oktober 2026 auf `enabled: true` (NDW erklärt die Daten in der eigenen Handreichung als frei wiederverwendbar durch Dritte, keine benannte Lizenz, Haftung ausgeschlossen — Ampel „auflagen“). Entscheiden, ob sie importiert wird, oder per `ROADWORKS_FEEDS_OFF=nl-ndw` abschalten; Namensnennung in der Weboberfläche (`ingestion/docs/attribution.md`)
 - [ ] Auf dem Knoten `tn-europe`: die 2.000 doppelt importierten Segmente entfernen (SQL im Europa-Bericht), dann `pg_dump` als Grundstock ziehen; danach das Server-Image dort starten (Migration `0007`/`0008` sperrt `speed_limit_segments` etwa 6 Minuten, siehe `server/docs/operating.md`)
 - [ ] NVDB-Norwegen-Vollimport ausführen (`--region norway`, 20–40 min; auf einem Knoten mit den Europa-Daten nur mit `--allow-non-empty`)
 - [ ] NVDB Schweden nur, wenn ein Lastkajen-Zugang samt Beispieldatei vorliegt
@@ -39,13 +42,11 @@ Ausgeliefert ist: Kategorien freigeschaltet, Standard `full` in jedem Land, Filt
 Server und Weboberfläche:
 
 - [ ] `federationEventId` in Snapshot/Delta ausliefern (Voraussetzung für föderiertes Bestätigen/Widersprechen; heute sind Bestätigungen pro Knoten — dazu gehört auch das vorzeitige Ende temporärer Kameras durch „nicht mehr da“, das deshalb nur knotenlokal wirkt)
-- [ ] Weboberfläche: „Stimmt nicht?"-Formular und Herkunftsanzeige für Tempolimit-Korrekturen (die Server-Pfade sind für Web-Sitzungen offen)
 - [ ] Weboberfläche: Startansicht Europa, nur den sichtbaren Ausschnitt laden, Cluster bei kleiner Zoomstufe
 - [ ] Weboberfläche: Quellen-Attribution aus `ingestion/docs/attribution.md` anzeigen (braucht `source_feed` in der Hazard-API)
 - [ ] Weboberfläche: in sehr großen Ausschnitten (Hinweis „Ausschnitt sehr groß") kommen neue Meldungen erst mit dem Minutentakt statt live, weil die Push-Abos begrenzt sind (`WEB_WS_MAX_TILES_PER_CONNECTION`) — in `server/docs/web-ui.md` vermerkt, nicht behoben
-- [ ] Eigene Ablaufzeit: Anbindung in der Weboberfläche (Auswahl der Dauer) — Server ab 1.1.0 und Client-Bibliothek 1.2.0 (`ttlSeconds`, `getReportLimits`) fertig, Web folgt (Block 5 des Oktober-Auftrags)
 - [ ] Eigene Ablaufzeit: ob Geräte mit geringer Reputation nur bis zum Standard dürfen — bewusst nicht gebaut (Reputation ist knotenlokal, ein Tor würde Knoten auseinanderlaufen lassen); nach echten Daten neu bewerten
-- [ ] Tempolimit nachreichen (D13): Vorschläge über Zellgrenzen hinweg zusammenführen; Straßen länger als 120 m brauchen je Stück drei Geräte; Anbindung Weboberfläche — Server ab 1.1.0 und Client-Bibliothek 1.2.0 (`reportMissingSpeedLimit`, `lookupSpeedLimit`) fertig, Web folgt (Block 5)
+- [ ] Tempolimit nachreichen (D13): Vorschläge über Zellgrenzen hinweg zusammenführen; Straßen länger als 120 m brauchen je Stück drei Geräte (Server 1.1.0, Client-Bibliothek 1.2.0 und Weboberfläche sind fertig)
 - [ ] Tempolimit-Korrekturen: temporäre Korrekturen (Baustelle) automatisch auslaufen lassen; `deviceAssertion` bei Meldungen an den gebundenen Schlüssel knüpfen; Stimmen nach Ruf des weiterleitenden Knotens gewichten
 - [ ] Dauerhafte Anlagen: Abschnittskontrolle (`enforcement=average_speed`) — erst entscheiden, dann bauen; ob Nutzer eine Meldung „dauerhaft" machen können (Schwelle) oder Nutzermeldungen immer verfallen; die acht Standardwerte aus `server/docs/persistent-enforcement-devices.md` §10 bestätigen oder ändern
 - [ ] Blitzer nach Land: `GET /v1/config` nennt `staticDataVersion` sofort, das Manifest aber erst nach dem Neubau der Pakete — bei einem Knoten ohne statische Daten bewegt sich die Manifest-Version bei einem Politikwechsel nie (die Bibliothek fragt deshalb zusätzlich in kurzem Takt)
