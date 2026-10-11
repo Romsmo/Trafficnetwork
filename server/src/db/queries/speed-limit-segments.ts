@@ -48,7 +48,7 @@ interface Row extends Record<string, unknown> {
   source_license: string | null;
   imported_at: string;
   last_confirmed_at: string | null;
-  imported_speed_limit: number;
+  imported_speed_limit: number | null;
   correction_id: string | null;
   support_count: number | null;
   deny_count: number | null;
@@ -66,14 +66,20 @@ interface Row extends Record<string, unknown> {
  * key *and unit* whose value actually differs from the row's imported value —
  * if a later import already agrees with the community, the correction is
  * redundant and the row is served as a plain imported one.
+ *
+ * A `community` row (a road the import had no limit for, docs D13) is the one exception: its value *is* the correction, so
+ * the join always applies and nothing is "imported" about it. With the feature off such rows are not served at all.
  */
 const COLUMNS = sql`
   s.id, ST_AsGeoJSON(s.geometry)::json as geometry_geojson, s.geometry_key as segment_key,
   coalesce(c.value, s.speed_limit) as speed_limit, s.speed_limit_unit,
   s.source, s.source_license, s.imported_at, s.last_confirmed_at,
-  s.speed_limit as imported_speed_limit,
+  case when s.source = 'community' then null else s.speed_limit end as imported_speed_limit,
   c.id as correction_id, c.support_count, c.deny_count, c.applied_at as correction_applied_at,
-  (c.id is not null and c.base_value is not null and s.speed_limit <> c.base_value) as needs_review
+  case when s.source = 'community'
+       then coalesce((select g.needs_review from speed_limit_gaps g where g.segment_key = s.geometry_key), false)
+       else (c.id is not null and c.base_value is not null and s.speed_limit <> c.base_value)
+  end as needs_review
 `;
 
 function fromClause(overlay: boolean) {
@@ -81,8 +87,8 @@ function fromClause(overlay: boolean) {
     ? sql`from speed_limit_segments s
           left join speed_limit_corrections c
             on c.segment_key = s.geometry_key and c.unit = s.speed_limit_unit
-           and c.status = 'applied' and c.value <> s.speed_limit`
-    : sql`from speed_limit_segments s left join speed_limit_corrections c on false`;
+           and c.status = 'applied' and (c.value <> s.speed_limit or s.source = 'community')`
+    : sql`from (select * from speed_limit_segments where source <> 'community') s left join speed_limit_corrections c on false`;
 }
 
 export function toSegmentApi(row: Row): SpeedLimitSegmentApi {
@@ -99,7 +105,8 @@ export function toSegmentApi(row: Row): SpeedLimitSegmentApi {
   };
   if (row.correction_id) {
     api.correctedBy = "community";
-    api.importedSpeedLimit = row.imported_speed_limit;
+    // A community segment has no imported value to keep (docs D13): origin and counts are enough.
+    if (row.imported_speed_limit !== null) api.importedSpeedLimit = row.imported_speed_limit;
     api.correction = {
       id: row.correction_id,
       confirmations: row.support_count ?? 0,

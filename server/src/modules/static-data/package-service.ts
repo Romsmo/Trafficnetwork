@@ -15,6 +15,8 @@ import {
 import { PackageStore } from "./package-store.js";
 import { isCurrentFingerprint, rebuildPolicyStale, runBuild, type BuilderDeps } from "./package-builder.js";
 import { buildEffectivePolicy, type EffectiveCameraPolicy } from "../cameras/policy/policy.js";
+import { countriesOfTiles, boundaryContentHash } from "../../db/queries/tile-countries.js";
+import { groupRegions, tileCentres, type Region } from "./regions.js";
 
 /**
  * What the static-data endpoints talk to (add-on E-B, docs/europe-scale.md):
@@ -51,6 +53,16 @@ export interface ManifestBody {
   since?: number;
 }
 
+export interface RegionsBody {
+  staticDataVersion: number;
+  partitionResolution: number;
+  generatedAt: string;
+  /** Whether country boundaries are loaded on this node: without them every region is a coarse H3 area (`country: null`). */
+  countryBoundaries: boolean;
+  regions: Region[];
+  totals: { tileCount: number; sizeBytes: number; gzipBytes: number; brotliBytes: number; complete: boolean };
+}
+
 export interface RenderedManifest {
   json: string;
   gzip: Buffer;
@@ -82,6 +94,7 @@ export class StaticPackageService {
   private inflight: Promise<unknown> | null = null;
   private policyRebuild: Promise<unknown> | null = null;
   private cache: { key: string; manifest: RenderedManifest } | null = null;
+  private regionsCache: { key: string; rendered: RenderedManifest } | null = null;
   /** The camera policy in force; until an app or a CLI hands one in, nothing camera-related is packaged. */
   private policy: (() => EffectiveCameraPolicy) | null = null;
 
@@ -220,6 +233,47 @@ export class StaticPackageService {
     const manifest = render(body);
     if (since === undefined) this.cache = { key, manifest };
     return { status: "ready", manifest };
+  }
+
+  /**
+   * The packages grouped into regions with their sizes (docs/operating.md, "Offline regions") — what a host app shows as
+   * "France: 410 MB" and then fetches by tile id. Same readiness rules as the manifest; computed from the per-tile state, so
+   * no data is read, and cached until the package set or the boundary data changes.
+   */
+  async regions(): Promise<ManifestResult> {
+    const fresh = await this.ensureFresh();
+    if (!fresh.ready) return { status: "building", reason: fresh.reason ?? "packages are being built" };
+    if (!(await this.settlePolicyStale())) {
+      return { status: "building", reason: "a change of the camera policy is being applied to the packages" };
+    }
+    const state = await getPackageState(this.db);
+    const boundaryHash = await boundaryContentHash(this.db);
+    const key = `${state.updatedAt}|${boundaryHash ?? ""}`;
+    if (this.regionsCache?.key === key) return { status: "ready", manifest: this.regionsCache.rendered };
+
+    const rows = (await listPackageRows(this.db)).filter((r) => r.hash !== null);
+    const countries = await countriesOfTiles(this.db, tileCentres(rows.map((r) => r.tile)));
+    const regions = groupRegions(
+      rows.map((r) => ({ tile: r.tile, sizeBytes: r.sizeBytes ?? 0, gzipBytes: r.gzipBytes, brotliBytes: r.brotliBytes })),
+      countries,
+    );
+    const body: RegionsBody = {
+      staticDataVersion: state.builtVersion,
+      partitionResolution: this.env.STATIC_DATA_PARTITION_H3_RESOLUTION,
+      generatedAt: new Date(state.updatedAt).toISOString(),
+      countryBoundaries: boundaryHash !== null,
+      regions,
+      totals: {
+        tileCount: regions.reduce((n, r) => n + r.tileCount, 0),
+        sizeBytes: regions.reduce((n, r) => n + r.sizeBytes, 0),
+        gzipBytes: regions.reduce((n, r) => n + r.gzipBytes, 0),
+        brotliBytes: regions.reduce((n, r) => n + r.brotliBytes, 0),
+        complete: regions.every((r) => r.complete),
+      },
+    };
+    const rendered = render(body as unknown as ManifestBody);
+    this.regionsCache = { key, rendered };
+    return { status: "ready", manifest: rendered };
   }
 
   /** A package row exists but its file does not: have the builder recreate that tile. */

@@ -39,6 +39,7 @@ const CONFIRMATION_PATH = /^\/v1\/hazard-reports\/[^/]+\/confirmations$/;
 // node these paths simply answer 404 after passing the guard.
 const CORRECTIONS_OF_SEGMENT_PATH = /^\/v1\/speed-limit-segments\/[^/]+\/corrections$/;
 const CORRECTION_VOTE_PATH = /^\/v1\/speed-limit-corrections\/[^/]+\/confirmations$/;
+const SPEED_LIMIT_GAPS_PATH = "/v1/speed-limit-gaps";
 
 /** A device signature makes a submission federation-eligible; browser sessions are anonymous and free to mint, so theirs never carry one. */
 function carriesDeviceSignature(body: unknown): boolean {
@@ -104,8 +105,9 @@ export function classifyWebRequest(info: WebRequestInfo, policy: WebPolicy): Gua
     return { kind: "allow", category: "write" };
   }
 
-  // Proposing or confirming/denying a speed-limit correction: unsigned, so the vote counts on this node only (add-on K-A).
-  if (method === "POST" && (CORRECTIONS_OF_SEGMENT_PATH.test(path) || CORRECTION_VOTE_PATH.test(path))) {
+  // Proposing or confirming/denying a speed-limit correction, or naming a road the import has no limit for (docs D13):
+  // unsigned, so the vote counts on this node only (add-on K-A).
+  if (method === "POST" && (CORRECTIONS_OF_SEGMENT_PATH.test(path) || CORRECTION_VOTE_PATH.test(path) || path === SPEED_LIMIT_GAPS_PATH)) {
     if (carriesDeviceSignature(body)) {
       return deny(403, "WEB_NO_DEVICE_SIGNATURE", "Web sessions cannot submit device-signed votes; their votes count on this node only");
     }

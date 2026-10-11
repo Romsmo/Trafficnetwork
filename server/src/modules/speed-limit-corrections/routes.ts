@@ -7,13 +7,15 @@ import type { Queryable } from "../../db/client.js";
 import { findClientByClientId } from "../../db/queries/clients.js";
 import { listCorrections } from "../../db/queries/speed-limit-corrections.js";
 import { findSpeedLimitSegmentById, type SpeedLimitSegmentApi } from "../../db/queries/speed-limit-segments.js";
-import { ApiError, badRequest, notFound } from "../../lib/errors.js";
+import { ApiError, badRequest, notFound, unprocessable } from "../../lib/errors.js";
+import { findImportedRoadsNear } from "../../db/queries/speed-limit-gaps.js";
+import { GAP_AXES, gapGeometry, gapGeoJson, placeOf } from "./gap.js";
 import { parseCsv } from "../../lib/query-params.js";
 import { isFreshTimestamp } from "../crypto/envelope.js";
 import { computeFederationEventId } from "../federation/device-event.js";
 import { broadcastSpeedLimitVotes } from "../federation/broadcast.js";
 import { publishEvent } from "../realtime/publisher.js";
-import { castLocalVote, loadCorrectionTarget, type CastVoteResult, type LocalCaller } from "./service.js";
+import { castLocalVote, loadCorrectionTarget, targetOfSegment, type CastVoteResult, type LocalCaller } from "./service.js";
 import {
   deviceReporterId,
   speedLimitVoteEnvelopeSchema,
@@ -37,6 +39,22 @@ const proposeBodySchema = z.object({
   // it eligible for federation. Without it the vote counts on this server only.
   deviceAssertion: speedLimitVoteEnvelopeSchema.optional(),
 });
+
+// "This road has no speed limit on record" (docs D13). A place and a direction, not a segment: there is none to name.
+const gapBodySchema = z.object({
+  lat: z.number().min(-90).max(90),
+  lng: z.number().min(-180).max(180),
+  // Any heading along the road, either direction of travel; 0 = north, clockwise. Needed to place the stretch of road.
+  bearingDegrees: z.number().min(0).max(360),
+  value: z.number().int(),
+  unit: z.enum(SPEED_LIMIT_UNITS),
+  reason: z.enum(CORRECTION_REASONS).optional(),
+  deviceAssertion: speedLimitVoteEnvelopeSchema.optional(),
+});
+
+/** An imported road this close to the reported point, running the same way, means the road is not missing — correct that one. */
+const ROAD_ALREADY_THERE_RADIUS_M = 15;
+const ROAD_ALREADY_THERE_MAX_ANGLE_DEGREES = 25;
 
 const confirmBodySchema = z.object({
   kind: z.enum(["confirm", "deny"]),
@@ -64,12 +82,13 @@ async function resolveCaller(db: Queryable, sub: string, assertion: SpeedLimitVo
 
 function verifyAssertion(
   envelope: SpeedLimitVoteEnvelope,
-  expected: { vote: "support" | "deny"; segmentKey: string; value: number; unit: string; reason: CorrectionReason | null },
+  expected: { vote: "support" | "deny"; segmentKey: string | readonly string[]; value: number; unit: string; reason: CorrectionReason | null },
 ) {
   const p = envelope.payload;
+  const acceptedKeys = typeof expected.segmentKey === "string" ? [expected.segmentKey] : expected.segmentKey;
   if (
     p.vote !== expected.vote ||
-    p.segmentKey !== expected.segmentKey ||
+    !acceptedKeys.includes(p.segmentKey) ||
     p.value !== expected.value ||
     p.unit !== expected.unit ||
     (p.reason ?? null) !== expected.reason
@@ -119,7 +138,13 @@ function respond(app: FastifyInstance, reply: { status: (code: number) => unknow
   for (const event of result.events) publishEvent(app.realtime, event);
   if (signed && result.recorded) broadcastSpeedLimitVotes(app, [signed], null);
   reply.status(result.recorded && !result.merged ? 201 : 200);
-  return { correction: result.correction, recorded: result.recorded, merged: result.merged, segment: segmentSummary(result.segment) };
+  return {
+    correction: result.correction,
+    recorded: result.recorded,
+    merged: result.merged,
+    // null while a road without a limit on record is still below its threshold: there is no segment yet
+    segment: result.segment ? segmentSummary(result.segment) : null,
+  };
 }
 
 /**
@@ -148,7 +173,7 @@ export async function registerSpeedLimitCorrectionRoutes(app: FastifyInstance) {
       : null;
 
     const result = await castLocalVote(db, env, {
-      segment,
+      target: targetOfSegment(segment),
       kind: "support",
       value: input.value,
       unit: input.unit,
@@ -166,17 +191,68 @@ export async function registerSpeedLimitCorrectionRoutes(app: FastifyInstance) {
     if (!body.success) throw badRequest("Invalid request body", body.error.issues);
     const input = body.data;
 
-    const { row, segment } = await loadCorrectionTarget(db, env, params.data.id);
+    const { row, target } = await loadCorrectionTarget(db, env, params.data.id);
     const kind = input.kind === "confirm" ? "support" : "deny";
 
     const assertion = input.deviceAssertion as SpeedLimitVoteEnvelope | undefined;
     const caller = await resolveCaller(db, req.auth!.sub, assertion);
     const signed = assertion
-      ? verifyAssertion(assertion, { vote: kind, segmentKey: segment.segmentKey, value: row.value, unit: row.unit, reason: null })
+      ? verifyAssertion(assertion, { vote: kind, segmentKey: target.segmentKey, value: row.value, unit: row.unit, reason: null })
       : null;
 
-    const result = await castLocalVote(db, env, { segment, kind, value: row.value, unit: row.unit, reason: null, caller, signed });
+    const result = await castLocalVote(db, env, { target, kind, value: row.value, unit: row.unit, reason: null, caller, signed });
     return respond(app, reply, result, result.recorded ? assertion : undefined);
+  });
+
+  // "No speed limit is recorded here" (docs D13): a value for a road the import has none for. Several devices naming the
+  // same place and direction are one proposal; at the threshold it becomes a short stretch of road with the value on it.
+  app.post("/v1/speed-limit-gaps", async (req, reply) => {
+    const body = gapBodySchema.safeParse(req.body);
+    if (!body.success) throw badRequest("Invalid request body", body.error.issues);
+    const input = body.data;
+    if (input.lat === 0 && input.lng === 0) throw badRequest("Position (0, 0) is rejected as implausible (\"null island\")");
+
+    const place = placeOf(input.lat, input.lng, input.bearingDegrees);
+    const gap = gapGeometry(place);
+
+    // Not missing after all: an imported road runs here, in this direction. The proposal belongs on that road.
+    const proposedAxis = place.axis * (180 / GAP_AXES);
+    for (const road of await findImportedRoadsNear(db, input.lat, input.lng, ROAD_ALREADY_THERE_RADIUS_M)) {
+      const diff = Math.abs(road.axisDegrees - proposedAxis) % 180;
+      if (Math.min(diff, 180 - diff) <= ROAD_ALREADY_THERE_MAX_ANGLE_DEGREES) {
+        throw unprocessable(
+          "ROAD_ALREADY_HAS_LIMIT",
+          "A road with a speed limit on record runs here in this direction; propose a correction for that segment instead",
+          { segmentId: road.segmentId, segmentKey: road.segmentKey, speedLimit: road.speedLimit, unit: road.unit },
+        );
+      }
+    }
+
+    const assertion = input.deviceAssertion as SpeedLimitVoteEnvelope | undefined;
+    const caller = await resolveCaller(db, req.auth!.sub, assertion);
+    const signed = assertion
+      ? verifyAssertion(assertion, { vote: "support", segmentKey: [gap.ref, gap.segmentKey], value: input.value, unit: input.unit, reason: input.reason ?? null })
+      : null;
+
+    const result = await castLocalVote(db, env, {
+      target: { segmentKey: gap.segmentKey, unit: null, importedValue: null, segment: null, gap },
+      kind: "support",
+      value: input.value,
+      unit: input.unit,
+      reason: input.reason ?? null,
+      caller,
+      signed,
+    });
+    for (const event of result.events) publishEvent(app.realtime, event);
+    if (assertion && result.recorded) broadcastSpeedLimitVotes(app, [assertion], null);
+    reply.status(result.recorded && !result.merged ? 201 : 200);
+    return {
+      correction: result.correction,
+      recorded: result.recorded,
+      merged: result.merged,
+      segment: result.segment ? segmentSummary(result.segment) : null,
+      gap: { segmentKey: gap.segmentKey, ref: gap.ref, geometry: gapGeoJson(gap) },
+    };
   });
 
   // Discovery of open proposals and applied corrections. One of tiles / segmentId

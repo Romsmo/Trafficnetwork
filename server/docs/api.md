@@ -424,6 +424,7 @@ one.
 | GET | `/v1/config` | See "Client config" below |
 | GET | `/v1/static-data/manifest` | See "Static data packages" below |
 | GET | `/v1/static-data/partitions/:tile` | See "Static data packages" below |
+| GET | `/v1/static-data/regions` | The packages grouped into countries with their sizes — see "Offline regions" below |
 
 `radiusM` is capped at 50,000 (50 km). `types` is a comma-separated list of
 hazard types; unsupported/disallowed values are dropped rather than rejected.
@@ -534,6 +535,32 @@ from reads. Works whatever the camera policy says, and for every kind of
 persistent device (the id is what counts — see the next section). `camera` is
 in the answer only where the camera's country is delivered at level `full`;
 otherwise the answer is `{ "recorded", "removed" }`.
+
+## Offline regions (server 1.1.0)
+
+`GET /v1/static-data/regions` groups the static-data packages into things a person can choose and says what each costs, so a host
+app can show "France: 410 MB" and then fetch exactly its tiles from the manifest.
+
+```
+{ "staticDataVersion": 118, "partitionResolution": 4, "generatedAt": "…",
+  "countryBoundaries": true,                      // false: no boundary data is loaded, every region is a coarse area
+  "regions": [
+    { "id": "FR", "country": "FR",                // or "h3:<res-2 cell>" with "country": null
+      "tileCount": 612,
+      "sizeBytes": 701234567,                     // uncompressed: what the JSON packages hold
+      "gzipBytes": 171234567, "brotliBytes": 165123456,   // what is sent (Accept-Encoding decides which)
+      "complete": true,                           // false while some tile has no compressed copy yet: the sums are lower bounds
+      "bbox": [west, south, east, north],
+      "tiles": ["841f9ddffffffff", …] } ],        // the partition tile ids — the keys of the manifest's `partitions`
+  "totals": { "tileCount", "sizeBytes", "gzipBytes", "brotliBytes", "complete" } }
+```
+
+A tile belongs to **one** region: the country its centre lies in (the boundary data the camera policy loads), so the regions add
+up to the whole without double counting; a tile on a border is counted for the country of its centre. Tiles out at sea or on a
+node without boundary data fall into coarse H3 areas. Per-tile bounding boxes are not in the manifest (a client computes them
+from the H3 id); the region's `bbox` is the box around all its tiles. Same readiness, ETag and `Accept-Encoding` rules as the
+manifest (`503 PACKAGES_BUILDING` while packages are built). Additive: an older server has no such endpoint (404) — that is the
+version hint.
 
 ## Persistent enforcement devices (add-on D)
 
@@ -701,6 +728,29 @@ silently overwrites it), but the operator or the community should re-check
 static package are "as of the last change of the effective value"; the live
 numbers come from the endpoints below. `GET /v1/speed-limit` returns the same
 additive fields next to `segmentId` and `segmentKey`.
+
+### `POST /v1/speed-limit-gaps` — a road with no speed limit on record (server 1.1.0)
+
+```
+Request:  { "lat": number, "lng": number, "bearingDegrees": number /* 0..360, either direction of travel */,
+            "value": integer, "unit": "kmh" | "mph", "reason"?: "missing" | "sign_missing_or_new" | "limit_lifted" | "other",
+            "deviceAssertion"?: SignedEnvelope<SpeedLimitVote> }
+Response: { "correction": {...}, "recorded": boolean, "merged": boolean,
+            "segment": {...} | null,                         // null until a value is applied
+            "gap": { "segmentKey": "<32 hex>", "ref": "gap:<h3 cell>:<axis>", "geometry": { LineString } } }
+            — 201 if recorded and new, 200 otherwise
+```
+
+For a road the import has no limit for. The place and direction are quantised to an H3 cell (resolution 10) and one of 8
+direction buckets; **devices that name the same cell and bucket make the same proposal** (`merged: true`). Three distinct
+devices (`COMMUNITY_CORRECTIONS_CONFIRMATIONS_REQUIRED`) turn it into a 120 m stretch of road with the value on it, served by
+every read (`source: "community"`, `correctedBy: "community"`, no `importedSpeedLimit`). Confirm or object with
+`POST /v1/speed-limit-corrections/:id/confirmations`; discover open proposals with `GET /v1/speed-limit-corrections?tiles=…`
+(`segmentId` is null and `geometry` is the stretch while it is below the threshold). A signed `deviceAssertion` names the place as
+`segmentKey: "gap:<cell>:<axis>"` (or the derived key). Errors: `422 ROAD_ALREADY_HAS_LIMIT` (an imported road with a limit
+runs here in this direction; `details` names the segment — propose a correction for it), `422 CORRECTION_VALUE_*`, `429`
+(same per-client budget as corrections). With the feature off the endpoint does not exist (404). Design: D13 in
+[`speed-limit-corrections.md`](speed-limit-corrections.md).
 
 ### `POST /v1/speed-limit-segments/:id/corrections`
 

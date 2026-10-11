@@ -151,6 +151,24 @@ export async function registerStaticDataRoutes(app: FastifyInstance) {
     return reply.send(manifest.json);
   });
 
+  // Offline regions (server 1.1.0): the packages grouped into countries (or coarse areas) with their sizes, so an app can show
+  // "France: 410 MB" and fetch exactly the tiles of a region. Read-only, from the per-tile state; same readiness as the manifest.
+  app.get("/v1/static-data/regions", async (req, reply) => {
+    const result = await service().regions();
+    if (result.status === "building") {
+      reply.header("retry-after", "30").status(503);
+      return { error: { code: "PACKAGES_BUILDING", message: `Static-data packages are not ready: ${result.reason}. Retry shortly.` } };
+    }
+    const { manifest } = result;
+    reply.header("etag", manifest.etag).header("cache-control", "private, no-cache").header("vary", "Accept-Encoding");
+    if (etagMatches(req.headers["if-none-match"] as string | undefined, manifest.etag)) return reply.status(304).send();
+    reply.header("content-type", "application/json; charset=utf-8");
+    if (negotiateEncoding(req.headers["accept-encoding"]) !== "identity") {
+      return reply.header("content-encoding", "gzip").send(manifest.gzip);
+    }
+    return reply.send(manifest.json);
+  });
+
   // Same content as before (a partition by tile), now streamed from the pre-built file:
   // ETag + revalidation instead of a cache the server keeps in memory.
   app.get("/v1/static-data/partitions/:tile", async (req, reply) => {
