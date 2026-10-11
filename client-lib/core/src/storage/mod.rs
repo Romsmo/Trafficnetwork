@@ -193,6 +193,19 @@ pub struct LocalCorrectionProposal {
     pub proposed_at_unix_ms: i64,
 }
 
+/// What the store knows about one stored static-data package, beyond its hash — what the offline-area
+/// management (docs/offline-storage.md) decides by: how big it is, and when a position inside it was last used.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PartitionRecord {
+    pub tile: String,
+    pub hash: String,
+    /// The package's size as the manifest stated it (the JSON bytes), `0` when it was stored before sizes were
+    /// recorded.
+    pub size_bytes: u64,
+    /// Unix milliseconds of the last lookup inside it; `0` = never used since it was stored.
+    pub last_used_unix_ms: i64,
+}
+
 /// `entity_type` matches the server's `EntityType` values
 /// (`server/src/config/constants.ts`): `"speedLimitSegment"`, `"staticSign"`,
 /// `"fixedSpeedCamera"`, `"hazardReport"`.
@@ -338,6 +351,38 @@ pub trait Store: Send + Sync {
     }
 
     fn set_static_partition_resolution(&self, _resolution: u8) -> Result<(), StoreError> {
+        Ok(())
+    }
+
+    /// Every stored static-data package with its size and last use. (The default knows the hashes only through
+    /// `get_partition_hash` and so lists nothing: a store that does not override this takes no part in the
+    /// offline-area management and keeps everything it was given.)
+    fn partition_records(&self) -> Result<Vec<PartitionRecord>, StoreError> {
+        Ok(Vec::new())
+    }
+
+    /// Records the size of a package just stored.
+    fn set_partition_size(&self, _tile: &str, _size_bytes: u64) -> Result<(), StoreError> {
+        Ok(())
+    }
+
+    /// Notes that these packages were just looked at (a lookup inside them).
+    fn record_partition_use(&self, _tiles: &[String], _now_unix_ms: i64) -> Result<(), StoreError> {
+        Ok(())
+    }
+
+    /// Forgets that a package is stored (its hash, size and use) — so the next sync downloads it again if it
+    /// is wanted. Its entities are removed by the caller (`remove_static_entity`).
+    fn remove_partition_record(&self, _tile: &str) -> Result<(), StoreError> {
+        Ok(())
+    }
+
+    /// A small named value that must survive a restart (the offline-area settings). (The default keeps nothing.)
+    fn get_setting(&self, _key: &str) -> Result<Option<String>, StoreError> {
+        Ok(None)
+    }
+
+    fn set_setting(&self, _key: &str, _value: &str) -> Result<(), StoreError> {
         Ok(())
     }
 }

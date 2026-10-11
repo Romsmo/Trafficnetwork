@@ -15,6 +15,7 @@ pub mod engine;
 pub mod expiry;
 pub mod gaps;
 pub mod matching;
+pub mod offline;
 pub mod realtime;
 pub mod report_ttl;
 pub(crate) mod server_time;
