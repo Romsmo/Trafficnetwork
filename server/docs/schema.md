@@ -77,6 +77,22 @@ verbatim `SignedEnvelope`, null for an unsigned/node-local vote), `origin_node_i
 No foreign key to `speed_limit_segments`: a vote may arrive before its segment is
 imported, and must survive a wipe-and-reimport.
 
+### `speed_limit_gaps`
+
+Where a road without a speed limit on record is (server 1.1.0, migration `0012`, docs/speed-limit-corrections.md D13).
+
+| Column | Type | Notes |
+|---|---|---|
+| `segment_key` | text PK | `speed_limit_geometry_key` of `geometry` — the key votes and corrections for it use |
+| `cell` | text | H3 cell, resolution 10 |
+| `axis` | integer | 0..7, 22.5° each (an axis, not a heading) |
+| `geometry` | LineString(4326) | the 120 m stretch derived from `cell` and `axis` |
+| `needs_review` | boolean | an import brought a road of its own next to it |
+| `created_at` | timestamptz | |
+
+A value that is applied is an ordinary row of `speed_limit_segments` with `source = 'community'`, written and removed by the
+application (never by an import).
+
 ### `speed_limit_corrections`
 Materialised view of the votes: one row per `(segment_key, unit, value)` that a
 vote names. `id` is deterministic — first 128 bits of

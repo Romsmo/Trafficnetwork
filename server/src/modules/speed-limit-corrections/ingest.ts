@@ -4,6 +4,7 @@ import type { appendEvent } from "../../db/append-event.js";
 import { ApiError } from "../../lib/errors.js";
 import { computeFederationEventId } from "../federation/device-event.js";
 import { validateCorrectionValue } from "./plausibility.js";
+import { gapGeometry, parseGapRef, type GapGeometry } from "./gap.js";
 import { applyVote } from "./service.js";
 import { deviceReporterId, isNotInTheFuture, verifySpeedLimitVoteEnvelope, type SpeedLimitVoteEnvelope } from "./vote.js";
 
@@ -52,12 +53,23 @@ export async function ingestSpeedLimitVote(
     throw err;
   }
 
+  // A place reference (docs D13) is resolved the same way on every node: same cell and axis, same geometry, same key.
+  let segmentKey = p.segmentKey;
+  let gap: GapGeometry | undefined;
+  if (p.segmentKey.startsWith("gap:")) {
+    const place = parseGapRef(p.segmentKey);
+    if (!place) return { status: "rejected", voteId, reason: "Not a valid place reference", code: "implausible" };
+    gap = gapGeometry(place);
+    segmentKey = gap.segmentKey;
+  }
+
   const result = await applyVote(
     db,
     env,
     {
       id: voteId,
-      segmentKey: p.segmentKey,
+      segmentKey,
+      ...(gap ? { gap } : {}),
       reporterId: deviceReporterId(p.devicePublicKey),
       submittedBy: null,
       kind: p.vote,

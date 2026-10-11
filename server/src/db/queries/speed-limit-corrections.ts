@@ -3,6 +3,7 @@ import type { Queryable } from "../client.js";
 import type { CorrectionReason, CorrectionStatus, CorrectionVoteKind, SpeedLimitUnit } from "../../config/constants.js";
 import { pgArray } from "../pg-array.js";
 import type { VoteInput } from "../../modules/speed-limit-corrections/tally.js";
+import type { GapGeometry } from "../../modules/speed-limit-corrections/gap.js";
 
 /**
  * Persistence for community speed-limit corrections (add-on K-A). The rules
@@ -24,6 +25,8 @@ export interface NewVote {
   voteTimestamp: Date;
   envelope: unknown;
   originNodeId: string | null;
+  /** Set when the vote names a place instead of an existing segment: remembered before the vote is stored (docs D13). Not a column. */
+  gap?: GapGeometry;
 }
 
 /** Serialises every write that touches one segment's votes/corrections — two concurrent votes on the same segment must not both read the same tally. */
@@ -320,7 +323,7 @@ export async function setCorrectionBlocked(tx: Queryable, id: string, blocked: {
 export async function lookupBaseValue(tx: Queryable, segmentKey: string, unit: SpeedLimitUnit): Promise<number | null> {
   const rows = await tx.execute<{ speed_limit: number } & Record<string, unknown>>(sql`
     select speed_limit from speed_limit_segments
-    where geometry_key = ${segmentKey} and speed_limit_unit = ${unit}::speed_limit_unit
+    where geometry_key = ${segmentKey} and speed_limit_unit = ${unit}::speed_limit_unit and source <> 'community'
     order by imported_at, id limit 1
   `);
   return rows[0]?.speed_limit ?? null;
@@ -338,7 +341,8 @@ export async function fillMissingBaseValues(tx: Queryable): Promise<void> {
     from (
       select distinct on (geometry_key, speed_limit_unit) geometry_key, speed_limit_unit, speed_limit
       from speed_limit_segments
-      where geometry_key in (select segment_key from speed_limit_corrections where base_value is null)
+      where source <> 'community'
+        and geometry_key in (select segment_key from speed_limit_corrections where base_value is null)
       order by geometry_key, speed_limit_unit, imported_at, id
     ) s
     where c.base_value is null and c.segment_key = s.geometry_key and c.unit = s.speed_limit_unit
@@ -434,7 +438,10 @@ export async function listCorrections(db: Queryable, filter: CorrectionListFilte
   if (!filter.includeUnsupported) conditions.push(sql`c.support_count > 0`);
   if (filter.segmentKey) conditions.push(sql`c.segment_key = ${filter.segmentKey}`);
   if (filter.area) {
-    conditions.push(sql`seg.id is not null and ST_Intersects(seg.geometry, ST_SetSRID(ST_GeomFromGeoJSON(${JSON.stringify(filter.area)}), 4326))`);
+    // A proposal for a road with no limit on record has no segment yet: its remembered place is what the area is matched against.
+    conditions.push(
+      sql`coalesce(seg.geometry, gap.geometry) is not null and ST_Intersects(coalesce(seg.geometry, gap.geometry), ST_SetSRID(ST_GeomFromGeoJSON(${JSON.stringify(filter.area)}), 4326))`,
+    );
   }
   if (filter.needsReviewOnly) conditions.push(sql`needs.review`);
   const where = sql.join(conditions, sql` and `);
@@ -442,20 +449,22 @@ export async function listCorrections(db: Queryable, filter: CorrectionListFilte
   const rows = await db.execute<CorrectionApiRaw>(sql`
     select c.id, c.segment_key, seg.id as segment_id, c.value, c.unit, c.status, c.reason, c.support_count, c.deny_count,
            c.first_proposed_at, c.last_vote_at, c.applied_at,
-           seg.speed_limit as imported_speed_limit, needs.review as needs_review,
-           ST_AsGeoJSON(seg.geometry)::json as geometry_geojson
+           case when seg.source = 'community' then null else seg.speed_limit end as imported_speed_limit, needs.review as needs_review,
+           coalesce(ST_AsGeoJSON(seg.geometry)::json, ST_AsGeoJSON(gap.geometry)::json) as geometry_geojson
     from speed_limit_corrections c
+    left join speed_limit_gaps gap on gap.segment_key = c.segment_key
     left join lateral (
-      select s.id, s.geometry, s.speed_limit from speed_limit_segments s
+      select s.id, s.geometry, s.speed_limit, s.source from speed_limit_segments s
       where s.geometry_key = c.segment_key and s.speed_limit_unit = c.unit
-      order by s.imported_at, s.id limit 1
+      order by (s.source = 'community'), s.imported_at, s.id limit 1
     ) seg on true
     cross join lateral (
-      select (c.status = 'applied' and c.base_value is not null and exists (
-        select 1 from speed_limit_segments s2
-        where s2.geometry_key = c.segment_key and s2.speed_limit_unit = c.unit
-          and s2.speed_limit <> c.base_value and s2.speed_limit <> c.value
-      )) as review
+      select case when gap.segment_key is not null then (c.status = 'applied' and gap.needs_review)
+        else (c.status = 'applied' and c.base_value is not null and exists (
+          select 1 from speed_limit_segments s2
+          where s2.geometry_key = c.segment_key and s2.speed_limit_unit = c.unit
+            and s2.speed_limit <> c.base_value and s2.speed_limit <> c.value
+        )) end as review
     ) needs
     where ${where}
     order by c.last_vote_at desc, c.id
@@ -468,18 +477,20 @@ export async function findCorrectionApiById(db: Queryable, id: string): Promise<
   const rows = await db.execute<CorrectionApiRaw>(sql`
     select c.id, c.segment_key, seg.id as segment_id, c.value, c.unit, c.status, c.reason, c.support_count, c.deny_count,
            c.first_proposed_at, c.last_vote_at, c.applied_at,
-           seg.speed_limit as imported_speed_limit,
-           (c.status = 'applied' and c.base_value is not null and exists (
-             select 1 from speed_limit_segments s2
-             where s2.geometry_key = c.segment_key and s2.speed_limit_unit = c.unit
-               and s2.speed_limit <> c.base_value and s2.speed_limit <> c.value
-           )) as needs_review,
+           case when seg.source = 'community' then null else seg.speed_limit end as imported_speed_limit,
+           case when gap.segment_key is not null then (c.status = 'applied' and gap.needs_review)
+             else (c.status = 'applied' and c.base_value is not null and exists (
+               select 1 from speed_limit_segments s2
+               where s2.geometry_key = c.segment_key and s2.speed_limit_unit = c.unit
+                 and s2.speed_limit <> c.base_value and s2.speed_limit <> c.value
+             )) end as needs_review,
            null::json as geometry_geojson
     from speed_limit_corrections c
+    left join speed_limit_gaps gap on gap.segment_key = c.segment_key
     left join lateral (
-      select s.id, s.speed_limit from speed_limit_segments s
+      select s.id, s.speed_limit, s.source from speed_limit_segments s
       where s.geometry_key = c.segment_key and s.speed_limit_unit = c.unit
-      order by s.imported_at, s.id limit 1
+      order by (s.source = 'community'), s.imported_at, s.id limit 1
     ) seg on true
     where c.id = ${id}
   `);
@@ -494,6 +505,7 @@ export async function listOrphanCorrections(db: Queryable, limit: number): Promi
            null::int as imported_speed_limit, false as needs_review, null::json as geometry_geojson
     from speed_limit_corrections c
     where not exists (select 1 from speed_limit_segments s where s.geometry_key = c.segment_key)
+      and not exists (select 1 from speed_limit_gaps g where g.segment_key = c.segment_key)
     order by c.last_vote_at desc, c.id
     limit ${limit}
   `);

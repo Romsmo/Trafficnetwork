@@ -1,4 +1,5 @@
-import { bigserial, index, integer, pgTable, text, timestamp, unique, uuid, jsonb } from "drizzle-orm/pg-core";
+import { bigserial, boolean, index, integer, pgTable, text, timestamp, unique, uuid, jsonb } from "drizzle-orm/pg-core";
+import { geometryColumn } from "./geometry.js";
 import { correctionReasonEnum, correctionStatusEnum, correctionVoteKindEnum, speedLimitUnitEnum } from "./enums.js";
 
 /**
@@ -92,4 +93,21 @@ export const speedLimitCorrectionBans = pgTable("speed_limit_correction_bans", {
   reporterId: text("reporter_id").primaryKey(),
   reason: text("reason"),
   bannedAt: timestamp("banned_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+/**
+ * A stretch of road the import has no speed limit for, proposed by the community ("missing", docs D13). The key is the
+ * content-derived key of the synthetic geometry (the same function as speed_limit_segments.geometry_key), so votes for it
+ * live in the same tables as every other correction. The row exists from the first vote; the segment itself
+ * (speed_limit_segments, source 'community') exists only while a value is applied.
+ */
+export const speedLimitGaps = pgTable("speed_limit_gaps", {
+  segmentKey: text("segment_key").primaryKey(),
+  // H3 cell (resolution 10) and direction bucket (0..7, 22.5 degrees each, axis not heading) the geometry is derived from.
+  cell: text("cell").notNull(),
+  axis: integer("axis").notNull(),
+  geometry: geometryColumn("geometry", "LineString").notNull(),
+  // An import brought a road of its own at this place after the community segment was put there: look at it (D13).
+  needsReview: boolean("needs_review").notNull().default(false),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });

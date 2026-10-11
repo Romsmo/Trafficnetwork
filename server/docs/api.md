@@ -729,6 +729,29 @@ static package are "as of the last change of the effective value"; the live
 numbers come from the endpoints below. `GET /v1/speed-limit` returns the same
 additive fields next to `segmentId` and `segmentKey`.
 
+### `POST /v1/speed-limit-gaps` — a road with no speed limit on record (server 1.1.0)
+
+```
+Request:  { "lat": number, "lng": number, "bearingDegrees": number /* 0..360, either direction of travel */,
+            "value": integer, "unit": "kmh" | "mph", "reason"?: "missing" | "sign_missing_or_new" | "limit_lifted" | "other",
+            "deviceAssertion"?: SignedEnvelope<SpeedLimitVote> }
+Response: { "correction": {...}, "recorded": boolean, "merged": boolean,
+            "segment": {...} | null,                         // null until a value is applied
+            "gap": { "segmentKey": "<32 hex>", "ref": "gap:<h3 cell>:<axis>", "geometry": { LineString } } }
+            — 201 if recorded and new, 200 otherwise
+```
+
+For a road the import has no limit for. The place and direction are quantised to an H3 cell (resolution 10) and one of 8
+direction buckets; **devices that name the same cell and bucket make the same proposal** (`merged: true`). Three distinct
+devices (`COMMUNITY_CORRECTIONS_CONFIRMATIONS_REQUIRED`) turn it into a 120 m stretch of road with the value on it, served by
+every read (`source: "community"`, `correctedBy: "community"`, no `importedSpeedLimit`). Confirm or object with
+`POST /v1/speed-limit-corrections/:id/confirmations`; discover open proposals with `GET /v1/speed-limit-corrections?tiles=…`
+(`segmentId` is null and `geometry` is the stretch while it is below the threshold). A signed `deviceAssertion` names the place as
+`segmentKey: "gap:<cell>:<axis>"` (or the derived key). Errors: `422 ROAD_ALREADY_HAS_LIMIT` (an imported road with a limit
+runs here in this direction; `details` names the segment — propose a correction for it), `422 CORRECTION_VALUE_*`, `429`
+(same per-client budget as corrections). With the feature off the endpoint does not exist (404). Design: D13 in
+[`speed-limit-corrections.md`](speed-limit-corrections.md).
+
 ### `POST /v1/speed-limit-segments/:id/corrections`
 
 Propose a value (or confirm someone else's identical one — same value merges).
