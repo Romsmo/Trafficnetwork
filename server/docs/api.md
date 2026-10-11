@@ -424,6 +424,7 @@ one.
 | GET | `/v1/config` | See "Client config" below |
 | GET | `/v1/static-data/manifest` | See "Static data packages" below |
 | GET | `/v1/static-data/partitions/:tile` | See "Static data packages" below |
+| GET | `/v1/static-data/regions` | The packages grouped into countries with their sizes — see "Offline regions" below |
 
 `radiusM` is capped at 50,000 (50 km). `types` is a comma-separated list of
 hazard types; unsupported/disallowed values are dropped rather than rejected.
@@ -534,6 +535,32 @@ from reads. Works whatever the camera policy says, and for every kind of
 persistent device (the id is what counts — see the next section). `camera` is
 in the answer only where the camera's country is delivered at level `full`;
 otherwise the answer is `{ "recorded", "removed" }`.
+
+## Offline regions (server 1.1.0)
+
+`GET /v1/static-data/regions` groups the static-data packages into things a person can choose and says what each costs, so a host
+app can show "France: 410 MB" and then fetch exactly its tiles from the manifest.
+
+```
+{ "staticDataVersion": 118, "partitionResolution": 4, "generatedAt": "…",
+  "countryBoundaries": true,                      // false: no boundary data is loaded, every region is a coarse area
+  "regions": [
+    { "id": "FR", "country": "FR",                // or "h3:<res-2 cell>" with "country": null
+      "tileCount": 612,
+      "sizeBytes": 701234567,                     // uncompressed: what the JSON packages hold
+      "gzipBytes": 171234567, "brotliBytes": 165123456,   // what is sent (Accept-Encoding decides which)
+      "complete": true,                           // false while some tile has no compressed copy yet: the sums are lower bounds
+      "bbox": [west, south, east, north],
+      "tiles": ["841f9ddffffffff", …] } ],        // the partition tile ids — the keys of the manifest's `partitions`
+  "totals": { "tileCount", "sizeBytes", "gzipBytes", "brotliBytes", "complete" } }
+```
+
+A tile belongs to **one** region: the country its centre lies in (the boundary data the camera policy loads), so the regions add
+up to the whole without double counting; a tile on a border is counted for the country of its centre. Tiles out at sea or on a
+node without boundary data fall into coarse H3 areas. Per-tile bounding boxes are not in the manifest (a client computes them
+from the H3 id); the region's `bbox` is the box around all its tiles. Same readiness, ETag and `Accept-Encoding` rules as the
+manifest (`503 PACKAGES_BUILDING` while packages are built). Additive: an older server has no such endpoint (404) — that is the
+version hint.
 
 ## Persistent enforcement devices (add-on D)
 

@@ -458,6 +458,39 @@ What an operator has to know:
 - **"Gone" votes:** `HAZARD_GONE_THRESHOLD_CAMERA` (default 2) distinct devices end a temporary camera report early. The
   votes are local to a node.
 
+## Offline regions (server 1.1.0)
+
+`GET /v1/static-data/regions` ([`api.md`](api.md), "Offline regions") is how an app learns what an offline area costs. It reads
+the per-tile package state (no data), so it is cheap, and it is cached until the package set or the boundary data changes.
+Two things to know as an operator:
+
+- **Load the country boundaries** (`npm run cameras -- load-boundaries …`, Natural Earth 1:10m) — the camera policy needs them too.
+  Without them the endpoint still answers, but every region is a coarse H3 area (`country: null`) and an app cannot offer
+  "France" or "Germany".
+- **Read the real figures from your own node.** The numbers below are measured on the Europe import of 2026-09 (13.63 M rows,
+  `docs/europe-scale.md`); per-country figures were not measured and are *derived* from that data's per-row cost and are labelled so.
+
+| What | Value | Basis |
+|---|---|---|
+| Whole of Europe, packages as stored | 6,027.7 MB JSON = 443 B per row | measured (5,825 tiles) |
+| … as sent | **1,442 MB brotli** / 1,493 MB gzip = ≈ 106 / 110 B per row | measured |
+| … on a device after import (SQLite + R*Tree) | **≈ 4.0 GB** = 270–300 B per object, 13.6 M objects | measured (`client-lib/docs/bootstrap-measurements.md`) |
+| Largest tile | 38.7 MB uncompressed, 9.4 MB on the wire; median 0.2 MB | measured |
+| Germany | ≈ 3.5 M objects → ≈ 370 MB brotli, ≈ 1.0 GB on the device | **derived**: OSM taginfo 2026-09-18 (2.86 M `maxspeed` ways + 0.67 M `traffic_sign`) × the per-row cost above |
+| A country, in general | objects × 106 B (sent) / ≈ 300 B (device) | derived |
+
+`totals.brotliBytes` of the endpoint on `tn-europe` replaces the derived lines with measured ones — run it once after the next
+package build and note the figures here.
+
+## Roadworks from a feed: the end date and its cap
+
+A roadwork imported with `POST /v1/bulk-import/seed-reports` ends at **the date its source gives**; it is not cut to the 7-day default
+(`HAZARD_EXPIRY_CONSTRUCTION_DAYS` is only what a report *without* an end date lives, renewed on every sighting). Sources are not
+always honest about the end: `2099-12-31` is a common placeholder. So an end date more than `SEED_REPORT_MAX_END_DAYS` (default 365)
+away is held to that; the answer counts them as `endCapped`. A later import run that sees the roadwork again moves the end along
+with the cap — and emits no event for it. With no further run, such a roadwork ends at the cap, which is what "one import now,
+repeat by hand" needs: nothing stands on the map for longer than a year without somebody renewing it.
+
 ## Restarting, upgrading, backing up
 
 An upgrade that includes a migration with a heavy lock (0007, above) needs a maintenance window on a big node;

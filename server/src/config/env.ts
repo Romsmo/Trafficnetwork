@@ -76,6 +76,11 @@ const envSchema = z.object({
   // and at least as many as confirmed it, before the report ends early. Votes are node-local (not federated).
   HAZARD_GONE_THRESHOLD_CAMERA: z.coerce.number().int().positive().default(2),
 
+  // Roadworks imported from a feed (POST /v1/bulk-import/seed-reports) end at the date their source gives. A source that
+  // gives an end date further away than this many days (placeholders like 2099-12-31 are common) is held to it: the
+  // report then ends there unless a later import run sees it again and renews it. 0 would never expire, so it is refused.
+  SEED_REPORT_MAX_END_DAYS: z.coerce.number().int().positive().default(365),
+
   // Distinct-reporter "this fixed camera is gone" votes needed before it's marked
   // removed (docs/concept.md section 8: "nur durch gehäufte 'nicht mehr da'-
   // Meldungen entfernt" — no specific number given, this is our chosen default).
