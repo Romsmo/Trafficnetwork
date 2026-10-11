@@ -32,7 +32,7 @@ Ausgeliefert ist: Kategorien freigeschaltet, Standard `full` in jedem Land, Filt
 - [ ] NVDB Schweden nur, wenn ein Lastkajen-Zugang samt Beispieldatei vorliegt
 - [ ] Entscheiden, ob „alles auf jedem Gerät" für Europa so bleibt (Messung in `client-lib/docs/bootstrap-measurements.md` und `server/docs/europe-scale.md`)
 - [ ] Entscheiden: Mapillary/KartaView einbinden? (nur nach belegter Lizenzprüfung, wäre standardmäßig aus)
-- [ ] Baustellen-Dauerbetrieb einrichten: der Import ist gebaut, läuft aber nicht als wiederkehrender Lauf (`ingestion/docs/roadworks.md`; Frankreich an, Niederlande/Deutschland aus)
+- [ ] Baustellen: bewusst **kein** Dauerbetrieb (Betriebsentscheidung Oktober 2026: einmal importieren, Wiederholung manuell mit `npm run roadworks:update`, `ingestion/docs/roadworks.md`). Baustellen ohne erneuten Lauf laufen zum Enddatum bzw. zur Obergrenze (ohne Enddatum 168 h, mit Enddatum höchstens `SEED_REPORT_MAX_END_DAYS`) ab. Der produktive erste Lauf liegt beim Betreiber; Deutschland (`de-autobahn`) bleibt aus, bis Bedingungen vorliegen
 
 ## 4. Entwicklung — bewusst zurückgestellt oder nie zugesagt
 
