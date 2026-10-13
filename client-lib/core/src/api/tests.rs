@@ -1303,96 +1303,129 @@ fn covered_server() -> Arc<ScriptedServer> {
 }
 
 #[tokio::test]
-async fn a_road_without_a_limit_is_proposed_by_place_and_direction_and_shown_at_once() {
+async fn a_stretch_of_road_is_proposed_by_two_points_and_shown_at_once() {
     let server = covered_server();
     let client = client(server.clone());
     client.sync().await.unwrap();
 
-    // 52.01 / 13.005 is 1 km north of the stored road: nothing on record there
+    // 52.01 is 1 km north of the stored road: nothing on record there. The two points are ~140 m apart.
     let proposal = client
         .call(
-            "reportMissingSpeedLimit",
-            json!({ "lat": 52.01, "lng": 13.005, "bearing": 90, "value": 30, "unit": "kmh", "reason": "missing" }),
+            "reportSpeedLimitInterval",
+            json!({
+                "from": { "lat": 52.01, "lng": 13.005 },
+                "to": { "lat": 52.01, "lng": 13.007 },
+                "value": 30, "unit": "kmh", "reason": "missing"
+            }),
         )
         .await
         .unwrap();
     assert_eq!(proposal["value"], json!(30));
     assert_eq!(proposal["state"], json!("queued"));
 
-    // the device's own proposal answers for that place, marked as its own
+    // the device's own proposal answers for positions along the stretch, marked as its own
     let here = client
-        .call("getSpeedLimitAt", json!({ "lat": 52.01, "lng": 13.005 }))
+        .call("getSpeedLimitAt", json!({ "lat": 52.01, "lng": 13.006 }))
         .await
         .unwrap();
     assert_eq!(here["value"], json!(30.0));
     assert_eq!(here["origin"]["kind"], json!("locallyProposed"));
-    assert!(here["segmentKey"].as_str().unwrap().starts_with("gap:"));
+    assert!(here["segmentKey"].as_str().unwrap().starts_with("ivl:"));
+    // and not for a place far from it
+    let elsewhere = client
+        .call("getSpeedLimitAt", json!({ "lat": 52.012, "lng": 13.006 }))
+        .await
+        .unwrap();
+    assert!(elsewhere.is_null());
 
     client.sync().await.unwrap();
-    let sent = server.bodies_to("POST", "/v1/speed-limit-gaps");
+    let sent = server.bodies_to("POST", "/v1/speed-limit-intervals");
     assert_eq!(sent.len(), 1);
-    assert_eq!(sent[0]["bearingDegrees"], json!(90.0));
-    let place = crate::sync::gaps::place_of(52.01, 13.005, 90.0).unwrap();
+    assert_eq!(sent[0]["from"], json!({ "lat": 52.01, "lng": 13.005 }));
+    assert_eq!(sent[0]["to"], json!({ "lat": 52.01, "lng": 13.007 }));
+    let reference = crate::sync::intervals::interval_ref(
+        crate::sync::IntervalPoint {
+            lat: 52.01,
+            lng: 13.005,
+        },
+        crate::sync::IntervalPoint {
+            lat: 52.01,
+            lng: 13.007,
+        },
+    )
+    .unwrap();
     let signed = &sent[0]["deviceAssertion"]["payload"];
-    assert_eq!(signed["segmentKey"], json!(place.reference()));
+    assert_eq!(signed["segmentKey"], json!(reference));
     assert_eq!(signed["vote"], json!("support"));
     assert_eq!(signed["value"], json!(30));
 }
 
 #[tokio::test]
-async fn a_gap_is_refused_where_a_road_with_a_limit_runs_the_same_way() {
+async fn the_order_of_the_two_points_does_not_matter_and_a_second_report_replaces_a_queued_one() {
     let server = covered_server();
     let client = client(server.clone());
     client.sync().await.unwrap();
-    // on the stored road (east-west along latitude 52.0)
-    let error = client
+    let report = |from: (f64, f64), to: (f64, f64), value: u32| {
+        json!({
+            "from": { "lat": from.0, "lng": from.1 }, "to": { "lat": to.0, "lng": to.1 },
+            "value": value, "unit": "kmh"
+        })
+    };
+    client
         .call(
-            "reportMissingSpeedLimit",
-            json!({ "lat": 52.0, "lng": 13.005, "bearing": 90, "value": 30, "unit": "kmh" }),
+            "reportSpeedLimitInterval",
+            report((52.01, 13.005), (52.01, 13.007), 30),
         )
         .await
-        .unwrap_err();
-    assert_eq!(error.code, "roadAlreadyHasLimit");
-    assert!(error.message.contains("seg1"));
-    // a side street leaving it (north-south) is still missing
-    let side = client
+        .unwrap();
+    // the same stretch picked from its other end, with another value: one proposal, the newer value
+    client
         .call(
-            "reportMissingSpeedLimit",
-            json!({ "lat": 52.0, "lng": 13.005, "bearing": 0, "value": 30, "unit": "kmh" }),
+            "reportSpeedLimitInterval",
+            report((52.01, 13.007), (52.01, 13.005), 50),
         )
-        .await;
-    assert!(side.is_ok());
+        .await
+        .unwrap();
+    client.sync().await.unwrap();
+    let sent = server.bodies_to("POST", "/v1/speed-limit-intervals");
+    assert_eq!(sent.len(), 1);
+    assert_eq!(sent[0]["value"], json!(50));
 }
 
 #[tokio::test]
-async fn the_direction_falls_back_to_the_last_heading_and_is_otherwise_required() {
+async fn points_that_name_no_stretch_are_refused_before_anything_is_queued() {
     let server = covered_server();
     let client = client(server.clone());
     client.sync().await.unwrap();
-
+    // too close together
     let error = client
         .call(
-            "reportMissingSpeedLimit",
-            json!({ "lat": 52.01, "lng": 13.005, "value": 30, "unit": "kmh" }),
+            "reportSpeedLimitInterval",
+            json!({ "from": { "lat": 52.01, "lng": 13.005 }, "to": { "lat": 52.010_01, "lng": 13.005 }, "value": 30, "unit": "kmh" }),
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(error.code, "intervalTooShort");
+    // not a position
+    let error = client
+        .call(
+            "reportSpeedLimitInterval",
+            json!({ "from": { "lat": 95.0, "lng": 13.005 }, "to": { "lat": 52.01, "lng": 13.007 }, "value": 30, "unit": "kmh" }),
         )
         .await
         .unwrap_err();
     assert_eq!(error.code, "invalidArgument");
-
-    client
+    // a stretch needs both ends
+    let error = client
         .call(
-            "updatePosition",
-            json!({ "lat": 52.01, "lng": 13.005, "heading": 270 }),
+            "reportSpeedLimitInterval",
+            json!({ "from": { "lat": 52.01, "lng": 13.005 }, "value": 30, "unit": "kmh" }),
         )
         .await
-        .unwrap();
-    client
-        .call(
-            "reportMissingSpeedLimit",
-            json!({ "lat": 52.01, "lng": 13.005, "value": 30, "unit": "kmh" }),
-        )
-        .await
-        .unwrap();
+        .unwrap_err();
+    assert_eq!(error.code, "invalidArgument");
+    client.sync().await.unwrap();
+    assert_eq!(server.count("POST", "/v1/speed-limit-intervals"), 0);
 }
 
 #[tokio::test]
@@ -1403,15 +1436,114 @@ async fn implausible_values_are_refused_before_anything_is_queued() {
     for value in [33, 400] {
         let error = client
             .call(
-                "reportMissingSpeedLimit",
-                json!({ "lat": 52.01, "lng": 13.005, "bearing": 90, "value": value, "unit": "kmh" }),
+                "reportSpeedLimitInterval",
+                json!({ "from": { "lat": 52.01, "lng": 13.005 }, "to": { "lat": 52.01, "lng": 13.007 }, "value": value, "unit": "kmh" }),
             )
             .await
             .unwrap_err();
         assert_eq!(error.code, "invalidArgument");
     }
     client.sync().await.unwrap();
-    assert_eq!(server.count("POST", "/v1/speed-limit-gaps"), 0);
+    assert_eq!(server.count("POST", "/v1/speed-limit-intervals"), 0);
+}
+
+#[tokio::test]
+async fn the_road_between_two_points_is_resolved_by_the_server_and_its_refusals_have_codes() {
+    let server = covered_server();
+    let client = client(server.clone());
+    client.sync().await.unwrap();
+    server.route(
+        "POST",
+        "/v1/roads/resolve",
+        200,
+        json!({
+            "ref": "ivl:5201000,1300500:5201000,1300700",
+            "segmentKey": "0123456789abcdef0123456789abcdef",
+            "geometry": { "type": "LineString", "coordinates": [[13.005, 52.01], [13.006, 52.0102], [13.007, 52.01]] },
+            "lengthM": 142.0,
+            "road": { "name": "Feldweg", "ref": null, "class": "track" },
+            "covered": [{ "segmentId": "s1", "segmentKey": "k", "speedLimit": 100.0, "unit": "kmh", "source": "osm", "coveredMeters": 140.0 }],
+            "proposals": []
+        }),
+    );
+    let road = client
+        .call(
+            "resolveRoadInterval",
+            json!({ "from": { "lat": 52.01, "lng": 13.005 }, "to": { "lat": 52.01, "lng": 13.007 } }),
+        )
+        .await
+        .unwrap();
+    assert_eq!(road["road"]["name"], json!("Feldweg"));
+    assert_eq!(road["geometry"]["coordinates"].as_array().unwrap().len(), 3);
+    assert_eq!(road["covered"][0]["speedLimit"], json!(100.0));
+    let sent = server.bodies_to("POST", "/v1/roads/resolve");
+    assert_eq!(sent[0]["from"], json!({ "lat": 52.01, "lng": 13.005 }));
+
+    server.route(
+        "POST",
+        "/v1/roads/resolve",
+        422,
+        json!({ "error": { "code": "NO_ROAD_BETWEEN_POINTS", "message": "no road between" } }),
+    );
+    let error = client
+        .call(
+            "resolveRoadInterval",
+            json!({ "from": { "lat": 52.01, "lng": 13.005 }, "to": { "lat": 52.02, "lng": 13.007 } }),
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(error.code, "noRoadBetweenPoints");
+}
+
+#[tokio::test]
+async fn an_entry_can_be_marked_as_wrong_and_the_answer_says_how_many_have() {
+    let server = covered_server();
+    let client = client(server.clone());
+    client.sync().await.unwrap();
+    server.route(
+        "GET",
+        "/v1/data-defects/near",
+        200,
+        json!({ "items": [{
+            "targetType": "speedLimitSegment", "targetId": "00000000-0000-4000-8000-000000000001",
+            "distanceMeters": 7, "speedLimit": 51.0, "speedLimitUnit": "kmh", "source": "osm",
+            "geometry": { "type": "LineString", "coordinates": [[13.0, 52.0], [13.001, 52.0]] },
+            "reports": 1, "threshold": 3
+        }] }),
+    );
+    let items = client
+        .call("dataDefectsNear", json!({ "lat": 52.0, "lng": 13.0005 }))
+        .await
+        .unwrap();
+    assert_eq!(items[0]["reports"], json!(1));
+    assert_eq!(items[0]["threshold"], json!(3));
+
+    server.route(
+        "POST",
+        "/v1/data-defects",
+        201,
+        json!({ "recorded": true, "reports": 2, "threshold": 3, "removed": false }),
+    );
+    let answer = client
+        .call(
+            "reportDataDefect",
+            json!({ "targetType": "speedLimitSegment", "targetId": "00000000-0000-4000-8000-000000000001", "reason": "not_on_a_road" }),
+        )
+        .await
+        .unwrap();
+    assert_eq!(answer["reports"], json!(2));
+    assert_eq!(answer["removed"], json!(false));
+    let sent = server.bodies_to("POST", "/v1/data-defects");
+    assert_eq!(sent[0]["reason"], json!("not_on_a_road"));
+
+    let error = client
+        .call(
+            "reportDataDefect",
+            json!({ "targetType": "hazardReport", "targetId": "x" }),
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(error.code, "invalidArgument");
 }
 
 #[tokio::test]

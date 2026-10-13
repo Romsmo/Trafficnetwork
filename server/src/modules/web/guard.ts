@@ -39,7 +39,12 @@ const CONFIRMATION_PATH = /^\/v1\/hazard-reports\/[^/]+\/confirmations$/;
 // node these paths simply answer 404 after passing the guard.
 const CORRECTIONS_OF_SEGMENT_PATH = /^\/v1\/speed-limit-segments\/[^/]+\/corrections$/;
 const CORRECTION_VOTE_PATH = /^\/v1\/speed-limit-corrections\/[^/]+\/confirmations$/;
-const SPEED_LIMIT_GAPS_PATH = "/v1/speed-limit-gaps";
+const SPEED_LIMIT_INTERVALS_PATH = "/v1/speed-limit-intervals";
+// The road network (docs/road-network.md): resolving two picked points may ask the lookup service for an area, so it is a heavy read.
+const ROADS_RESOLVE_PATH = "/v1/roads/resolve";
+// "This entry is wrong" (docs/road-network.md): what is near a point that could be marked, and the mark itself.
+const DEFECTS_NEAR_PATH = "/v1/data-defects/near";
+const DEFECTS_PATH = "/v1/data-defects";
 
 /** A device signature makes a submission federation-eligible; browser sessions are anonymous and free to mint, so theirs never carry one. */
 function carriesDeviceSignature(body: unknown): boolean {
@@ -69,6 +74,7 @@ export function classifyWebRequest(info: WebRequestInfo, policy: WebPolicy): Gua
       case "/v1/speed-cameras/nearby":
       case "/v1/speed-cameras/by-tile":
       case "/v1/speed-limit-corrections":
+      case DEFECTS_NEAR_PATH:
         return { kind: "allow", category: "read" };
       case "/v1/hazard-reports/nearby":
         if (radiusExceeds(query, policy.maxHazardRadiusM)) {
@@ -85,6 +91,8 @@ export function classifyWebRequest(info: WebRequestInfo, policy: WebPolicy): Gua
         break;
     }
   }
+
+  if (method === "POST" && path === ROADS_RESOLVE_PATH) return { kind: "allow", category: "heavy-read" };
 
   if (method === "POST" && path === "/v1/hazard-reports") {
     const record = body && typeof body === "object" ? (body as Record<string, unknown>) : {};
@@ -107,7 +115,7 @@ export function classifyWebRequest(info: WebRequestInfo, policy: WebPolicy): Gua
 
   // Proposing or confirming/denying a speed-limit correction, or naming a road the import has no limit for (docs D13):
   // unsigned, so the vote counts on this node only (add-on K-A).
-  if (method === "POST" && (CORRECTIONS_OF_SEGMENT_PATH.test(path) || CORRECTION_VOTE_PATH.test(path) || path === SPEED_LIMIT_GAPS_PATH)) {
+  if (method === "POST" && (CORRECTIONS_OF_SEGMENT_PATH.test(path) || CORRECTION_VOTE_PATH.test(path) || path === SPEED_LIMIT_INTERVALS_PATH || path === DEFECTS_PATH)) {
     if (carriesDeviceSignature(body)) {
       return deny(403, "WEB_NO_DEVICE_SIGNATURE", "Web sessions cannot submit device-signed votes; their votes count on this node only");
     }

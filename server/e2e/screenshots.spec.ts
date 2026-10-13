@@ -156,6 +156,27 @@ test.describe("phone", () => {
     await page.screenshot(photo("map-mobile-correction"));
   });
 
+  test("phone: a stretch of road picked by two points, drawn grey along the road", async ({ page }) => {
+    await watchTraffic(page, node, { fakeTiles: false });
+    await openMap(page, node);
+    await tilesLoaded(page);
+    await page.locator("#filters input[type=checkbox]").evaluateAll((boxes) =>
+      boxes.forEach((box) => {
+        (box as HTMLInputElement).checked = false;
+        box.dispatchEvent(new Event("change", { bubbles: true }));
+      }),
+    );
+    await page.locator("#map").click();
+    const detail = page.locator("#detail-content");
+    await detail.getByRole("button", { name: "Tempolimit für ein Stück ändern" }).click();
+    await detail.getByRole("button", { name: "Ende auf der Karte wählen" }).click();
+    const box = (await page.locator("#map").boundingBox())!;
+    await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2 - 110);
+    await expect(detail).toContainText("Gefunden:");
+    await page.waitForTimeout(500);
+    await page.screenshot(photo("map-mobile-stretch"));
+  });
+
   test("phone: report with an own duration", async ({ page }) => {
     await watchTraffic(page, node, { fakeTiles: false });
     await openMap(page, node);

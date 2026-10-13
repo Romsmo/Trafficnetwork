@@ -214,20 +214,40 @@ only withdrew this device's own still-queued proposal (nothing left to send).
 prompts) and returns an empty list, not an error, against a server that
 predates the feature.
 
-### A road with no limit on record (1.2.0)
+### A limit for a stretch of road: two points (1.2.0)
 
 ```
-reportMissingSpeedLimit({ lat, lng, bearing?, value, unit, reason? }) -> Proposal
+reportSpeedLimitInterval({ from: {lat, lng}, to: {lat, lng}, value, unit, reason? }) -> Proposal
+resolveRoadInterval(from, to) -> RoadInterval                      // async, needs the network
 ```
 
-"There is no speed limit on record for this road, it is X": a value for a road the import has none for (the server's
-`speed-limit-corrections.md`, D13). The road is named by position and **direction** (`bearing`: any heading along it, either
-way; the last heading given with a position is used when none is passed) — there is no segment to name. It is effective for
-this device at once as its own proposal (`getSpeedLimitAt` then answers it with `origin: locallyProposed`), sent signed on
-the next sync, and becomes a stretch of road everybody gets when three distinct devices agree. Same range/step validation as
-a correction. Where a road *with* a limit is stored right there running the same way the call fails with
-**`roadAlreadyHasLimit`** — correct that segment (`reportWrongSpeedLimit`) instead. A server without the feature is
-`notOffered`.
+"On this stretch of road the limit is X" — for a road the import has no limit for, and to change a limit that is wrong on
+*part* of a road. The visitor picks the **two ends of the stretch on the map** (ideally on the road); the device needs no
+road, no segment and no direction. The server finds the road that runs between the two points (the one nearest to both and
+running along between them) and writes the limit along that road's own shape, so a road coloured by limit looks like every
+other (`server/docs/road-network.md`).
+
+* `resolveRoadInterval` is the preview: `geometry` is the stretch along the road's own shape (draw it, grey, so the visitor can
+  check it is the stretch meant), `road` its name and class, `lengthM`, `covered` the limits already on record under it
+  (what a proposal would replace) and `proposals` the open proposals for exactly this stretch (to confirm or deny with
+  `confirmSpeedLimitCorrection`). It fails with a code a host can say in words: `noRoadFound` (tap closer to the road),
+  `noRoadBetweenPoints` (the two points are not on one road), `intervalTooLong` (the server's `roadNetwork.intervalMaxMeters`),
+  `intervalTooShort`, or `noRoadData` (this node has no roads for that area and cannot look them up).
+* `reportSpeedLimitInterval` is effective for this device at once as its own proposal (`getSpeedLimitAt` then answers it
+  with `origin: locallyProposed` for positions along the stretch), sent signed on the next sync, and written along the road for
+  everybody when three distinct devices agree. It works offline: the two points are the whole proposal, and the same two
+  points picked in the other order name the same stretch. Same range/step validation as a correction. A server without the
+  feature is `notOffered`.
+
+```
+dataDefectsNear(lat, lng, radiusMeters?) -> DataDefect[]            // async, needs the network
+reportDataDefect({ targetType, targetId, reason? }) -> { recorded, reports, threshold, removed }
+```
+
+"This entry is wrong": a speed-limit line or a sign that lies off a road, in the wrong place, or does not exist. The host shows
+what `dataDefectsNear` lists (with `reports` of `threshold` already marked), the visitor picks one, `reportDataDefect` marks
+it. One mark per device and entry; when enough distinct devices have marked it the server takes it out (`removed: true`) and
+keeps it out when the next import brings it again. `notOffered` where the server does not take such marks.
 
 ## Position and sync
 
@@ -479,7 +499,11 @@ logs, `code` is what a host app should branch on:
 | `rejected` | The server refused the request itself. |
 | `unavailable` | The data the call needs is not there yet (e.g. sync once first). |
 | `ttlOutOfRange` | The duration asked for a report is outside the server's bounds for its type; nothing was queued (`getReportLimits`). |
-| `roadAlreadyHasLimit` | "No limit here" was reported where a road with a limit is stored running the same way — correct that segment instead. |
+| `noRoadFound` | No road was found near one of the two points (`resolveRoadInterval`): tap closer to the road. |
+| `noRoadBetweenPoints` | The two points are not on one road that runs between them. |
+| `intervalTooLong` | The two points are further apart than one stretch may be (`roadNetwork.intervalMaxMeters` of the server's configuration). |
+| `intervalTooShort` | The two points are closer together than a stretch can be (10 m); nothing was queued. |
+| `noRoadData` | The server has no road data for that area and cannot look it up. |
 | `closed` | The client was closed. |
 | `internal` | An internal error (in the C ABI: including a caught panic — never crosses the boundary as a crash). |
 

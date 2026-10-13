@@ -25,11 +25,14 @@ import {
   findCommunitySegments,
   findGap,
   insertCommunitySegment,
+  listPiecesOf,
   setCommunitySegmentValue,
+  splitImportedUnder,
+  unsplitUnder,
   upsertGap,
   type GapRow,
 } from "../../db/queries/speed-limit-gaps.js";
-import type { GapGeometry } from "./gap.js";
+import type { CommunityStretch } from "./stretch.js";
 import { conflict, forbidden, notFound, tooManyRequests, unprocessable } from "../../lib/errors.js";
 import { validateCorrectionValue } from "./plausibility.js";
 import { markTilesDirty } from "../../db/queries/static-packages.js";
@@ -139,7 +142,8 @@ export async function announceChanges(
     // it or take it away first, so the read below — and every reader afterwards — sees the effective state.
     const gap = await findGap(tx, change.segmentKey);
     if (gap) {
-      for (const removed of await syncGapSegment(tx, gap, change.unit, overlay)) {
+      const synced = await syncGapSegment(tx, gap, change.unit, overlay);
+      for (const removed of synced.removed) {
         events.push(
           await appendEvent(tx, {
             type: "StaticDataRemoved",
@@ -151,6 +155,22 @@ export async function announceChanges(
           }),
         );
         for (const tile of segmentTilesOf(removed.geometry, partitionResolution)) tiles.add(tile);
+      }
+      // what an interval did to the way under it: the pieces of that way that are now their own rows, or the way shown again
+      for (const id of synced.touched) {
+        const segment = await findSpeedLimitSegmentById(tx, id, overlay);
+        if (!segment) continue;
+        events.push(
+          await appendEvent(tx, {
+            type: "StaticDataUpdated",
+            entityType: "speedLimitSegment",
+            entityId: segment.id,
+            payload: segment,
+            regionTile: null,
+            source: "community",
+          }),
+        );
+        for (const tile of segmentTilesOf(segment.geometry, partitionResolution)) tiles.add(tile);
       }
     }
     for (const segment of await findSpeedLimitSegmentsByKey(tx, change.segmentKey, change.unit, overlay)) {
@@ -178,13 +198,33 @@ export async function announceChanges(
  * when the winner changes, removed when none is left — and not served at all while the feature is off. Returns the
  * segments that stopped being delivered (as served, for the removal event).
  */
-async function syncGapSegment(tx: Transaction, gap: GapRow, unit: SpeedLimitUnit, overlay: boolean): Promise<SpeedLimitSegmentApi[]> {
+interface GapSync {
+  /** Segments that stopped being delivered, as they were served (for the removal event). */
+  removed: SpeedLimitSegmentApi[];
+  /** Ids of rows to announce as updated: remainders of an imported way written beside the stretch, or the way itself shown again. */
+  touched: string[];
+}
+
+async function syncGapSegment(tx: Transaction, gap: GapRow, unit: SpeedLimitUnit, overlay: boolean): Promise<GapSync> {
   const existing = (await findCommunitySegments(tx, gap.segmentKey)).filter((s) => s.unit === unit);
-  const asServed = async (id: string) => (await findSpeedLimitSegmentById(tx, id, true)) as SpeedLimitSegmentApi;
+  const asServed = async (id: string) => (await findSpeedLimitSegmentById(tx, id, true, true)) as SpeedLimitSegmentApi;
+
+  /** Gives the imported way under the stretch back (the stretch is not in effect): its pieces go, the way is shown again. */
+  const unsplit = async (): Promise<GapSync> => {
+    const removed: SpeedLimitSegmentApi[] = [];
+    for (const id of await listPiecesOf(tx, gap.segmentKey)) {
+      const piece = await findSpeedLimitSegmentById(tx, id, true, true);
+      if (piece) removed.push(piece);
+    }
+    const undone = await unsplitUnder(tx, gap.segmentKey);
+    return { removed, touched: undone.restored };
+  };
 
   if (!overlay) {
     // Switched off: the rows stay (so switching on restores them) but no read returns them any more - tell the clients.
-    return Promise.all(existing.map((s) => asServed(s.id)));
+    const away = await unsplit();
+    const hiddenNow = await Promise.all(existing.map((s) => asServed(s.id)));
+    return { removed: [...hiddenNow, ...away.removed], touched: away.touched };
   }
 
   const applied = (await listCorrectionRowsForKey(tx, gap.segmentKey)).find((row) => row.unit === unit && row.status === "applied");
@@ -194,13 +234,18 @@ async function syncGapSegment(tx: Transaction, gap: GapRow, unit: SpeedLimitUnit
       removed.push(await asServed(row.id));
       await deleteCommunitySegment(tx, row.id);
     }
-    return removed;
+    const away = await unsplit();
+    return { removed: [...removed, ...away.removed], touched: away.touched };
   }
 
   const [first] = existing;
   if (!first) await insertCommunitySegment(tx, gap.segmentKey, unit, applied.value);
   else if (first.speedLimit !== applied.value) await setCommunitySegmentValue(tx, first.id, applied.value);
-  return [];
+  // an imported way under the stretch is replaced by the stretch and its own remainders
+  const split = await splitImportedUnder(tx, gap.segmentKey);
+  const removed: SpeedLimitSegmentApi[] = [];
+  for (const id of split.hidden) removed.push(await asServed(id));
+  return { removed, touched: split.pieces };
 }
 
 export interface ApplyVoteOptions {
@@ -273,8 +318,8 @@ export interface VoteTarget {
   importedValue: number | null;
   /** The segment as served now, if there is one. */
   segment: SpeedLimitSegmentApi | null;
-  /** Set when the vote creates or addresses a gap by place — remembered before the vote is stored. */
-  gap?: GapGeometry;
+  /** Set when the vote creates or addresses a stretch by its place - remembered before the vote is stored. */
+  gap?: CommunityStretch;
 }
 
 export function targetOfSegment(segment: SpeedLimitSegmentApi): VoteTarget {

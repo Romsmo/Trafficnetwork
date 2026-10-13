@@ -6,7 +6,7 @@ use serde::Serialize;
 
 use crate::discovery::DiscoveryError;
 use crate::storage::StoreError;
-use crate::sync::{AuthError, CorrectionError, SyncError, WriteBufferError};
+use crate::sync::{AuthError, CorrectionError, RoadError, SyncError, WriteBufferError};
 
 /// The `code` values an [`ApiError`] can carry.
 pub mod code {
@@ -38,9 +38,16 @@ pub mod code {
     /// The duration asked for a report is outside what the server accepts for that type. Nothing was
     /// queued; `getReportLimits` gives the bounds.
     pub const TTL_OUT_OF_RANGE: &str = "ttlOutOfRange";
-    /// "No limit on record here" was reported for a place where a road with a limit is on record running the
-    /// same way: correct that segment instead (`reportWrongSpeedLimit`).
-    pub const ROAD_ALREADY_HAS_LIMIT: &str = "roadAlreadyHasLimit";
+    /// The server has no road data for that area and cannot look it up (`resolveRoadInterval`).
+    pub const NO_ROAD_DATA: &str = "noRoadData";
+    /// No road was found near one of the two points: tap closer to the road.
+    pub const NO_ROAD_FOUND: &str = "noRoadFound";
+    /// The two points are not on one road that runs between them.
+    pub const NO_ROAD_BETWEEN_POINTS: &str = "noRoadBetweenPoints";
+    /// The two points are further apart than one stretch may be (the server's `roadNetwork.intervalMaxMeters`).
+    pub const INTERVAL_TOO_LONG: &str = "intervalTooLong";
+    /// The two points are closer together than a stretch can be.
+    pub const INTERVAL_TOO_SHORT: &str = "intervalTooShort";
     /// The client was closed.
     pub const CLOSED: &str = "closed";
     pub const INTERNAL: &str = "internal";
@@ -144,10 +151,38 @@ impl From<CorrectionError> for ApiError {
                 ApiError::new(code::UNKNOWN_SEGMENT, "no speed-limit segment matches")
             }
             CorrectionError::Store(message) => ApiError::new(code::STORAGE, message),
-            CorrectionError::RoadAlreadyHasLimit { .. } => {
-                ApiError::new(code::ROAD_ALREADY_HAS_LIMIT, error.to_string())
+            CorrectionError::IntervalTooShort { .. } => {
+                ApiError::new(code::INTERVAL_TOO_SHORT, error.to_string())
             }
             other => ApiError::invalid(other.to_string()),
+        }
+    }
+}
+
+impl From<RoadError> for ApiError {
+    fn from(error: RoadError) -> Self {
+        match error {
+            RoadError::NotOffered => ApiError::new(
+                code::NOT_OFFERED,
+                "the server does not offer this (an older server, or the operator switched it off)",
+            ),
+            RoadError::Transport(message) => ApiError::new(code::NETWORK, message),
+            RoadError::Refused {
+                status,
+                code: server_code,
+                message,
+            } => {
+                let mapped = match server_code.as_str() {
+                    "NO_ROAD_DATA" => code::NO_ROAD_DATA,
+                    "NO_ROAD_FOUND" => code::NO_ROAD_FOUND,
+                    "NO_ROAD_BETWEEN_POINTS" => code::NO_ROAD_BETWEEN_POINTS,
+                    "INTERVAL_TOO_LONG" => code::INTERVAL_TOO_LONG,
+                    "INTERVAL_TOO_SHORT" => code::INTERVAL_TOO_SHORT,
+                    _ if status == 429 => code::REJECTED,
+                    _ => code::REJECTED,
+                };
+                ApiError::new(mapped, message)
+            }
         }
     }
 }

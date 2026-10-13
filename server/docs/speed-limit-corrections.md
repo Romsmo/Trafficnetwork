@@ -232,10 +232,16 @@ with an applied correction, so delta *and* package clients converge.
   open proposals: `GET /v1/speed-limit-corrections?tiles=…`.
 * To sign: take `segmentKey` from the segment.
 
-### D13. A road with no speed limit on record (server 1.1.0)
+### D13. A road with no speed limit on record (server 1.1.0) — superseded by two points
 
-The import only holds roads that carry a limit, so "this road has none" has no segment to vote on. The proposal names a
-**place and a direction** instead, and the server derives a short, fixed stretch of road from it.
+> **Superseded for new proposals by [`road-network.md`](road-network.md):** a visitor now picks **two points** on the road and
+> the node writes the limit along the road's own shape (`POST /v1/speed-limit-intervals`); the place-and-direction proposal below
+> (`POST /v1/speed-limit-gaps`) no longer exists. What stays valid from this section: the threshold, tie and removal rules, the
+> origin shown, the `needsReview` flag for the legacy places, and that **signed votes by `gap:<cell>:<axis>` are still
+> understood** (an older node may send them; they resolve to the same 120 m line as before).
+
+The import only holds roads that carry a limit, so "this road has none" has no segment to vote on. The proposal named a
+**place and a direction** instead, and the server derived a short, fixed stretch of road from it.
 
 | Question | Decision | Why |
 |---|---|---|
@@ -246,7 +252,7 @@ The import only holds roads that carry a limit, so "this road has none" has no s
 | What does a tie mean? | As D4: no winner — and since nothing is imported, no road. | A tie is genuine disagreement about a safety-relevant number. |
 | Origin | Served with `source: "community"`, `correctedBy: "community"`, the counts, and **no `importedSpeedLimit`**. | "Always shown with its origin". |
 | An import later has a road of its own there | After each import batch, a community segment with an imported road within 20 m running the same way (±25°) is marked `needsReview: true`. **Nothing is replaced or removed.** | The import must not silently overwrite a community-confirmed value (D7) and must not silently be shadowed by it either; the doubt is made visible and left to the operator (`reset`) or the community. |
-| Is it really missing? | A proposal is refused with `422 ROAD_ALREADY_HAS_LIMIT` (naming the segment) when an imported road with a limit lies within 15 m and runs the same way (±25°). | Keeps the proposal on the segment that exists (the correction flow) and stops gap spam over roads that have a value. Local only: another node's import is not consulted. |
+| Is it really missing? | (Before intervals: refused with `ROAD_ALREADY_HAS_LIMIT`.) A stretch picked by two points may lie over a road that has a value: that is how a wrong limit on *part* of a road is changed. | The imported line under it is cut open and joined again when the value goes (`road-network.md`). |
 | Switching the feature off | The rows stay in the table but no read returns them (`overlay = false` hides `community` rows); clients are told with `StaticDataRemoved`, and switching on announces them again. | Same promise as D11: nothing is lost by turning it off. |
 | Reasons | `wrong_value`, `limit_lifted` (= "Limit aufgehoben"), `sign_missing_or_new` (= "neues Schild"), `other`, and new `missing`. | The existing enum already had the others; `missing` is additive. |
 
@@ -275,7 +281,8 @@ roads longer than 120 m need one proposal per stretch; geometry other than a str
 | Replication (3 servers, different row ids), denial flips everywhere, competing/tie, partition healing in different pull orders, tampered vote, implausible/future/ancient votes, unsigned stays local, feature-off peer, old push format | `tests/integration/federation-speed-limit-corrections.test.ts` |
 | Feature switch: reads, endpoints, config, flip announced, threshold from env | integration |
 | Operator: show, reset (+ runner-up), restore, reset --all, ban/unban | integration |
-| Gap (D13): derivation of cell/axis/geometry/key (and equality with the database function), threshold, merge across devices and directions, denial removes it and is announced, tie, overtaking value, operator reset, `ROAD_ALREADY_HAS_LIMIT`, plausibility, signed place reference, replication by place and by key, import brings its own road (`needsReview`), feature switch | `tests/unit/speed-limit-gap.test.ts`, `tests/integration/speed-limit-gaps.test.ts` |
+| Gap (D13, legacy places): derivation of cell/axis/geometry/key (and equality with the database function) | `tests/unit/speed-limit-gap.test.ts` |
+| Stretches by two points: threshold, merge across devices and order of the points, denial removes it and joins the imported line, tie, overtaking value, operator reset, plausibility, signed `ivl:` reference (resolved, kept until the road arrives), legacy `gap:` reference | `tests/integration/road-network.test.ts` |
 
 Mutation checks done by hand while writing them (each made a test fail, then
 reverted): threshold off by one, key-binding check removed, unit dropped from

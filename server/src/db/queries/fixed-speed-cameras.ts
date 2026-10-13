@@ -85,7 +85,7 @@ const SELECT_COLUMNS = sql`
 
 /** Every active persistent device of every kind (snapshot, zones). */
 export async function findAllActiveDeviceRecords(db: Queryable): Promise<DeviceRecord[]> {
-  const rows = await db.execute<Row>(sql`select ${SELECT_COLUMNS} from fixed_speed_cameras c where c.status = 'active'`);
+  const rows = await db.execute<Row>(sql`select ${SELECT_COLUMNS} from fixed_speed_cameras c where c.status = 'active' and c.visible`);
   return rows.map(toDeviceRecord);
 }
 
@@ -93,7 +93,7 @@ export async function findAllActiveDeviceRecords(db: Queryable): Promise<DeviceR
 export async function findDeviceRecordsNearby(db: Queryable, lat: number, lng: number, radiusM: number): Promise<DeviceRecord[]> {
   const rows = await db.execute<Row>(sql`
     select ${SELECT_COLUMNS} from fixed_speed_cameras c
-    where c.status = 'active'
+    where c.status = 'active' and c.visible
       and ST_DWithin(c.position::geography, ST_SetSRID(ST_MakePoint(${lng}, ${lat}), 4326)::geography, ${radiusM})
   `);
   return rows.map(toDeviceRecord);
@@ -104,7 +104,7 @@ export async function findDeviceRecordsInEnvelopes(db: Queryable, envelopes: rea
   if (envelopes.length === 0) return [];
   const rows = await db.execute<Row>(sql`
     select ${SELECT_COLUMNS} from fixed_speed_cameras c
-    where c.status = 'active' and ${envelopeOverlap(sql`c.position`, envelopes)}
+    where c.status = 'active' and c.visible and ${envelopeOverlap(sql`c.position`, envelopes)}
   `);
   return rows.map(toDeviceRecord);
 }
@@ -122,7 +122,7 @@ export async function findDuplicateFixedSpeedCamera(
 ): Promise<DeviceRecord | null> {
   const rows = await db.execute<Row>(sql`
     select ${SELECT_COLUMNS} from fixed_speed_cameras c
-    where c.status = 'active'
+    where c.status = 'active' and c.visible
       and c.camera_type = 'fixedSpeedCamera'
       and ST_DWithin(c.position::geography, ST_SetSRID(ST_MakePoint(${lng}, ${lat}), 4326)::geography, ${radiusM})
     order by c.imported_at asc
@@ -192,7 +192,7 @@ export function tileDeviceRecordsQuery(envelopes: readonly Envelope[]): { query:
   return {
     query: sql`
       select ${SELECT_COLUMNS} from fixed_speed_cameras c
-      where c.status = 'active' and ${envelopeOverlap(sql`c.position`, envelopes)} order by c.id
+      where c.status = 'active' and c.visible and ${envelopeOverlap(sql`c.position`, envelopes)} order by c.id
     `,
     map: toDeviceRecord,
   };

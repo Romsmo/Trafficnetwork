@@ -259,9 +259,9 @@ export async function estimateStaticRows(db: Queryable, cap: number): Promise<nu
 export async function hasStaticDataIn(db: Queryable, envelopes: readonly Envelope[], cameraEnvelopes: readonly Envelope[] | null): Promise<boolean> {
   const rows = await db.execute<{ found: boolean } & Record<string, unknown>>(sql`
     select (
-      exists (select 1 from speed_limit_segments s where ${envelopeOverlap(sql`s.geometry`, envelopes)})
-      or exists (select 1 from static_signs g where ${envelopeOverlap(sql`g.position`, envelopes)})
-      ${cameraEnvelopes ? sql`or exists (select 1 from fixed_speed_cameras c where c.status = 'active' and ${envelopeOverlap(sql`c.position`, cameraEnvelopes)})` : sql``}
+      exists (select 1 from speed_limit_segments s where s.visible and ${envelopeOverlap(sql`s.geometry`, envelopes)})
+      or exists (select 1 from static_signs g where g.visible and ${envelopeOverlap(sql`g.position`, envelopes)})
+      ${cameraEnvelopes ? sql`or exists (select 1 from fixed_speed_cameras c where c.status = 'active' and c.visible and ${envelopeOverlap(sql`c.position`, cameraEnvelopes)})` : sql``}
     ) as found
   `);
   return rows[0]?.found === true;

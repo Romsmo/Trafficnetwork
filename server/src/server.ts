@@ -8,6 +8,7 @@ import { startRetentionWorker } from "./modules/expiry/retention.js";
 import { currentReportExpiry } from "./modules/expiry/rules.js";
 import { startFederationWorkers, type FederationWorkersHandle } from "./modules/federation/workers.js";
 import { startStaticPackageWorker } from "./modules/static-data/package-worker.js";
+import { startRoadWorker } from "./modules/roads/worker.js";
 
 async function main() {
   const env = loadEnv();
@@ -23,12 +24,16 @@ async function main() {
   // Pre-built static-data packages (add-on E-B): rebuilt in the background after static data changes.
   const packageWorker = env.STATIC_PACKAGES_WORKER_ENABLED ? startStaticPackageWorker(db, env, app.log, () => app.cameraPolicy.current()) : null;
 
+  // Ties signs, cameras and community stretches to roads and hides what is off the road (docs/road-network.md).
+  const roadWorker = env.ROAD_ATTACH_WORKER_ENABLED ? startRoadWorker(db, env, app.log) : null;
+
   closeWithGrace(async ({ err }) => {
     if (err) app.log.error(err, "closing due to error");
     expiryWorker.stop();
     retentionWorker.stop();
     federationWorkers?.stop();
     packageWorker?.stop();
+    roadWorker?.stop();
     await app.close();
     await client.end();
   });

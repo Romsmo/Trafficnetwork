@@ -103,11 +103,20 @@ export const speedLimitCorrectionBans = pgTable("speed_limit_correction_bans", {
  */
 export const speedLimitGaps = pgTable("speed_limit_gaps", {
   segmentKey: text("segment_key").primaryKey(),
-  // H3 cell (resolution 10) and direction bucket (0..7, 22.5 degrees each, axis not heading) the geometry is derived from.
-  cell: text("cell").notNull(),
-  axis: integer("axis").notNull(),
+  // A stretch the community named by two points on a road (docs/road-network.md): the reference those points make (ivl:...),
+  // the road it was resolved to and its length. The geometry is that road's own shape between the two points.
+  ref: text("ref"),
+  roadName: text("road_name"),
+  roadRef: text("road_ref"),
+  roadClass: text("road_class"),
+  lengthM: integer("length_m"),
+  // Legacy places (before the interval model): H3 cell (resolution 10) and direction bucket the synthetic geometry came from.
+  cell: text("cell"),
+  axis: integer("axis"),
   geometry: geometryColumn("geometry", "LineString").notNull(),
   // An import brought a road of its own at this place after the community segment was put there: look at it (D13).
   needsReview: boolean("needs_review").notNull().default(false),
+  // When the attach step last compared a legacy place with the road network of its area (null = not yet).
+  checkedAt: timestamp("checked_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });

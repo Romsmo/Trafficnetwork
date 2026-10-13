@@ -1,6 +1,7 @@
 import { bigserial, index, pgTable, text, timestamp, unique, uuid } from "drizzle-orm/pg-core";
 import { cameraStatusEnum, cameraTypeEnum } from "./enums.js";
 import { geometryColumn } from "./geometry.js";
+import { roadAttachment } from "./static.js";
 
 /**
  * fixedSpeedCamera lives in its own table rather than hazard_reports: per
@@ -28,6 +29,7 @@ export const fixedSpeedCameras = pgTable(
     sourceLicense: text("source_license"),
     importedAt: timestamp("imported_at", { withTimezone: true }).notNull().defaultNow(),
     lastConfirmedAt: timestamp("last_confirmed_at", { withTimezone: true }),
+    ...roadAttachment(),
   },
   (t) => [index("fixed_speed_cameras_position_gist").using("gist", t.position)],
 );

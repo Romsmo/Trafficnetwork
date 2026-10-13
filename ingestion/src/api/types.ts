@@ -36,6 +36,15 @@ export interface FixedSpeedCameraRow {
   importedAt?: string;
 }
 
+/** One drivable way (server `POST /v1/bulk-import/roads`, `docs/road-network.md`). Coordinates are [lng, lat], like the segments'. */
+export interface RoadWayRow {
+  externalId: string;
+  lineString: [number, number][];
+  highway: string;
+  name?: string;
+  ref?: string;
+}
+
 export type BulkImportKind = "speed-limit-segment" | "static-sign" | "fixed-speed-camera";
 
 export const BULK_IMPORT_KINDS: BulkImportKind[] = ["speed-limit-segment", "static-sign", "fixed-speed-camera"];

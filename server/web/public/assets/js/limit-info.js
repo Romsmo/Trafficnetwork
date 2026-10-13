@@ -4,17 +4,34 @@
  */
 import { distanceToLineMeters } from "./geo.js";
 
-/** The four road axes the page offers for "no limit on record" (the server needs a direction; a visitor cannot know a bearing). */
-export const AXES = [
-  { id: "ns", bearingDegrees: 0 },
-  { id: "nesw", bearingDegrees: 45 },
-  { id: "ew", bearingDegrees: 90 },
-  { id: "nwse", bearingDegrees: 135 },
-];
+/** What a node says about roads and "this entry is wrong" marks (`roadNetwork`, `defectReports` in GET /v1/config). */
+export function intervalSettings(serverConfig) {
+  const r = serverConfig?.roadNetwork;
+  return { maxMeters: Number.isFinite(r?.intervalMaxMeters) ? r.intervalMaxMeters : 3000 };
+}
+
+export function defectSettings(serverConfig) {
+  const d = serverConfig?.defectReports;
+  if (!d || d.enabled !== true) return null;
+  return { threshold: Number.isInteger(d.removalThreshold) ? d.removalThreshold : 3 };
+}
+
+export const DEFECT_REASONS = ["not_on_a_road", "wrong_place", "does_not_exist", "wrong_value", "other"];
+
+/** The node's answer to a mark -> what to tell the visitor. */
+export function describeDefectResult(response) {
+  const reports = Number(response?.reports ?? 0);
+  const threshold = Number(response?.threshold ?? 3);
+  if (response?.removed === true) return { kind: "removed", reports, threshold };
+  if (response?.recorded === false) return { kind: "unchanged", reports, threshold };
+  return { kind: "recorded", reports, threshold };
+}
 
 /** Reasons the node knows (additive enum). The first of each list is the preselected one. */
 export const WRONG_REASONS = ["wrong_value", "limit_lifted", "sign_missing_or_new", "other"];
 export const MISSING_REASONS = ["missing", "sign_missing_or_new", "limit_lifted", "other"];
+/** For a stretch of road: nothing on record there, or something that is wrong. */
+export const INTERVAL_REASONS = ["missing", "wrong_value", "sign_missing_or_new", "limit_lifted", "other"];
 
 /** A tap this close (metres) to a recorded road counts as "on that road"; the node's own lookup reaches further (200 m by default). */
 export const NEAR_ROAD_NOTE_M = 200;
@@ -131,6 +148,12 @@ export function describeCorrectionError(error, settings) {
   if (status === 422 && code === "ROAD_ALREADY_HAS_LIMIT") {
     return { key: "roadAlreadyHasLimit", params: {}, switchTo: { segmentId: d.segmentId, speedLimit: d.speedLimit, unit: d.unit } };
   }
+  // Two points that do not name one stretch of road (POST /v1/roads/resolve and POST /v1/speed-limit-intervals).
+  if (status === 422 && code === "NO_ROAD_DATA") return { key: "noRoadData", params: {} };
+  if (status === 422 && code === "NO_ROAD_FOUND") return { key: "noRoadFound", params: {} };
+  if (status === 422 && code === "NO_ROAD_BETWEEN_POINTS") return { key: "noRoadBetween", params: {} };
+  if (status === 422 && code === "INTERVAL_TOO_LONG") return { key: "tooLong", params: { max: d.maxMeters } };
+  if (status === 422 && code === "INTERVAL_TOO_SHORT") return { key: "tooShort", params: {} };
   if (status === 422 && code === "CORRECTION_VALUE_OUT_OF_RANGE") return { key: "outOfRange", params: { min: d.min, max: d.max, unit: d.unit } };
   if (status === 422 && code === "CORRECTION_VALUE_NOT_ON_STEP") return { key: "notOnStep", params: { step: d.step } };
   if (status === 422 && code === "CORRECTION_NO_CHANGE") return { key: "noChange", params: {} };

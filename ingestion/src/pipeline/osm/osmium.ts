@@ -4,6 +4,8 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import readline from "node:readline";
 import type { Logger } from "../../logging.js";
+import type { OsmFeature } from "./normalize.js";
+import { ROAD_TAG_FILTER } from "./roads.js";
 import { readSectionManifest, splitIntoSections, writeSectionManifest, type SectionManifest } from "./sections.js";
 
 /**
@@ -105,6 +107,44 @@ export async function filterAndSplit(pbfPath: string, workDir: string, options: 
   logger.info({ sections: manifest.sections.length, features: manifest.totalFeatures }, "sections written");
 
   return { manifest, sectionsDir, osmiumVersion, header, reused: false, peakRssKb };
+}
+
+const RECORD_SEPARATOR = "\u001e";
+
+async function* featuresOfLines(lines: AsyncIterable<string>): AsyncGenerator<OsmFeature> {
+  for await (const raw of lines) {
+    const line = raw.startsWith(RECORD_SEPARATOR) ? raw.slice(1) : raw;
+    if (line.trim().length === 0) continue;
+    yield JSON.parse(line) as OsmFeature;
+  }
+}
+
+/**
+ * Filters `pbfPath` down to the drivable ways and hands them, as exported features, to `consume` - streamed, never written to
+ * disk as GeoJSON (≈99 M ways in Europe). The same two osmium steps as `filterAndSplit`: `tags-filter` bounds the memory of the
+ * `export` that follows.
+ */
+export async function exportRoads<T>(
+  pbfPath: string,
+  workDir: string,
+  options: { indexDir?: string },
+  logger: Logger,
+  consume: (features: AsyncIterable<OsmFeature>) => Promise<T>,
+): Promise<T> {
+  await fs.mkdir(workDir, { recursive: true });
+  await getOsmiumVersion(logger);
+  const filteredPath = path.join(workDir, "roads.filtered.osm.pbf");
+  logger.info({ filter: ROAD_TAG_FILTER.join(" ") }, "osmium tags-filter for the road network started");
+  await runOsmium(["tags-filter", pbfPath, ...ROAD_TAG_FILTER, "-o", filteredPath, "--overwrite"], logger, "tags-filter roads");
+  const indexPath = path.join(options.indexDir ?? workDir, "road-node-locations.idx");
+  await fs.mkdir(path.dirname(indexPath), { recursive: true });
+  const exportArgs = ["export", filteredPath, "-f", "geojsonseq", "-a", "type,id", `--index-type=sparse_file_array,${indexPath}`, "-o", "-"];
+  try {
+    return await runOsmiumStreaming(exportArgs, logger, "export roads", (lines) => consume(featuresOfLines(lines)), {});
+  } finally {
+    await fs.unlink(filteredPath).catch(() => {});
+    await fs.unlink(indexPath).catch(() => {});
+  }
 }
 
 async function getOsmiumVersion(logger: Logger): Promise<string> {

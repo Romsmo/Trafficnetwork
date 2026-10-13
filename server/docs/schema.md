@@ -79,19 +79,37 @@ imported, and must survive a wipe-and-reimport.
 
 ### `speed_limit_gaps`
 
-Where a road without a speed limit on record is (server 1.1.0, migration `0012`, docs/speed-limit-corrections.md D13).
+Where a community stretch is (server 1.1.0, migrations `0012` and `0013`; `road-network.md`; D13 for the legacy places).
 
 | Column | Type | Notes |
 |---|---|---|
 | `segment_key` | text PK | `speed_limit_geometry_key` of `geometry` — the key votes and corrections for it use |
-| `cell` | text | H3 cell, resolution 10 |
-| `axis` | integer | 0..7, 22.5° each (an axis, not a heading) |
-| `geometry` | LineString(4326) | the 120 m stretch derived from `cell` and `axis` |
-| `needs_review` | boolean | an import brought a road of its own next to it |
+| `ref` | text | the `ivl:…` reference of the two picked points (null for a legacy place) |
+| `road_name`, `road_ref`, `road_class`, `length_m` | | what the node found when it resolved the stretch |
+| `cell`, `axis` | text, integer | **legacy** places only (D13): H3 cell (res. 10) and direction bucket 0..7 |
+| `geometry` | LineString(4326) | the stretch along the road's own shape (legacy: the 120 m line) |
+| `needs_review` | boolean | legacy: an import brought a road of its own next to it |
+| `checked_at` | timestamptz | legacy: when the road check ran (hidden if off the road of a covered area) |
 | `created_at` | timestamptz | |
 
 A value that is applied is an ordinary row of `speed_limit_segments` with `source = 'community'`, written and removed by the
 application (never by an import).
+
+### Road network (migration `0013`, `road-network.md`)
+
+* `road_ways` — drivable ways: `source`, `external_id` (unique together; the OSM way id as `w<id>`), `geometry` LineString,
+  `highway`, `name`, `ref`, `fetched_at`. GIST on `geometry`.
+* `road_coverage_tiles` — H3 resolution-8 cells whose road network is held completely: `tile` PK, `via` (`import`|`lookup`),
+  `way_count`, `fetched_at`.
+* `speed_limit_splits` — an imported line that was cut open under a community stretch: the original geometry and values
+  (`interval_key`, `original_id`, …), so that removing the stretch joins the pieces again.
+* `data_defect_reports` — one row per `(target_type, target_id, reporter_id)`: the marks of "this entry is wrong".
+* `data_defect_removals` — what was taken out: `target_type`, `match_key` (a line: its geometry key; a sign:
+  `md5(sign_type || ':' || ST_AsText(position))`), `reason`, `removed_at`, `restored_at`. A re-import inserts a matching row hidden.
+
+**Attachment columns** (additive, on `static_signs`, `fixed_speed_cameras` and `speed_limit_segments`): `road_source`, `road_id`,
+`road_offset_m`, `attach_status` (`pending`|`attached`|`off_road`|`unknown`, default `pending`), `visible` (default true; every
+read, snapshot and package filters on it), `hidden_reason` (`off_road`|`defect`). Rows stay in their tables when hidden.
 
 ### `speed_limit_corrections`
 Materialised view of the votes: one row per `(segment_key, unit, value)` that a

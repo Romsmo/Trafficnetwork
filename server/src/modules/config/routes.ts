@@ -62,6 +62,15 @@ export async function registerConfigRoutes(app: FastifyInstance) {
           windowMinutes: env.COMMUNITY_CORRECTIONS_RATE_LIMIT_WINDOW_MINUTES,
         },
       },
+      // The road network (docs/road-network.md): a stretch of road is proposed by two points on it, which the node resolves to
+      // the road's own shape. `lookup` says whether this node can fetch roads it does not have (else only imported ones).
+      roadNetwork: {
+        intervalMaxMeters: env.ROAD_INTERVAL_MAX_M,
+        pickToleranceMeters: env.ROAD_PICK_TOLERANCE_M,
+        lookup: env.ROAD_LOOKUP_URL !== "",
+      },
+      // "This entry is wrong" marks: how many distinct reporters hide an entry. Absent where the feature is off.
+      ...(env.DEFECT_REPORTS_ENABLED ? { defectReports: { enabled: true, removalThreshold: env.DEFECT_REMOVAL_THRESHOLD } } : {}),
       staticDataVersion: await getStaticDataVersion(app.deps.db),
       federationEnabled: env.FEDERATION_ENABLED,
       // Full signed envelope (payload + keyId + signature), not just the

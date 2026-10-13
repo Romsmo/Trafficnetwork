@@ -230,6 +230,26 @@ limit. Keep the range/step/threshold the same as the servers you federate with â
 votes are checked against *your* limits on arrival, so different limits make servers
 disagree about which votes count.
 
+## The road network and entries marked as wrong (server 1.1.0)
+
+Design and reasons: [`road-network.md`](road-network.md). What an operator decides and does:
+
+* **Where roads come from.** Import them (`cd ingestion && npm run ingest -- --roads --region <id>`, once per region) *and/or*
+  let the node look them up (`ROAD_LOOKUP_URL`, default the public OpenStreetMap Overpass instance, `none` = never). The
+  lookup sends the *area* of two picked points to that service (not who picked them): the node's privacy notice says so; a busy
+  node should run its own Overpass instance. Without roads for an area a visitor gets "no road data for this area", nothing
+  else breaks.
+* **Items tied to roads.** The background step (`ROAD_ATTACH_WORKER_ENABLED`, every `ROAD_ATTACH_INTERVAL_SECONDS`) moves signs
+  and cameras onto their road and hides what lies off every road of a *covered* area. After a large import give it time, or run
+  it by hand: `npm run roads -- attach`; `npm run roads -- status` shows how many items are attached, off the road or still
+  unknown. Items in an area the node does not know stay delivered.
+* **Entries visitors marked as wrong.** `DEFECT_REMOVAL_THRESHOLD` distinct devices (default 3) hide an entry; `npm run roads --
+  reports` shows what is marked but not out yet, `defects` what was taken out, `restore <type> <match-key>` shows one again
+  (it then stays: a restored entry is not hidden by the same old marks). Local policy, not replicated.
+* **Switching off.** `DEFECT_REPORTS_ENABLED=false` (no marking; entries already out stay out), `ROAD_ATTACH_WORKER_ENABLED=false`
+  (nothing new is tied or hidden; what was hidden stays), `ROAD_LOOKUP_URL=none`.
+* **Migration `0013`** is additive (new tables, nullable/defaulted columns): no table is rewritten.
+
 ## Migrations that take a heavy lock
 
 **Migration 0007 (community corrections) needs a maintenance window on a node that already holds

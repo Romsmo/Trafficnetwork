@@ -334,19 +334,24 @@
       ]
     },
     {
-      "name": "no speed limit on record: a value for the road, queued offline, sent with a signature",
+      "name": "a limit for a stretch of road named by two points: queued offline, sent with a signature; the road is resolved by the server; wrong entries can be marked",
       "servers": { "main": { "communityCorrections": true } },
       "options": { "nodes": ["${main}"], "discovery": false, "credentials": { "type": "client", "clientId": "conformance", "clientSecret": "secret" } },
       "steps": [
         { "call": "setOfflineRegions", "args": { "mode": "all" } },
         { "call": "sync", "expect": { "ok": true } },
-        { "call": "reportMissingSpeedLimit", "args": { "lat": 52.3, "lng": 13.2, "value": 30, "unit": "kmh" }, "expectError": "invalidArgument" },
-        { "call": "reportMissingSpeedLimit", "args": { "lat": 52.3, "lng": 13.2, "bearing": 90, "value": 33, "unit": "kmh" }, "expectError": "invalidArgument" },
-        { "call": "reportMissingSpeedLimit", "args": { "lat": 52.52, "lng": 13.405, "bearing": 90, "value": 50, "unit": "kmh" }, "expectError": "roadAlreadyHasLimit" },
-        { "call": "reportMissingSpeedLimit", "args": { "lat": 52.3, "lng": 13.2, "bearing": 90, "value": 30, "unit": "kmh" }, "expect": { "state": "queued", "value": 30, "unit": "kmh" }, "expectKeys": ["segmentKey"] },
+        { "call": "reportSpeedLimitInterval", "args": { "from": { "lat": 52.3, "lng": 13.2 }, "to": { "lat": 52.3, "lng": 13.2001 }, "value": 30, "unit": "kmh" }, "expectError": "intervalTooShort" },
+        { "call": "reportSpeedLimitInterval", "args": { "from": { "lat": 52.3, "lng": 13.2 }, "to": { "lat": 52.3, "lng": 13.204 }, "value": 33, "unit": "kmh" }, "expectError": "invalidArgument" },
+        { "call": "reportSpeedLimitInterval", "args": { "from": { "lat": 52.3, "lng": 13.2 }, "value": 30, "unit": "kmh" }, "expectError": "invalidArgument" },
+        { "call": "reportSpeedLimitInterval", "args": { "from": { "lat": 52.3, "lng": 13.2 }, "to": { "lat": 52.3, "lng": 13.204 }, "value": 30, "unit": "kmh" }, "expect": { "state": "queued", "value": 30, "unit": "kmh" }, "expectKeys": ["segmentKey"] },
+        { "call": "resolveRoadInterval", "args": { "from": { "lat": 52.3, "lng": 13.2 }, "to": { "lat": 52.3, "lng": 13.204 } }, "expect": { "lengthM": 300, "road": { "name": "Feldweg" }, "geometry": { "type": "LineString" } } },
+        { "call": "resolveRoadInterval", "args": { "from": { "lat": 30.0, "lng": 13.2 }, "to": { "lat": 30.0, "lng": 13.204 } }, "expectError": "noRoadBetweenPoints" },
+        { "call": "dataDefectsNear", "args": { "lat": 52.3, "lng": 13.2005 }, "expect": [ { "targetType": "speedLimitSegment", "reports": 1, "threshold": 3 } ] },
+        { "call": "reportDataDefect", "args": { "targetType": "speedLimitSegment", "targetId": "defect-seg-1", "reason": "not_on_a_road" }, "expect": { "recorded": true, "reports": 2, "removed": false } },
         { "call": "getSyncStatus", "expect": { "pendingWrites": 1 } },
         { "call": "sync", "expect": { "submitted": 1, "pendingWrites": 0 } },
-        { "mockLog": { "server": "main", "route": "POST /v1/speed-limit-gaps", "count": 1, "bodyIncludes": { "value": 30, "unit": "kmh" } } }
+        { "mockLog": { "server": "main", "route": "POST /v1/speed-limit-intervals", "count": 1, "bodyIncludes": { "value": 30, "unit": "kmh" } } },
+        { "mockLog": { "server": "main", "route": "POST /v1/data-defects", "count": 1, "bodyIncludes": { "targetType": "speedLimitSegment", "reason": "not_on_a_road" } } }
       ]
     },
     {

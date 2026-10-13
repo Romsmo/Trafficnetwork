@@ -344,15 +344,33 @@ class Client:
             args["reason"] = reason
         return self.call("reportWrongSpeedLimit", args)
 
-    def report_missing_speed_limit(self, lat: float, lng: float, value: int, unit: str,
-                                   bearing: Optional[float] = None, reason: Optional[str] = None):
-        """"There is no speed limit on record for this road": a value for a road the import has none for."""
-        args: Dict[str, Any] = {"lat": lat, "lng": lng, "value": value, "unit": unit}
-        if bearing is not None:
-            args["bearing"] = bearing
+    def report_speed_limit_interval(self, from_point: Dict[str, float], to_point: Dict[str, float],
+                                    value: int, unit: str, reason: Optional[str] = None):
+        """"On this stretch of road the limit is X": a limit for a stretch named by two points on it
+        (``{"lat": ..., "lng": ...}`` each). The server finds the road between them."""
+        args: Dict[str, Any] = {"from": from_point, "to": to_point, "value": value, "unit": unit}
         if reason is not None:
             args["reason"] = reason
-        return self.call("reportMissingSpeedLimit", args)
+        return self.call("reportSpeedLimitInterval", args)
+
+    def resolve_road_interval(self, from_point: Dict[str, float], to_point: Dict[str, float]):
+        """Which stretch of which road two picked points name (needs the network): ``geometry`` is the
+        stretch along the road's own shape, ``covered`` what is on record under it."""
+        return self.call("resolveRoadInterval", {"from": from_point, "to": to_point})
+
+    def data_defects_near(self, lat: float, lng: float, radius_meters: Optional[float] = None):
+        """The entries near a point that can be marked as wrong (needs the network)."""
+        args: Dict[str, Any] = {"lat": lat, "lng": lng}
+        if radius_meters is not None:
+            args["radiusMeters"] = radius_meters
+        return self.call("dataDefectsNear", args)
+
+    def report_data_defect(self, target_type: str, target_id: str, reason: Optional[str] = None):
+        """"This entry is wrong" (``speedLimitSegment`` or ``staticSign``): one mark per device and entry."""
+        args: Dict[str, Any] = {"targetType": target_type, "targetId": target_id}
+        if reason is not None:
+            args["reason"] = reason
+        return self.call("reportDataDefect", args)
 
     def lookup_speed_limit(self, lat: float, lng: float, heading: Optional[float] = None):
         """The limit here, from the offline data or (outside the offline area) from the server.

@@ -107,11 +107,26 @@ export class BaseClient {
     return this.call("reportWrongSpeedLimit", args);
   }
 
-  reportMissingSpeedLimit({ lat, lng, value, unit, bearing, reason }) {
-    const args = { lat, lng, value, unit };
-    if (bearing !== undefined) args.bearing = bearing;
+  reportSpeedLimitInterval({ from, to, value, unit, reason }) {
+    const args = { from, to, value, unit };
     if (reason !== undefined) args.reason = reason;
-    return this.call("reportMissingSpeedLimit", args);
+    return this.call("reportSpeedLimitInterval", args);
+  }
+
+  resolveRoadInterval(from, to) {
+    return this.call("resolveRoadInterval", { from, to });
+  }
+
+  dataDefectsNear(lat, lng, radiusMeters) {
+    const args = { lat, lng };
+    if (radiusMeters !== undefined) args.radiusMeters = radiusMeters;
+    return this.call("dataDefectsNear", args);
+  }
+
+  reportDataDefect({ targetType, targetId, reason }) {
+    const args = { targetType, targetId };
+    if (reason !== undefined) args.reason = reason;
+    return this.call("reportDataDefect", args);
   }
 
   lookupSpeedLimit(lat, lng, heading) {

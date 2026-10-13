@@ -1,6 +1,8 @@
 import { z } from "zod";
 import { isAcceptableFederationAddress } from "../modules/federation/address.js";
 import { DEFAULT_MAP_TILE_URL, isAcceptableTileUrl } from "../modules/web/tile.js";
+
+const DEFAULT_ROAD_LOOKUP_URL = "https://overpass-api.de/api/interpreter";
 import { CameraPolicyError, parseLocalCaps } from "../modules/cameras/policy/levels.js";
 import { parseExpiryOverrides } from "./report-expiry.js";
 
@@ -334,6 +336,38 @@ const envSchema = z.object({
   MAP_TILE_ATTRIBUTION_TEXT: z.string().min(1).default("© OpenStreetMap contributors"),
   MAP_TILE_ATTRIBUTION_URL: z.string().url().default("https://www.openstreetmap.org/copyright"),
   MAP_TILE_MAX_ZOOM: z.coerce.number().int().min(1).max(22).default(19),
+
+  // Road network (docs/road-network.md). A speed limit proposed for a stretch of road, and every sign, camera and limit the node
+  // delivers, is tied to the shape of a road. Where the node has no road shape for an area it asks an Overpass-compatible
+  // service (OpenStreetMap data, ODbL) for the roads of that area once and keeps them. The request carries the coordinates of
+  // the area a visitor picked, not who they are. Empty = the public instance of overpass-api.de (as for MAP_TILE_URL, so an
+  // unset variable in docker-compose means "default"); "none" = never ask anyone, use only the roads that were imported.
+  ROAD_LOOKUP_URL: z
+    .string()
+    .default("")
+    .transform((value) => (value.trim() === "" ? DEFAULT_ROAD_LOOKUP_URL : value.trim().toLowerCase() === "none" ? "" : value.trim())),
+  ROAD_LOOKUP_TIMEOUT_MS: z.coerce.number().int().min(1000).max(120_000).default(25_000),
+  // How far a picked point or an item may be from a road and still belong to it.
+  ROAD_PICK_TOLERANCE_M: z.coerce.number().int().min(5).max(200).default(35),
+  ROAD_SNAP_TOLERANCE_M: z.coerce.number().int().min(1).max(200).default(25),
+  // The longest stretch one proposal may span.
+  ROAD_INTERVAL_MAX_M: z.coerce.number().int().min(50).max(20_000).default(3000),
+  // The background step that attaches signs, cameras and community stretches to roads and hides what is off the road.
+  ROAD_ATTACH_WORKER_ENABLED: z
+    .enum(["true", "false"])
+    .default("true")
+    .transform((v) => v === "true"),
+  ROAD_ATTACH_INTERVAL_SECONDS: z.coerce.number().int().min(10).default(300),
+  // How many uncovered areas one run may ask the lookup service for (be polite to a public instance).
+  ROAD_ATTACH_TILES_PER_RUN: z.coerce.number().int().min(0).max(100).default(5),
+
+  // "This entry is wrong, take it out" (docs/road-network.md, "Defect reports"): a speed limit, sign or camera that visitors
+  // mark in the map. Distinct reporters needed before it is hidden. Off = the endpoints do not exist.
+  DEFECT_REPORTS_ENABLED: z
+    .enum(["true", "false"])
+    .default("true")
+    .transform((v) => v === "true"),
+  DEFECT_REMOVAL_THRESHOLD: z.coerce.number().int().positive().default(3),
 
   // Web sessions (POST /v1/web/session): anonymous, short-lived, unlinkable between renewals.
   WEB_SESSION_TTL_SECONDS: z.coerce.number().int().min(60).max(3600).default(900),

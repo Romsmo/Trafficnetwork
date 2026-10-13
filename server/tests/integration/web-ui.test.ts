@@ -144,6 +144,8 @@ describe("web UI (server/web)", () => {
       expect(config.tiles).toMatchObject({ url: "https://tile.openstreetmap.org/{z}/{x}/{y}.png", maxZoom: 19 });
       expect(config.limits).toEqual({ maxSegmentRadiusM: 1500, maxHazardRadiusM: 25_000 });
       expect(config.privacyLogging).toBe(true);
+      // the road service the node itself may ask (docs/road-network.md): named for the privacy notice
+      expect(config.roadLookupHost).toBe("overpass-api.de");
       const [[south, west], [north, east]] = config.region.bounds as [[number, number], [number, number]];
       expect(south).toBeLessThan(MUNICH.lat);
       expect(north).toBeGreaterThan(MUNICH.lat);

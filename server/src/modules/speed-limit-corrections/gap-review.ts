@@ -7,7 +7,8 @@ const REVIEW_RADIUS_M = 20;
 const REVIEW_MAX_ANGLE_DEGREES = 25;
 
 /**
- * After an import batch: a community segment (a road the import had no limit for, docs D13) next to which the import now
+ * After an import batch: a community segment from a legacy place (a road the import had no limit for, docs D13; stretches picked
+ * by two points are not looked at - they replace what is under them) next to which the import now
  * has a road of its own is marked "needs review". Never overwritten, never removed — the community's number stays, and
  * what it shows next to it is that somebody should look. Cheap when there are no such segments (one empty query).
  */

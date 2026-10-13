@@ -35,7 +35,7 @@ export async function findAllStaticSigns(db: Queryable): Promise<StaticSignApi[]
   const rows = await db.execute<Row>(sql`
     select id, ST_AsGeoJSON(position)::json as position_geojson, sign_type,
            source, source_license, imported_at
-    from static_signs
+    from static_signs where visible
   `);
   return rows.map(toApi);
 }
@@ -50,7 +50,7 @@ export async function findStaticSignsNearby(
     select id, ST_AsGeoJSON(position)::json as position_geojson, sign_type,
            source, source_license, imported_at
     from static_signs
-    where ${bboxPrefilter(sql`position`, lat, lng, radiusM)}ST_DWithin(
+    where visible and ${bboxPrefilter(sql`position`, lat, lng, radiusM)}ST_DWithin(
       position::geography,
       ST_SetSRID(ST_MakePoint(${lng}, ${lat}), 4326)::geography,
       ${radiusM}
@@ -64,7 +64,7 @@ export function tileStaticSignsQuery(envelopes: readonly Envelope[]): { query: S
   return {
     query: sql`
       select id, ST_AsGeoJSON(position)::json as position_geojson, sign_type, source, source_license, imported_at
-      from static_signs where ${envelopeOverlap(sql`position`, envelopes)} order by id
+      from static_signs where visible and ${envelopeOverlap(sql`position`, envelopes)} order by id
     `,
     map: (row) => toApi(row as Row),
   };

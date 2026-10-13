@@ -729,28 +729,60 @@ static package are "as of the last change of the effective value"; the live
 numbers come from the endpoints below. `GET /v1/speed-limit` returns the same
 additive fields next to `segmentId` and `segmentKey`.
 
-### `POST /v1/speed-limit-gaps` — a road with no speed limit on record (server 1.1.0)
+### `POST /v1/speed-limit-intervals` — a limit for a stretch of road, named by two points (server 1.1.0)
 
 ```
-Request:  { "lat": number, "lng": number, "bearingDegrees": number /* 0..360, either direction of travel */,
-            "value": integer, "unit": "kmh" | "mph", "reason"?: "missing" | "sign_missing_or_new" | "limit_lifted" | "other",
+Request:  { "from": { "lat", "lng" }, "to": { "lat", "lng" },
+            "value": integer, "unit": "kmh" | "mph", "reason"?: "missing" | "wrong_value" | "sign_missing_or_new" | "limit_lifted" | "other",
             "deviceAssertion"?: SignedEnvelope<SpeedLimitVote> }
 Response: { "correction": {...}, "recorded": boolean, "merged": boolean,
             "segment": {...} | null,                         // null until a value is applied
-            "gap": { "segmentKey": "<32 hex>", "ref": "gap:<h3 cell>:<axis>", "geometry": { LineString } } }
+            "interval": { "segmentKey": "<32 hex>", "ref": "ivl:<lat>,<lng>:<lat>,<lng>", "geometry": { LineString },
+                          "lengthM": number, "road": { "name", "ref", "class" },
+                          "replaces": [ { "segmentId", "segmentKey", "speedLimit", "unit", "source", "coveredMeters" } ] } }
             — 201 if recorded and new, 200 otherwise
 ```
 
-For a road the import has no limit for. The place and direction are quantised to an H3 cell (resolution 10) and one of 8
-direction buckets; **devices that name the same cell and bucket make the same proposal** (`merged: true`). Three distinct
-devices (`COMMUNITY_CORRECTIONS_CONFIRMATIONS_REQUIRED`) turn it into a 120 m stretch of road with the value on it, served by
-every read (`source: "community"`, `correctedBy: "community"`, no `importedSpeedLimit`). Confirm or object with
-`POST /v1/speed-limit-corrections/:id/confirmations`; discover open proposals with `GET /v1/speed-limit-corrections?tiles=…`
-(`segmentId` is null and `geometry` is the stretch while it is below the threshold). A signed `deviceAssertion` names the place as
-`segmentKey: "gap:<cell>:<axis>"` (or the derived key). Errors: `422 ROAD_ALREADY_HAS_LIMIT` (an imported road with a limit
-runs here in this direction; `details` names the segment — propose a correction for it), `422 CORRECTION_VALUE_*`, `429`
-(same per-client budget as corrections). With the feature off the endpoint does not exist (404). Design: D13 in
-[`speed-limit-corrections.md`](speed-limit-corrections.md).
+For a road the import has no limit for, **and to change a limit that is wrong on part of a road**. The visitor picks the two
+ends of the stretch on the map; the node finds the road between them and the stretch's own shape (`road-network.md`). Devices
+that name the same stretch make the same proposal (`merged: true`; the same two points in the other order are the same
+stretch). Three distinct devices (`COMMUNITY_CORRECTIONS_CONFIRMATIONS_REQUIRED`) write the limit along the road, replacing what
+the import says under it (`source: "community"`, `correctedBy: "community"`, no `importedSpeedLimit`; the cut imported line
+is joined again if the value is taken away). A signed `deviceAssertion` names the stretch as `segmentKey: "ivl:<lat>,<lng>:<lat>,<lng>"`
+(integer 1e-5°, smaller pair first) or its derived key. Confirm or object with
+`POST /v1/speed-limit-corrections/:id/confirmations`.
+Errors: `422 NO_ROAD_DATA` | `NO_ROAD_FOUND` | `NO_ROAD_BETWEEN_POINTS` | `INTERVAL_TOO_LONG` | `INTERVAL_TOO_SHORT` (nothing was
+recorded), `422 CORRECTION_NO_CHANGE` (the stretch already has that value), `422 CORRECTION_VALUE_*`, `429` (same per-client
+budget as corrections). With the feature off the endpoint does not exist (404). The earlier `POST /v1/speed-limit-gaps` (a
+place and a direction) is gone.
+
+### `POST /v1/roads/resolve` — which stretch two points name (server 1.1.0)
+
+```
+Request:  { "from": { "lat", "lng" }, "to": { "lat", "lng" } }
+Response: { "ref": "ivl:…", "segmentKey": "<32 hex>", "geometry": { LineString }, "lengthM": number,
+            "road": { "name": string|null, "ref": string|null, "class": string|null },
+            "covered": [ { "segmentId", "segmentKey", "speedLimit", "unit", "source", "coveredMeters" } ],   // on record under it
+            "proposals": [ Correction ] }                                                                     // for exactly this stretch
+```
+
+The preview: draw `geometry` (the road's own shape) so the visitor can check it is the stretch meant. Stores nothing about the
+request. Errors as above (422). Counts as a heavy read for the web session limits.
+
+### `GET /v1/data-defects/near` and `POST /v1/data-defects` — entries marked as wrong (server 1.1.0)
+
+```
+GET  /v1/data-defects/near?lat&lng&radiusM   (radiusM ≤ 100, default 30)
+  -> { "items": [ { "targetType": "speedLimitSegment" | "staticSign", "targetId": uuid, "distanceMeters": integer,
+                    "speedLimit"?, "speedLimitUnit"?, "signType"?, "source", "geometry"? | "position"?,
+                    "reports": integer, "threshold": integer } ] }       // nearest first, at most 20
+POST /v1/data-defects  { "targetType", "targetId": uuid, "reason"?: "not_on_a_road" | "wrong_place" | "does_not_exist" | "wrong_value" | "other" }
+  -> { "recorded": boolean, "reports": integer, "threshold": integer, "removed": boolean }     — 201 recorded, 200 already marked
+```
+
+One mark per reporter and entry; at `DEFECT_REMOVAL_THRESHOLD` distinct reporters the entry is hidden (events, packages), and
+stays out after a re-import. `404` when the entry is not served (any more). Only registered when `DEFECT_REPORTS_ENABLED`.
+`GET /v1/config` → `defectReports { enabled, removalThreshold }`. See `road-network.md`.
 
 ### `POST /v1/speed-limit-segments/:id/corrections`
 
@@ -1132,6 +1164,18 @@ Row shapes:
 // speed-cameras (persistent devices; cameraType optional: fixedSpeedCamera | redLightCamera | distanceControl, default fixedSpeedCamera)
 { "lat": 52.5, "lng": 13.4, "cameraType": "redLightCamera", "source": "osm", "sourceLicense": "ODbL" }
 ```
+
+### The road network: `POST /v1/bulk-import/roads` and `.../road-coverage`
+
+```
+// POST /v1/bulk-import/roads — upsert one batch of drivable ways (idempotent per (source, externalId))
+{ "rows": [ { "externalId": "w123456", "lineString": [[lng, lat], ...], "highway": "residential", "name"?: "Hauptstraße", "ref"?: "B 26" } ] }
+// POST /v1/bulk-import/road-coverage — areas (H3 resolution 8) the import holds the road network of completely
+{ "tiles": [ "<h3 cell>", ... ] }          // 1..20000
+```
+
+Both are additive and need the `bulk-import` scope. `GET /v1/config` also carries `roadNetwork { intervalMaxMeters,
+pickToleranceMeters, lookup }` (`lookup`: the node can fetch roads it does not have). `ingestion --roads` is the client.
 
 ### Seed reports (roadworks): `POST /v1/bulk-import/seed-reports` and `.../retire`
 

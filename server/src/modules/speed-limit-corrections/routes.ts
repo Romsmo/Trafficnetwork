@@ -8,8 +8,9 @@ import { findClientByClientId } from "../../db/queries/clients.js";
 import { listCorrections } from "../../db/queries/speed-limit-corrections.js";
 import { findSpeedLimitSegmentById, type SpeedLimitSegmentApi } from "../../db/queries/speed-limit-segments.js";
 import { ApiError, badRequest, notFound, unprocessable } from "../../lib/errors.js";
-import { findImportedRoadsNear } from "../../db/queries/speed-limit-gaps.js";
-import { GAP_AXES, gapGeometry, gapGeoJson, placeOf } from "./gap.js";
+import { findSegmentsUnder, type CoveredSegment } from "../../db/queries/speed-limit-gaps.js";
+import { stretchGeoJson, stretchOfInterval } from "./stretch.js";
+import { RoadResolveError, resolveInterval } from "../roads/resolve.js";
 import { parseCsv } from "../../lib/query-params.js";
 import { isFreshTimestamp } from "../crypto/envelope.js";
 import { computeFederationEventId } from "../federation/device-event.js";
@@ -40,21 +41,32 @@ const proposeBodySchema = z.object({
   deviceAssertion: speedLimitVoteEnvelopeSchema.optional(),
 });
 
-// "This road has no speed limit on record" (docs D13). A place and a direction, not a segment: there is none to name.
-const gapBodySchema = z.object({
-  lat: z.number().min(-90).max(90),
-  lng: z.number().min(-180).max(180),
-  // Any heading along the road, either direction of travel; 0 = north, clockwise. Needed to place the stretch of road.
-  bearingDegrees: z.number().min(0).max(360),
+const pointSchema = z.object({ lat: z.number().min(-90).max(90), lng: z.number().min(-180).max(180) });
+
+// A limit for a stretch of road (docs/road-network.md): two points picked on a road. The node finds the road and the road's own
+// shape between the points; the visitor names no direction and no segment. Used for a road the import has no limit for and to
+// replace a limit that is wrong on part of a road.
+const intervalBodySchema = z.object({
+  from: pointSchema,
+  to: pointSchema,
   value: z.number().int(),
   unit: z.enum(SPEED_LIMIT_UNITS),
   reason: z.enum(CORRECTION_REASONS).optional(),
   deviceAssertion: speedLimitVoteEnvelopeSchema.optional(),
 });
 
-/** An imported road this close to the reported point, running the same way, means the road is not missing — correct that one. */
-const ROAD_ALREADY_THERE_RADIUS_M = 15;
-const ROAD_ALREADY_THERE_MAX_ANGLE_DEGREES = 25;
+/** What of the road under a stretch already carries one and the same limit (>= 90 % of its length): a proposal for that value changes nothing. */
+function uniformLimit(covered: CoveredSegment[], lengthM: number): { value: number; unit: "kmh" | "mph" } | null {
+  const sums = new Map<string, number>();
+  for (const c of covered) sums.set(`${c.speedLimit}|${c.unit}`, (sums.get(`${c.speedLimit}|${c.unit}`) ?? 0) + c.coveredMeters);
+  for (const [key, meters] of sums) {
+    if (meters >= lengthM * 0.9) {
+      const [value, unit] = key.split("|");
+      return { value: Number(value), unit: unit as "kmh" | "mph" };
+    }
+  }
+  return null;
+}
 
 const confirmBodySchema = z.object({
   kind: z.enum(["confirm", "deny"]),
@@ -204,38 +216,36 @@ export async function registerSpeedLimitCorrectionRoutes(app: FastifyInstance) {
     return respond(app, reply, result, result.recorded ? assertion : undefined);
   });
 
-  // "No speed limit is recorded here" (docs D13): a value for a road the import has none for. Several devices naming the
-  // same place and direction are one proposal; at the threshold it becomes a short stretch of road with the value on it.
-  app.post("/v1/speed-limit-gaps", async (req, reply) => {
-    const body = gapBodySchema.safeParse(req.body);
+  // A limit for a stretch of road, named by two points on it (docs/road-network.md). Several devices naming the same stretch
+  // are one proposal; at the threshold it becomes the stretch of the road's own shape with the value on it - and replaces what the
+  // import says under it. Editing a limit on part of a road is the same call.
+  app.post("/v1/speed-limit-intervals", async (req, reply) => {
+    const body = intervalBodySchema.safeParse(req.body);
     if (!body.success) throw badRequest("Invalid request body", body.error.issues);
     const input = body.data;
-    if (input.lat === 0 && input.lng === 0) throw badRequest("Position (0, 0) is rejected as implausible (\"null island\")");
-
-    const place = placeOf(input.lat, input.lng, input.bearingDegrees);
-    const gap = gapGeometry(place);
-
-    // Not missing after all: an imported road runs here, in this direction. The proposal belongs on that road.
-    const proposedAxis = place.axis * (180 / GAP_AXES);
-    for (const road of await findImportedRoadsNear(db, input.lat, input.lng, ROAD_ALREADY_THERE_RADIUS_M)) {
-      const diff = Math.abs(road.axisDegrees - proposedAxis) % 180;
-      if (Math.min(diff, 180 - diff) <= ROAD_ALREADY_THERE_MAX_ANGLE_DEGREES) {
-        throw unprocessable(
-          "ROAD_ALREADY_HAS_LIMIT",
-          "A road with a speed limit on record runs here in this direction; propose a correction for that segment instead",
-          { segmentId: road.segmentId, segmentKey: road.segmentKey, speedLimit: road.speedLimit, unit: road.unit },
-        );
-      }
+    for (const p of [input.from, input.to]) {
+      if (p.lat === 0 && p.lng === 0) throw badRequest("Position (0, 0) is rejected as implausible (\"null island\")");
     }
+
+    let stretch;
+    try {
+      stretch = stretchOfInterval(await resolveInterval({ db, env, warn: (m, d) => app.log.warn({ detail: d }, m) }, input.from, input.to));
+    } catch (error) {
+      if (error instanceof RoadResolveError) throw unprocessable(error.code, error.message, error.details);
+      throw error;
+    }
+
+    const covered = await findSegmentsUnder(db, stretch.coordinates);
+    const uniform = uniformLimit(covered, stretch.lengthM ?? 0);
 
     const assertion = input.deviceAssertion as SpeedLimitVoteEnvelope | undefined;
     const caller = await resolveCaller(db, req.auth!.sub, assertion);
     const signed = assertion
-      ? verifyAssertion(assertion, { vote: "support", segmentKey: [gap.ref, gap.segmentKey], value: input.value, unit: input.unit, reason: input.reason ?? null })
+      ? verifyAssertion(assertion, { vote: "support", segmentKey: [stretch.ref, stretch.segmentKey], value: input.value, unit: input.unit, reason: input.reason ?? null })
       : null;
 
     const result = await castLocalVote(db, env, {
-      target: { segmentKey: gap.segmentKey, unit: null, importedValue: null, segment: null, gap },
+      target: { segmentKey: stretch.segmentKey, unit: null, importedValue: uniform && uniform.unit === input.unit ? uniform.value : null, segment: null, gap: stretch },
       kind: "support",
       value: input.value,
       unit: input.unit,
@@ -251,7 +261,14 @@ export async function registerSpeedLimitCorrectionRoutes(app: FastifyInstance) {
       recorded: result.recorded,
       merged: result.merged,
       segment: result.segment ? segmentSummary(result.segment) : null,
-      gap: { segmentKey: gap.segmentKey, ref: gap.ref, geometry: gapGeoJson(gap) },
+      interval: {
+        segmentKey: stretch.segmentKey,
+        ref: stretch.ref,
+        geometry: stretchGeoJson(stretch),
+        lengthM: stretch.lengthM,
+        road: { name: stretch.roadName, ref: stretch.roadRef, class: stretch.roadClass },
+        replaces: covered,
+      },
     };
   });
 

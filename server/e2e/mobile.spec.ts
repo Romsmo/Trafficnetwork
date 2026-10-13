@@ -133,6 +133,47 @@ test.describe("phone: the map is the screen", () => {
     await expect(page.locator("#sheet-browse")).toBeVisible();
     await expect(page.locator("#sheet-detail")).toBeHidden();
   });
+
+  test("a stretch of road: the sheet makes room while the end is tapped, then comes back with the road drawn grey", async ({ page }) => {
+    await watchTraffic(page, node);
+    await openMap(page, node);
+    await page.locator("#filters input[type=checkbox]").evaluateAll((boxes) =>
+      boxes.forEach((box) => {
+        (box as HTMLInputElement).checked = false;
+        box.dispatchEvent(new Event("change", { bubbles: true }));
+      }),
+    );
+    await page.route("**/v1/roads/resolve", (route) => {
+      const body = route.request().postDataJSON() as { from: { lat: number; lng: number }; to: { lat: number; lng: number } };
+      return route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          ref: "ivl:1,1:2,2",
+          segmentKey: "k".repeat(32),
+          geometry: { type: "LineString", coordinates: [[body.from.lng, body.from.lat], [body.to.lng, body.to.lat]] },
+          lengthM: 260,
+          road: { name: "Teststraße", ref: null, class: "residential" },
+          covered: [{ segmentId: "s", segmentKey: "k", speedLimit: 50, unit: "kmh", source: "seed", coveredMeters: 255 }],
+          proposals: [],
+        }),
+      });
+    });
+    await page.locator("#map").click();
+    const detail = page.locator("#detail-content");
+    await detail.getByRole("button", { name: "Tempolimit für ein Stück ändern" }).click();
+    await expect(detail.getByRole("heading", { name: "Tempolimit für ein Stück Straße" })).toBeVisible();
+    await detail.getByRole("button", { name: "Ende auf der Karte wählen" }).click();
+    // the sheet rests at its small height while the end is picked, and the chip says what to tap
+    await expect(page.locator("#sheet")).toHaveAttribute("data-detent", "small");
+    await expect(page.locator("#pick-chip")).toContainText("Tippe auf der Karte das Ende des Stücks an.");
+    const box = (await page.locator("#map").boundingBox())!;
+    await page.mouse.click(box.x + box.width / 2 + 90, box.y + box.height / 2 - 60);
+    await expect(page.locator("#sheet")).not.toHaveAttribute("data-detent", "small");
+    await expect(detail).toContainText("Gefunden: Teststraße, etwa 260 m.");
+    await expect(detail).toContainText("50 km/h auf 255 m");
+    await expect(page.locator("path.interval-preview")).toHaveCount(1);
+  });
 });
 
 test.describe("the location arrow", () => {

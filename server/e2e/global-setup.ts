@@ -39,6 +39,8 @@ function nodeEnv(databaseUrl: string, extra: Record<string, string>): NodeJS.Pro
     SPEED_CAMERA_NAMESPACE_ENABLED: "false",
     WEB_UI_ENABLED: "true",
     MAP_TILE_URL: "",
+    // Tests never reach out to a public road service; the tests that need a road answer from a mock.
+    ROAD_LOOKUP_URL: "none",
     ...RELAXED_LIMITS,
     ...extra,
   };

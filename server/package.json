@@ -26,6 +26,7 @@
     "db:migrate": "tsx src/db/migrate.ts",
     "create-client": "tsx scripts/create-client.mts",
     "corrections": "tsx scripts/corrections.mts",
+    "roads": "tsx scripts/roads.mts",
     "measure-scale": "tsx scripts/measure-scale.mts",
     "static-packages": "tsx scripts/static-packages.mts",
     "cameras": "tsx scripts/cameras.mts",

@@ -4,7 +4,10 @@ import type { appendEvent } from "../../db/append-event.js";
 import { ApiError } from "../../lib/errors.js";
 import { computeFederationEventId } from "../federation/device-event.js";
 import { validateCorrectionValue } from "./plausibility.js";
-import { gapGeometry, parseGapRef, type GapGeometry } from "./gap.js";
+import { gapGeometry, parseGapRef } from "./gap.js";
+import { stretchOfGap, stretchOfInterval, type CommunityStretch } from "./stretch.js";
+import { parseIntervalRef } from "../roads/geo.js";
+import { RoadResolveError, resolveIntervalRef } from "../roads/resolve.js";
 import { applyVote } from "./service.js";
 import { deviceReporterId, isNotInTheFuture, verifySpeedLimitVoteEnvelope, type SpeedLimitVoteEnvelope } from "./vote.js";
 
@@ -53,14 +56,26 @@ export async function ingestSpeedLimitVote(
     throw err;
   }
 
-  // A place reference (docs D13) is resolved the same way on every node: same cell and axis, same geometry, same key.
+  // A place reference is resolved the same way on every node that has the data: a legacy place (docs D13) gives the same cell and
+  // axis, the same geometry and key; an interval is resolved against this node's road network (docs/road-network.md).
   let segmentKey = p.segmentKey;
-  let gap: GapGeometry | undefined;
+  let gap: CommunityStretch | undefined;
   if (p.segmentKey.startsWith("gap:")) {
     const place = parseGapRef(p.segmentKey);
     if (!place) return { status: "rejected", voteId, reason: "Not a valid place reference", code: "implausible" };
-    gap = gapGeometry(place);
+    gap = stretchOfGap(gapGeometry(place));
     segmentKey = gap.segmentKey;
+  } else if (p.segmentKey.startsWith("ivl:")) {
+    if (!parseIntervalRef(p.segmentKey)) return { status: "rejected", voteId, reason: "Not a valid interval reference", code: "implausible" };
+    try {
+      gap = stretchOfInterval(await resolveIntervalRef({ db, env }, p.segmentKey));
+      segmentKey = gap.segmentKey;
+    } catch (error) {
+      // This node cannot (yet) say which road it is. The vote is kept under its reference, so that it is not lost: once the
+      // roads of that area are here, settlePendingIntervals() moves it onto the stretch.
+      if (!(error instanceof RoadResolveError)) throw error;
+      segmentKey = p.segmentKey;
+    }
   }
 
   const result = await applyVote(
