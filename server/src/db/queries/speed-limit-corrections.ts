@@ -3,7 +3,7 @@ import type { Queryable } from "../client.js";
 import type { CorrectionReason, CorrectionStatus, CorrectionVoteKind, SpeedLimitUnit } from "../../config/constants.js";
 import { pgArray } from "../pg-array.js";
 import type { VoteInput } from "../../modules/speed-limit-corrections/tally.js";
-import type { GapGeometry } from "../../modules/speed-limit-corrections/gap.js";
+import type { CommunityStretch } from "../../modules/speed-limit-corrections/stretch.js";
 
 /**
  * Persistence for community speed-limit corrections (add-on K-A). The rules
@@ -26,7 +26,7 @@ export interface NewVote {
   envelope: unknown;
   originNodeId: string | null;
   /** Set when the vote names a place instead of an existing segment: remembered before the vote is stored (docs D13). Not a column. */
-  gap?: GapGeometry;
+  gap?: CommunityStretch;
 }
 
 /** Serialises every write that touches one segment's votes/corrections — two concurrent votes on the same segment must not both read the same tally. */
@@ -455,7 +455,7 @@ export async function listCorrections(db: Queryable, filter: CorrectionListFilte
     left join speed_limit_gaps gap on gap.segment_key = c.segment_key
     left join lateral (
       select s.id, s.geometry, s.speed_limit, s.source from speed_limit_segments s
-      where s.geometry_key = c.segment_key and s.speed_limit_unit = c.unit
+      where s.geometry_key = c.segment_key and s.speed_limit_unit = c.unit and s.visible
       order by (s.source = 'community'), s.imported_at, s.id limit 1
     ) seg on true
     cross join lateral (

@@ -82,13 +82,15 @@ const COLUMNS = sql`
   end as needs_review
 `;
 
-function fromClause(overlay: boolean) {
+function fromClause(overlay: boolean, includeHidden = false) {
+  // Only visible rows are delivered: a row replaced by a community interval, reported as defective or off every road is out.
+  const base = includeHidden ? sql`speed_limit_segments` : sql`(select * from speed_limit_segments where visible)`;
   return overlay
-    ? sql`from speed_limit_segments s
+    ? sql`from ${base} s
           left join speed_limit_corrections c
             on c.segment_key = s.geometry_key and c.unit = s.speed_limit_unit
            and c.status = 'applied' and (c.value <> s.speed_limit or s.source = 'community')`
-    : sql`from (select * from speed_limit_segments where source <> 'community') s left join speed_limit_corrections c on false`;
+    : sql`from (select * from speed_limit_segments where source <> 'community'${includeHidden ? sql`` : sql` and visible`}) s left join speed_limit_corrections c on false`;
 }
 
 export function toSegmentApi(row: Row): SpeedLimitSegmentApi {
@@ -143,8 +145,13 @@ export async function findSpeedLimitSegmentsNearby(
 }
 
 /** One segment by row id, with the overlay applied — null if there is no such row. */
-export async function findSpeedLimitSegmentById(db: Queryable, id: string, overlay: boolean): Promise<SpeedLimitSegmentApi | null> {
-  const rows = await db.execute<Row>(sql`select ${COLUMNS} ${fromClause(overlay)} where s.id = ${id}`);
+export async function findSpeedLimitSegmentById(
+  db: Queryable,
+  id: string,
+  overlay: boolean,
+  includeHidden = false,
+): Promise<SpeedLimitSegmentApi | null> {
+  const rows = await db.execute<Row>(sql`select ${COLUMNS} ${fromClause(overlay, includeHidden)} where s.id = ${id}`);
   return rows[0] ? toSegmentApi(rows[0]) : null;
 }
 

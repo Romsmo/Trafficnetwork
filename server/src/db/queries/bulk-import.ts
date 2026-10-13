@@ -50,7 +50,7 @@ export async function bulkInsertSpeedLimitSegments(db: Queryable, rows: SpeedLim
   for (const row of rows) for (const [lng, lat] of row.lineString) tiles.add(latLngToCell(lat, lng, opts.partitionResolution));
 
   return db.transaction(async (tx) => {
-    await tx.execute(sql`
+    const insertedRows = await tx.execute<{ id: string } & Record<string, unknown>>(sql`
       insert into speed_limit_segments (geometry, speed_limit, speed_limit_unit, source, source_license, imported_at)
       select ST_SetSRID(ST_GeomFromText(t.wkt), 4326), t.speed_limit, t.unit::speed_limit_unit, t.source, nullif(t.license, ''), t.imported_at
       from unnest(
@@ -61,7 +61,19 @@ export async function bulkInsertSpeedLimitSegments(db: Queryable, rows: SpeedLim
         ${pgArray(rows.map((r) => r.sourceLicense ?? ""))}::text[],
         ${pgArray(rows.map((r) => r.importedAt ?? nowIso))}::timestamptz[]
       ) as t(wkt, speed_limit, unit, source, license, imported_at)
+      returning id
     `);
+    // An entry visitors took out stays out when the import brings it again (docs/road-network.md, "Defect reports").
+    const removals = await tx.execute<{ one: number } & Record<string, unknown>>(sql`
+      select 1 as one from data_defect_removals where target_type = 'speedLimitSegment' and restored_at is null limit 1
+    `);
+    if (removals.length > 0) {
+      await tx.execute(sql`
+        update speed_limit_segments set visible = false, hidden_reason = 'defect'
+        where id = any(${pgArray(insertedRows.map((r) => r.id))}::uuid[])
+          and geometry_key in (select match_key from data_defect_removals where target_type = 'speedLimitSegment' and restored_at is null)
+      `);
+    }
     // Import only ever *adds* rows — it never touches an applied community
     // correction (those live in their own table, keyed by geometry, and are
     // overlaid at read time). The one bookkeeping step: a correction that was

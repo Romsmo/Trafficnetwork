@@ -31,6 +31,14 @@ function readPackageVersion(root: string): string {
  * Everything here exists only when WEB_UI_ENABLED; with it off the node serves the API and nothing else.
  * The auth hook only guards /v1/*, so these routes need no entry in its PUBLIC_PATHS (POST /v1/web/session does).
  */
+function hostOf(url: string): string | null {
+  try {
+    return new URL(url).host;
+  } catch {
+    return null;
+  }
+}
+
 export async function registerWebModule(app: FastifyInstance): Promise<void> {
   const env = app.deps.env;
   if (!env.WEB_UI_ENABLED) return;
@@ -89,6 +97,9 @@ export async function registerWebModule(app: FastifyInstance): Promise<void> {
         : { url: env.MAP_TILE_URL, attributionText: env.MAP_TILE_ATTRIBUTION_TEXT, attributionUrl: env.MAP_TILE_ATTRIBUTION_URL, maxZoom: env.MAP_TILE_MAX_ZOOM },
       region: bounds ? { bounds } : null,
       privacyLogging: env.LOG_PRIVACY_MODE,
+      // The road service the *node* asks for the roads around two picked points (docs/road-network.md): shown in the privacy
+      // notice. null = the node never asks anybody.
+      roadLookupHost: env.ROAD_LOOKUP_URL === "" ? null : hostOf(env.ROAD_LOOKUP_URL),
       sessionTtlSeconds: env.WEB_SESSION_TTL_SECONDS,
       // How long a report is kept after it ended (matching, moderation), then deleted: shown in the privacy notice.
       retentionDays: env.EVENT_LOG_RETENTION_DAYS_DYNAMIC,

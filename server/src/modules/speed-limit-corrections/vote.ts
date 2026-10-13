@@ -16,9 +16,10 @@ import { keyId } from "../crypto/keys.js";
  * segment by its content-derived `segmentKey`, never by a server-local id, so
  * any server that holds that geometry resolves it the same way.
  *
- * For a road the import has no limit for (docs D13) `segmentKey` is the place reference `gap:<h3 cell>:<axis>`: a device
- * can compute that, whereas it cannot compute the geometry key of a stretch of road it has no geometry for. Every server
- * derives the same geometry and key from the reference.
+ * For a stretch of road a device names by two points (docs/road-network.md) `segmentKey` is the interval reference
+ * `ivl:<lat>,<lng>:<lat>,<lng>` (1e-5 degrees): a device can compute that without any road data, whereas it cannot compute the
+ * geometry key of a stretch of a road it has no shape for. Every server resolves the reference against its own road network.
+ * (The first release named a place and a direction, `gap:<h3 cell>:<axis>`; votes with such a reference are still understood.)
  */
 export interface SpeedLimitVotePayload {
   kind: "speedLimitVote";
@@ -34,7 +35,7 @@ export interface SpeedLimitVotePayload {
 
 export const SEGMENT_KEY_PATTERN = /^[0-9a-f]{32}$/;
 /** A geometry key or a gap place reference — what `segmentKey` of a signed vote may be. */
-export const VOTE_SEGMENT_REF_PATTERN = /^([0-9a-f]{32}|gap:[0-9a-f]{15}:[0-7])$/;
+export const VOTE_SEGMENT_REF_PATTERN = /^([0-9a-f]{32}|gap:[0-9a-f]{15}:[0-7]|ivl:-?\d{1,8},-?\d{1,9}:-?\d{1,8},-?\d{1,9})$/;
 
 // .passthrough(): same rationale as every signed-payload schema since F-S2
 // (see modules/auth/routes.ts's deviceTokenBodySchema comment) — the payload

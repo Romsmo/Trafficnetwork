@@ -26,6 +26,8 @@ import { getPackageService } from "./modules/static-data/package-service.js";
 import type { SignedEnvelope } from "./modules/crypto/envelope.js";
 import { registerFederationRoutes } from "./modules/federation/routes.js";
 import { registerSpeedLimitCorrectionRoutes } from "./modules/speed-limit-corrections/routes.js";
+import { registerRoadRoutes } from "./modules/roads/routes.js";
+import { registerDefectRoutes } from "./modules/defects/routes.js";
 import { syncCorrectionsOverlaySwitch } from "./modules/speed-limit-corrections/switch.js";
 import { OnlineTracker } from "./modules/online/tracker.js";
 import { registerOnlineModule } from "./modules/online/plugin.js";
@@ -162,6 +164,11 @@ export async function buildApp(deps: AppDependencies): Promise<FastifyInstance> 
   await syncCorrectionsOverlaySwitch(deps.db, deps.env, app.log);
   if (deps.env.COMMUNITY_CORRECTIONS_ENABLED) {
     await registerSpeedLimitCorrectionRoutes(app);
+  }
+  // The road network (docs/road-network.md): picked points resolved to a road; entries visitors mark as wrong.
+  await registerRoadRoutes(app);
+  if (deps.env.DEFECT_REPORTS_ENABLED) {
+    await registerDefectRoutes(app);
   }
   // Web UI pages/files + POST /v1/web/session; only when WEB_UI_ENABLED (docs/web-ui.md).
   await registerWebModule(app);

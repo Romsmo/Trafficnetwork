@@ -6,6 +6,9 @@ import {
   bulkInsertStaticSigns,
 } from "../../db/queries/bulk-import.js";
 import { requireScope } from "../auth/hook.js";
+import { markCovered, upsertRoadWays } from "../../db/queries/roads.js";
+import { COVERAGE_RESOLUTION } from "../roads/resolve.js";
+import { getResolution, isValidCell } from "h3-js";
 import { PERSISTENT_CAMERA_TYPES } from "../../config/constants.js";
 import { badRequest } from "../../lib/errors.js";
 import { publishEvent } from "../realtime/publisher.js";
@@ -40,6 +43,25 @@ const fixedSpeedCameraRowSchema = z.object({
   source: z.string().min(1),
   sourceLicense: z.string().optional(),
   importedAt: z.string().datetime().optional(),
+});
+
+// The road network (docs/road-network.md): drivable ways of an extract, and which areas the extract covers completely.
+const roadWayRowSchema = z.object({
+  externalId: z.string().min(1).max(40),
+  lineString: z.array(latLng).min(2),
+  highway: z.string().min(1).max(40),
+  name: z.string().max(200).optional(),
+  ref: z.string().max(100).optional(),
+});
+
+const roadCoverageBodySchema = z.object({
+  tiles: z
+    .array(z.string())
+    .min(1)
+    .max(20_000)
+    .refine((tiles) => tiles.every((t) => isValidCell(t) && getResolution(t) === COVERAGE_RESOLUTION), {
+      message: `every tile must be an H3 cell of resolution ${COVERAGE_RESOLUTION}`,
+    }),
 });
 
 function rowsSchema<T extends z.ZodTypeAny>(row: T, maxRows: number) {
@@ -109,6 +131,33 @@ export async function registerBulkImportRoutes(app: FastifyInstance) {
       zoneResolution: app.deps.env.CAMERA_ZONE_H3_RESOLUTION,
     });
     return { inserted };
+  });
+
+  // Drivable ways (OpenStreetMap highway=*): what a stretch of road is resolved against and what signs, cameras and community
+  // limits are attached to. Idempotent per (source, way id).
+  app.post("/v1/bulk-import/roads", route, async (req) => {
+    const parsed = rowsSchema(roadWayRowSchema, maxRows).safeParse(req.body);
+    if (!parsed.success) throw badRequest("Invalid request body", parsed.error.issues);
+    const written = await upsertRoadWays(
+      app.deps.db,
+      "osm",
+      parsed.data.rows.map((r) => ({
+        externalId: r.externalId,
+        coordinates: r.lineString,
+        highway: r.highway,
+        name: r.name ?? null,
+        ref: r.ref ?? null,
+      })),
+    );
+    return { inserted: written };
+  });
+
+  // Areas (H3 resolution 8) whose road network the import now holds completely. Only a covered area can say "no road here".
+  app.post("/v1/bulk-import/road-coverage", route, async (req) => {
+    const parsed = roadCoverageBodySchema.safeParse(req.body);
+    if (!parsed.success) throw badRequest("Invalid request body", parsed.error.issues);
+    await markCovered(app.deps.db, parsed.data.tiles, "import");
+    return { covered: parsed.data.tiles.length };
   });
 
   // Upsert one batch of a feed's current reports. Idempotent: re-sending the same batch changes nothing.

@@ -46,6 +46,15 @@ The Docker image contains the UI (`server/web` is copied into it); `docker-compo
 * **Map** — the node's reports as markers (category icons, not just colours), a list next to or below the map, category
   filters, live updates over the node's WebSocket (a "Live" indicator shows the connection state), reports disappear when they
   expire. The map opens on the region the node has data for. Clicking it shows the speed limit at that spot.
+* **A limit for a stretch of road** — "Tempolimit nachreichen" (where nothing is recorded) and "Tempolimit für ein Stück ändern"
+  (where a limit is recorded): the tapped spot is the **start**, the visitor taps the **end** on the map (the form is put away
+  while they do and comes back), the node answers with the road's own shape between the two points and the page draws it
+  **grey** over the road colours, with the road's name, its length and what is recorded under it. Then value, unit and reason
+  as before; the proposal names the two points (`POST /v1/speed-limit-intervals`). Where the node finds no road or no road
+  between the points, the page says which (`NO_ROAD_*`). Open proposals for that exact stretch can be confirmed or denied.
+* **Report an entry as wrong** — "Fehlerhaften Eintrag melden": lists the speed-limit lines and signs near the tapped spot
+  with "n von 3 gemeldet", shows the chosen one in red on the map, and marks it (`POST /v1/data-defects`). Enough other devices
+  confirming it remove it for everybody (`road-network.md`).
   Live subscriptions are capped (`WEB_WS_MAX_TILES_PER_CONNECTION`): in a very large view (the page says "Ausschnitt sehr groß")
   not every tile is subscribed, and a new report shows up with the page's once-a-minute refresh instead of at once (measured: about
   45 s in a country-sized view, a few seconds when zoomed in).
@@ -246,7 +255,9 @@ the visitor switched on or off (`tn.filters.v1`), and which version of the camer
 None of it contains a position or a report, and none of it is sent to the node. Access logs contain no
 coordinates and no client addresses (`LOG_PRIVACY_MODE`; the About page tells visitors when an operator turned this off).
 The visitor's IP address is held in memory for the limits and never written to the database. A report stores only its spot,
-type and times. See [`docs/privacy.md`](../../docs/privacy.md) for the privacy notice draft (it is not legal advice; operators
+type and times. Where a limit for a stretch needs roads the node does not have, **the node** (not the browser) may ask the
+road service named by `ROAD_LOOKUP_URL` for the roads of that area - the privacy page says so and names the host; `none`
+turns it off. A mark "this entry is wrong" stores which entry and the pseudonymous session identifier, no coordinates. See [`docs/privacy.md`](../../docs/privacy.md) for the privacy notice draft (it is not legal advice; operators
 remain responsible for their own notice).
 
 ## Performance
