@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1254 1254" role="img" aria-label="Trafficnetwork">
+  <title>Trafficnetwork</title>
+  <rect width="1254" height="1254" fill="#000"/>
+  <g>
+  <path fill="#fff" d="M256 424 306 345H662L838 530 822 516 760 536 668 462V614H590V424H488V690H400V424Z"/>
+  <path fill="#fff" d="M838 368 862 355 950 462V738H922L758 562 822 516 838 530Z"/>
+  <path fill="#1e87ff" d="M888 342H952V440L888 372Z"/>
+  <path fill="#000" stroke="#000" stroke-width="10" stroke-linejoin="round" d="M330 775C455 620 640 520 818 498L840 522C690 570 665 650 735 775Z"/>
+  <g fill="#fff">
+    <path d="M350 752H402C500 640 650 560 812 512V505C640 530 470 610 350 752Z"/>
+    <path d="M712 752H765C700 660 700 590 822 522V516C665 560 650 670 712 752Z"/>
+    <path d="M515 746 560 678H598L571 746Z"/>
+    <path d="M583 650 612 612H640L622 650Z"/>
+    <path d="M632 597 660 577H678L660 597Z"/>
+    <path d="M690 566 712 548H724L706 566Z"/>
+    <path d="M734 534 752 525H762L745 534Z"/>
+  </g>
+  </g>
+  <text x="627" y="925" text-anchor="middle" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="136" font-weight="700" fill="#fff" letter-spacing="-3">Traffic<tspan fill="#1e87ff">network</tspan></text>
+</svg>

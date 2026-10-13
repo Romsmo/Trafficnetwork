@@ -12,6 +12,16 @@ const PAGES = [
  * Header (brand, navigation, language switch), safety notice and footer (GitHub, license, version, privacy, and the small
  * "N online" display at the bottom right) for every page.
  */
+/** The logo (its own image, no text of its own) and the name, whose "network" carries the accent colour as in the logo. */
+function brand() {
+  const name = t("site.name");
+  const accent = /network$/i.exec(name);
+  const text = accent
+    ? h("span", { class: "brand-name" }, name.slice(0, accent.index), h("span", { class: "brand-accent" }, accent[0]))
+    : h("span", { class: "brand-name" }, name);
+  return h("a", { class: "brand", href: "/" }, h("img", { class: "brand-mark", src: "/web/img/logo-mark.svg", alt: "", width: "40", height: "26" }), text);
+}
+
 export function mountLayout(config, pageId) {
   const header = document.getElementById("site-header");
   const footer = document.getElementById("site-footer");
@@ -23,7 +33,7 @@ export function mountLayout(config, pageId) {
 
     header.className = "site-header";
     header.replaceChildren(
-      h("a", { class: "brand", href: "/" }, t("site.name")),
+      brand(),
       h(
         "nav",
         { class: "site-nav", "aria-label": t("nav.label") },

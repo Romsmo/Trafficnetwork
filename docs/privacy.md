@@ -33,6 +33,12 @@ Stand / as of: 2026-09-24 · gilt für / applies to `server/web` (Weboberfläche
   `tile.openstreetmap.org`, betrieben von der OpenStreetMap Foundation). Dieser sieht deine IP-Adresse, deinen Browser und den
   angezeigten Kartenausschnitt und unterliegt seiner eigenen Datenschutzerklärung. Betreiber können einen anderen Kartenserver
   einstellen oder die Karte ganz abschalten (`MAP_TILE_URL=none`).
+* **Straßendaten:** Tippst du für ein Tempolimit zwei Stellen auf der Karte an und kennt der Knoten die Straßen dieser Gegend
+  nicht, fragt **der Knoten selbst** (nicht dein Browser) einen Straßendaten-Dienst (Standard: eine öffentliche Overpass-Instanz)
+  nach den Straßen rund um diese Stellen. Dieser sieht das Gebiet und die Adresse des Knotens, nicht deine IP-Adresse.
+  Betreiber können das abstellen (`ROAD_LOOKUP_URL=none`) oder eine eigene Instanz verwenden.
+* **Als fehlerhaft gemeldete Einträge:** gespeichert wird, welcher Eintrag (Tempolimit-Linie, Schild) gemeldet wurde und die
+  zufällige Kennung der anonymen Sitzung — keine Koordinaten von dir.
 * **Externe Links** (z. B. zum GitHub-Projekt) öffnen sich in einem neuen Tab ohne Übermittlung der Adresse des Knotens
   (`noreferrer`); ab dann gilt die Erklärung der Zielseite.
 
@@ -64,6 +70,12 @@ Abschnitt 8).
 * **Map tiles:** your browser loads tiles **directly from the configured tile server** (default `tile.openstreetmap.org`,
   operated by the OpenStreetMap Foundation). It sees your IP address, browser and the map area shown and is subject to its own
   privacy policy. Operators can configure another tile server or switch the map background off (`MAP_TILE_URL=none`).
+* **Road data:** when you tap two spots on the map for a speed limit and the node does not have the roads of that area, **the
+  node itself** (not your browser) asks a road-data service (default: a public Overpass instance) for the roads around those
+  spots. It sees the area and the node's address, not your IP address. Operators can switch this off (`ROAD_LOOKUP_URL=none`) or
+  use their own instance.
+* **Entries reported as wrong:** what is stored is which entry (speed-limit line, sign) was reported and the random identifier
+  of the anonymous session - no coordinates of yours.
 * **External links** (e.g. to the GitHub project) open in a new tab without sending the node's address (`noreferrer`); the
   target site's own policy applies from there.
 

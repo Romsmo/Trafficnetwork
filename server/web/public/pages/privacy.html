@@ -86,9 +86,12 @@
     </section>
 
     <section class="card">
-      <h2 id="tiles">8. Kartenkacheln (Dritte)</h2>
+      <h2 id="tiles">8. Kartenkacheln und Straßendaten (Dritte)</h2>
       <p data-if="tiles">Die Kacheln lädt <strong>dein Browser direkt von <span data-fill="tiles.host"></span></strong>. Dieser Anbieter sieht deine IP-Adresse, den angezeigten Kartenausschnitt (über die Kachelnummern) und die Adresse dieses Knotens als Herkunft. Es gelten seine eigenen Datenschutz- und Nutzungsbedingungen. Mit der Einstellung <code>MAP_TILE_URL=none</code> kann der Betreiber das abstellen.</p>
       <p data-if="no-tiles">Dieser Knoten lädt keine Karten von Dritten.</p>
+      <p data-if="roads"><strong>Straßendaten:</strong> Wenn du zwei Stellen auf der Karte für ein Tempolimit antippst, sucht der Knoten die Straße dazwischen. Hat er die Straßen dieser Gegend nicht, fragt <strong>der Knoten selbst</strong> (nicht dein Browser) einen Straßendaten-Dienst, <strong data-fill="roads.host"></strong>, nach den Straßen rund um diese Stellen. Dieser Dienst erhält das Gebiet (einen Kartenausschnitt) und die Adresse des Knotens – <strong>nicht deine IP-Adresse und nicht, wer du bist</strong>. Es gelten dessen Nutzungsbedingungen. Der Betreiber kann das mit <code>ROAD_LOOKUP_URL=none</code> abstellen.</p>
+      <p data-if="no-roads">Dieser Knoten fragt keinen Dienst nach Straßendaten; er nutzt nur Straßen, die er selbst eingespielt hat.</p>
+      <p><strong>Als fehlerhaft gemeldete Einträge:</strong> Meldest du ein Tempolimit oder ein Schild als fehlerhaft, speichert der Knoten, <em>welcher</em> Eintrag gemeldet wurde, und eine zufällige Kennung deiner anonymen Sitzung (damit jede Sitzung einen Eintrag nur einmal zählt) – keine Koordinaten von dir.</p>
     </section>
 
     <section class="card">
@@ -182,9 +185,12 @@
     </section>
 
     <section class="card">
-      <h2 id="tiles-en">8. Map tiles (third party)</h2>
+      <h2 id="tiles-en">8. Map tiles and road data (third parties)</h2>
       <p data-if="tiles">The tiles are loaded <strong>by your browser directly from <span data-fill="tiles.host"></span></strong>. That provider sees your IP address, the area shown (through the tile numbers) and this node's address as the origin. Its own privacy and usage terms apply. The operator can switch this off with <code>MAP_TILE_URL=none</code>.</p>
       <p data-if="no-tiles">This node loads no maps from third parties.</p>
+      <p data-if="roads"><strong>Road data:</strong> When you tap two spots on the map for a speed limit, the node looks for the road between them. If it does not have the roads of that area, <strong>the node itself</strong> (not your browser) asks a road-data service, <strong data-fill="roads.host"></strong>, for the roads around those spots. That service receives the area (a map extract) and this node's address – <strong>not your IP address and not who you are</strong>. Its own terms of use apply. The operator can switch this off with <code>ROAD_LOOKUP_URL=none</code>.</p>
+      <p data-if="no-roads">This node asks no service for road data; it uses only the roads it has imported itself.</p>
+      <p><strong>Entries reported as wrong:</strong> When you report a speed limit or a sign as wrong, the node stores <em>which</em> entry was reported and a random identifier of your anonymous session (so that each session counts an entry once) – no coordinates of yours.</p>
     </section>
 
     <section class="card">

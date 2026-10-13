@@ -130,52 +130,143 @@ test.describe("speed limit: correct it, or add one where none is recorded", () =
     await expect(popup).toContainText("Offene Vorschläge");
   });
 
-  test("where no limit is recorded: 'Tempolimit nachreichen' needs a direction, previews the road and sends the proposal", async ({ page }) => {
+  test("where no limit is recorded: two points on the map name the stretch, it is drawn grey, and the proposal is sent for it", async ({ page }) => {
     await watchTraffic(page, node);
     await openMap(page, node);
     await clearMarkers(page);
     // The node answers "nothing recorded" for this spot.
     await page.route("**/v1/speed-limit?**", (route) => route.fulfill({ status: 404, contentType: "application/json", body: JSON.stringify({ error: { code: "NOT_FOUND", message: "none" } }) }));
+    let resolved: Record<string, unknown> | null = null;
+    await page.route("**/v1/roads/resolve", (route) => {
+      resolved = route.request().postDataJSON() as Record<string, unknown>;
+      const from = (resolved.from as { lat: number; lng: number });
+      const to = (resolved.to as { lat: number; lng: number });
+      return route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          ref: "ivl:1,2:3,4",
+          segmentKey: "k".repeat(32),
+          // the road's own shape: not the straight line between the two taps
+          geometry: { type: "LineString", coordinates: [[from.lng, from.lat], [(from.lng + to.lng) / 2, (from.lat + to.lat) / 2 + 0.0002], [to.lng, to.lat]] },
+          lengthM: 420,
+          road: { name: "Teststraße", ref: null, class: "residential" },
+          covered: [],
+          proposals: [],
+        }),
+      });
+    });
     let body: Record<string, unknown> | null = null;
-    await page.route("**/v1/speed-limit-gaps", (route) => {
+    await page.route("**/v1/speed-limit-intervals", (route) => {
       body = route.request().postDataJSON() as Record<string, unknown>;
       return route.fulfill({
         status: 201,
         contentType: "application/json",
-        body: JSON.stringify({ correction: { id: "gap-1", status: "proposed", value: 30, unit: "kmh", confirmations: 1, denials: 0 }, recorded: true, merged: false }),
+        body: JSON.stringify({ correction: { id: "ivl-1", status: "proposed", value: 30, unit: "kmh", confirmations: 1, denials: 0 }, recorded: true, merged: false, segment: null }),
       });
     });
     await page.locator("#map").click();
     const popup = page.locator(".leaflet-popup-content");
     await expect(popup).toContainText("Kein Tempolimit erfasst");
     await popup.getByRole("button", { name: "Tempolimit nachreichen" }).click();
-    await expect(popup.getByRole("heading", { name: "Tempolimit nachreichen" })).toBeVisible();
+    await expect(popup.getByRole("heading", { name: "Tempolimit für ein Stück Straße" })).toBeVisible();
+    // No question about the direction of the road any more: the start is the tapped spot, the end is picked on the map.
+    await expect(popup).not.toContainText("In welcher Richtung verläuft die Straße?");
+    await expect(popup).toContainText("Anfang: gesetzt");
+    await expect(popup).toContainText("Ende: noch nicht gewählt");
+
+    // Sending before the stretch is known is refused, before anything is sent.
+    await popup.getByRole("button", { name: "30", exact: true }).click();
+    await popup.getByRole("button", { name: "Senden" }).click();
+    await expect(popup.getByRole("alert")).toContainText("Bitte erst Anfang und Ende des Stücks wählen.");
+    await expect(page.locator("path.interval-preview")).toHaveCount(0);
+
+    await popup.getByRole("button", { name: "Ende auf der Karte wählen" }).click();
+    // The form is put away while the point is picked (it would cover the map) and comes back with the answer.
+    await expect(page.locator("#pick-chip")).toContainText("Tippe auf der Karte das Ende des Stücks an.");
+    await expect(popup).toBeHidden();
+    const box = (await page.locator("#map").boundingBox())!;
+    await page.mouse.click(box.x + box.width / 2 + 160, box.y + box.height / 2 + 70);
+    await expect(popup).toContainText("Gefunden: Teststraße, etwa 420 m.");
+    await expect(page.locator("path.interval-preview")).toHaveCount(1);
+    expect(resolved).toMatchObject({ from: { lat: expect.any(Number), lng: expect.any(Number) }, to: { lat: expect.any(Number), lng: expect.any(Number) } });
 
     await popup.getByRole("button", { name: "30", exact: true }).click();
     await popup.getByRole("button", { name: "Senden" }).click();
-    await expect(popup.getByRole("alert")).toContainText("Bitte die Richtung der Straße wählen.");
-    await expect(page.locator("path.axis-preview")).toHaveCount(0);
-
-    await popup.getByRole("radio", { name: "Nord–Süd" }).check();
-    await expect(page.locator("path.axis-preview")).toHaveCount(1);
-    await popup.getByRole("button", { name: "Senden" }).click();
     await expect(popup.locator(".result.ok")).toContainText("Dein Vorschlag 30 km/h ist eingegangen (1 von 3 Bestätigungen).");
-    expect(body).toMatchObject({ bearingDegrees: 0, value: 30, unit: "kmh", reason: "missing" });
-    await expect(page.locator("path.axis-preview")).toHaveCount(0);
+    expect(body).toMatchObject({ value: 30, unit: "kmh", reason: "missing", from: { lat: expect.any(Number) }, to: { lng: expect.any(Number) } });
+    await expect(page.locator("path.interval-preview")).toHaveCount(0);
   });
 
-  test("the node knows a road there after all: the page moves the visitor to correcting that one", async ({ page }) => {
+  test("two points that are not on one road: the page says so and sends nothing", async ({ page }) => {
     await watchTraffic(page, node);
     await openMap(page, node);
     await clearMarkers(page);
     await page.route("**/v1/speed-limit?**", (route) => route.fulfill({ status: 404, contentType: "application/json", body: JSON.stringify({ error: { code: "NOT_FOUND", message: "none" } }) }));
-    await page.locator("#map").click(); // the seeded 50 km/h street runs north-south right here, the node's gap check knows it
+    await page.route("**/v1/roads/resolve", (route) =>
+      route.fulfill({ status: 422, contentType: "application/json", body: JSON.stringify({ error: { code: "NO_ROAD_BETWEEN_POINTS", message: "no road between" } }) }),
+    );
+    let posts = 0;
+    await page.route("**/v1/speed-limit-intervals", (route) => {
+      posts += 1;
+      return route.continue();
+    });
+    await page.locator("#map").click();
     const popup = page.locator(".leaflet-popup-content");
     await popup.getByRole("button", { name: "Tempolimit nachreichen" }).click();
-    await popup.getByRole("radio", { name: "Nord–Süd" }).check();
+    await popup.getByRole("button", { name: "Ende auf der Karte wählen" }).click();
+    // The form is put away while the point is picked (it would cover the map) and comes back with the answer.
+    await expect(page.locator("#pick-chip")).toContainText("Tippe auf der Karte das Ende des Stücks an.");
+    await expect(popup).toBeHidden();
+    const box = (await page.locator("#map").boundingBox())!;
+    await page.mouse.click(box.x + box.width / 2 + 160, box.y + box.height / 2 + 70);
+    await expect(popup.getByRole("alert")).toContainText("Die beiden Stellen liegen nicht auf einer gemeinsamen Straße.");
     await popup.getByRole("button", { name: "30", exact: true }).click();
     await popup.getByRole("button", { name: "Senden" }).click();
-    await expect(popup.getByRole("heading", { name: "Tempolimit korrigieren" })).toBeVisible();
-    await expect(popup).toContainText("Hier ist schon ein Tempolimit erfasst");
+    await expect(popup.getByRole("alert").last()).toContainText("Bitte erst Anfang und Ende des Stücks wählen.");
+    expect(posts).toBe(0);
+  });
+
+  test("a wrong entry can be marked: the page lists what is near, shows it, and tells how many have reported it", async ({ page }) => {
+    await watchTraffic(page, node);
+    await openMap(page, node);
+    await clearMarkers(page);
+    await page.route("**/v1/data-defects/near**", (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          items: [
+            {
+              targetType: "speedLimitSegment",
+              targetId: "00000000-0000-4000-8000-000000000001",
+              distanceMeters: 7,
+              speedLimit: 51,
+              speedLimitUnit: "kmh",
+              source: "seed",
+              geometry: { type: "LineString", coordinates: [[8.0, 50.0], [8.001, 50.0005]] },
+              reports: 1,
+              threshold: 3,
+            },
+          ],
+        }),
+      }),
+    );
+    let reported: Record<string, unknown> | null = null;
+    await page.route("**/v1/data-defects", (route) => {
+      reported = route.request().postDataJSON() as Record<string, unknown>;
+      return route.fulfill({ status: 201, contentType: "application/json", body: JSON.stringify({ recorded: true, reports: 2, threshold: 3, removed: false }) });
+    });
+    await page.locator("#map").click();
+    const popup = page.locator(".leaflet-popup-content");
+    await popup.getByRole("button", { name: "Fehlerhaften Eintrag melden" }).click();
+    await expect(popup.getByRole("heading", { name: "Fehlerhaften Eintrag melden" })).toBeVisible();
+    await expect(popup).toContainText("Tempolimit 51 km/h, 7 m entfernt");
+    await expect(popup).toContainText("(1 von 3 gemeldet)");
+    await popup.getByRole("button", { name: "Auf der Karte zeigen" }).click();
+    await expect(page.locator("path.defect-preview")).toHaveCount(1);
+    await popup.getByRole("button", { name: "Fehlerhaft melden" }).click();
+    await expect(popup).toContainText("Danke. 2 von 3 gemeldet.");
+    expect(reported).toMatchObject({ targetType: "speedLimitSegment", targetId: "00000000-0000-4000-8000-000000000001", reason: "not_on_a_road" });
   });
 });

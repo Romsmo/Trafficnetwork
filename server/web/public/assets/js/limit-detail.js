@@ -1,12 +1,15 @@
 import { h } from "./dom.js";
 import { currentTranslator, onLangChange } from "./i18n.js";
 import {
-  AXES,
+  DEFECT_REASONS,
+  INTERVAL_REASONS,
   MISSING_REASONS,
   WRONG_REASONS,
   classifyLookup,
   correctionSettings,
+  defectSettings,
   describeCorrectionError,
+  describeDefectResult,
   describeOrigin,
   describeVoteResult,
   gapProposalsNear,
@@ -18,33 +21,10 @@ import {
 let counter = 0;
 const uid = (prefix) => `${prefix}-${(counter += 1)}`;
 
-/** A small picture of the four road axes: a ring with the line through it, drawn in the direction the choice names. */
-function axisPicture(bearingDegrees) {
-  const NS = "http://www.w3.org/2000/svg";
-  const svg = document.createElementNS(NS, "svg");
-  svg.setAttribute("viewBox", "-20 -20 40 40");
-  svg.setAttribute("width", "36");
-  svg.setAttribute("height", "36");
-  svg.setAttribute("aria-hidden", "true");
-  svg.setAttribute("focusable", "false");
-  svg.setAttribute("class", "axis-picture");
-  const ring = document.createElementNS(NS, "circle");
-  ring.setAttribute("r", "17");
-  ring.setAttribute("class", "axis-ring");
-  const line = document.createElementNS(NS, "path");
-  line.setAttribute("d", "M0 -14 L0 14");
-  line.setAttribute("class", "axis-line");
-  line.setAttribute("transform", `rotate(${bearingDegrees})`);
-  const north = document.createElementNS(NS, "path");
-  north.setAttribute("d", "M0 -19 L3 -14 L-3 -14 Z");
-  north.setAttribute("class", "axis-north");
-  svg.append(ring, line, north);
-  return svg;
-}
-
 /**
  * What the visitor sees after tapping the map: the speed limit there with its origin, open proposals they can confirm or deny, and
- * the two ways to improve the data — "that's wrong?" (an existing road) and "add a speed limit" (a road with none on record).
+ * the ways to improve the data: "that's wrong?" (the whole recorded line), a limit for a stretch of road named by two points on it
+ * (docs/road-network.md: the node finds the road and its shape; the page only draws what it is told), and "this entry is wrong" marks.
  *
  * The element is rendered once and kept: the page puts it into a popup (desktop) or the bottom sheet (phone). Every answer is told
  * honestly (new / merged into an existing proposal / nothing changed / refused, and why), and a proposal from this page counts on
@@ -59,12 +39,14 @@ export class LimitDetail {
    * @param api            the page's ApiClient
    * @param getServerConfig  () => the node's GET /v1/config answer (or null while unknown)
    * @param getCells         (latlng) => Promise<string[]> H3 cells around a point, for discovering open "no limit" proposals
-   * @param onPreview        ({lat,lng}|null, bearing?) — draws or clears the line that shows the chosen road axis on the map
+   * @param onPreview        ({ line?: [lng,lat][], points?: {lat,lng}[], tone?: "defect" }|null) — draws or clears what the visitor is looking at
+   * @param onPickPoint      ({ hintKey, resolve(latlng), cancel() }|null) — asks the page to take the next tap on the map as a picked point
+   *                         (null withdraws a pending request)
    * @param onChanged        called after a vote or proposal was accepted (the page redraws its road colours)
    * @param onLayout         called after the content changed size (a popup re-fits itself)
    */
-  constructor({ api, getServerConfig, getCells = async () => [], onPreview = () => {}, onChanged = () => {}, onLayout = () => {} }) {
-    Object.assign(this, { api, getServerConfig, getCells, onPreview, onChanged, onLayout });
+  constructor({ api, getServerConfig, getCells = async () => [], onPreview = () => {}, onPickPoint = () => {}, onChanged = () => {}, onLayout = () => {} }) {
+    Object.assign(this, { api, getServerConfig, getCells, onPreview, onPickPoint, onChanged, onLayout });
     this.element = h("div", { class: "limit-detail" });
     // The element lives in a map popup on wide screens. A button that re-renders its own content has left the DOM by the time the click
     // reaches the map, which then takes it for a tap on the map and looks up the road under the button. Stop it here, where it still has a home.
@@ -78,9 +60,14 @@ export class LimitDetail {
     return correctionSettings(this.getServerConfig());
   }
 
+  get defects() {
+    return defectSettings(this.getServerConfig());
+  }
+
   /** Looks up the speed limit at `latlng` and renders the answer. `toleranceM` is how far from a road a tap still counts as on it. */
   async show(latlng, toleranceM) {
     const ticket = ++this.#ticket;
+    this.#cancelPick();
     this.#state = { phase: "loading", latlng, toleranceM, votes: {} };
     this.onPreview(null);
     this.#focusNext = true;
@@ -125,6 +112,7 @@ export class LimitDetail {
   /** Back from the form or result to the answer (looks it up again, so new counts show). */
   #reload() {
     const { latlng, toleranceM } = this.#state;
+    this.#cancelPick();
     this.onPreview(null);
     return this.show(latlng, toleranceM);
   }
@@ -142,6 +130,9 @@ export class LimitDetail {
         break;
       case "form":
         content = this.#renderForm(tr, s);
+        break;
+      case "defects":
+        content = this.#renderDefects(tr, s);
         break;
       case "result":
         content = this.#renderResult(tr, s);
@@ -191,32 +182,39 @@ export class LimitDetail {
       }
     }
 
-    if (s.proposals.length > 0) {
-      const list = h("ul", { class: "proposals" });
-      for (const proposal of s.proposals) {
-        list.append(
-          h(
-            "li",
-            null,
-            h("div", { class: "proposal-text" }, tr.t("limit.proposed.item", { value: proposal.value, unit: unitText(proposal.unit), counts: tr.t("limit.counts", { confirmations: proposal.confirmations ?? 0, denials: proposal.denials ?? 0 }) })),
-            this.#voteRow(tr, s, { id: proposal.id, confirm: true, deny: true }),
-          ),
-        );
-      }
-      children.push(h("section", { class: "proposals-box" }, h("h4", null, tr.t("limit.proposed.title")), settings ? h("p", { class: "hint" }, tr.t("limit.proposed.rule", { required: settings.required })) : null, list));
-    }
+    if (s.proposals.length > 0) children.push(this.#proposalBox(tr, s, s.proposals));
 
-    if (settings) {
+    const defects = this.defects;
+    if (settings || defects) {
       const actions = h("div", { class: "dialog-actions limit-actions" });
-      if (onRoad) {
-        actions.append(h("button", { type: "button", onclick: () => this.#openForm("wrong", { id: lookup.segmentId, speedLimit: lookup.speedLimit, unit: lookup.speedLimitUnit }) }, tr.t("limit.action.wrong")));
-      } else {
-        actions.append(h("button", { type: "button", class: "primary", onclick: () => this.#openForm("gap", null) }, tr.t("limit.action.missing")));
+      if (settings) {
+        if (onRoad) {
+          actions.append(h("button", { type: "button", onclick: () => this.#openForm("wrong", { id: lookup.segmentId, speedLimit: lookup.speedLimit, unit: lookup.speedLimitUnit }) }, tr.t("limit.action.wrong")));
+        }
+        actions.append(h("button", { type: "button", class: onRoad ? undefined : "primary", onclick: () => this.#openForm("interval", null) }, tr.t(onRoad ? "limit.action.interval" : "limit.action.missing")));
       }
+      if (defects) actions.append(h("button", { type: "button", onclick: () => void this.#openDefects() }, tr.t("limit.action.defect")));
       children.push(actions);
-      children.push(h("p", { class: "hint" }, tr.t("limit.localOnly")));
+      if (settings) children.push(h("p", { class: "hint" }, tr.t("limit.localOnly")));
     }
     return h("div", null, ...children);
+  }
+
+  /** Open proposals with a "confirm" and "deny" for each (and the rule that makes one count for everybody). */
+  #proposalBox(tr, s, proposals) {
+    const settings = this.settings;
+    const list = h("ul", { class: "proposals" });
+    for (const proposal of proposals) {
+      list.append(
+        h(
+          "li",
+          null,
+          h("div", { class: "proposal-text" }, tr.t("limit.proposed.item", { value: proposal.value, unit: tr.t(`unit.${proposal.unit}`), counts: tr.t("limit.counts", { confirmations: proposal.confirmations ?? 0, denials: proposal.denials ?? 0 }) })),
+          this.#voteRow(tr, s, { id: proposal.id, confirm: true, deny: true }),
+        ),
+      );
+    }
+    return h("section", { class: "proposals-box" }, h("h4", null, tr.t("limit.proposed.title")), settings ? h("p", { class: "hint" }, tr.t("limit.proposed.rule", { required: settings.required })) : null, list);
   }
 
   /** "Stimmt" / "Stimmt nicht" for one proposal (or applied correction), with the node's honest answer next to it. */
@@ -256,6 +254,7 @@ export class LimitDetail {
     const described = describeCorrectionError(error, this.settings);
     const params = { ...described.params };
     if (params.unit) params.unit = tr.t(`unit.${params.unit}`);
+    if (params.max !== undefined) params.max = Math.round(params.max);
     return { text: tr.t(`limit.error.${described.key}`, params), switchTo: described.switchTo };
   }
 
@@ -264,27 +263,104 @@ export class LimitDetail {
   #openForm(kind, segment, info = null) {
     const settings = this.settings;
     if (!settings) return;
+    this.#cancelPick();
     const unit = segment?.unit ?? "kmh";
-    this.#state = {
-      ...this.#state,
-      phase: "form",
-      form: { kind, segment, unit, value: "", reason: (kind === "wrong" ? WRONG_REASONS : MISSING_REASONS)[0], axis: null, error: null, sending: false, info },
-    };
+    const form = { kind, segment, unit, value: "", reason: (kind === "wrong" ? WRONG_REASONS : MISSING_REASONS)[0], error: null, sending: false, info };
+    if (kind === "interval") {
+      // The spot that was tapped is the first of the two points; the visitor picks the second on the map (docs/road-network.md).
+      Object.assign(form, { from: this.#state.latlng, to: null, resolved: null, resolving: false, resolveError: null, resolveTicket: 0, picking: null });
+    }
+    this.#state = { ...this.#state, phase: "form", form };
     this.#focusNext = true;
-    this.#previewAxis();
+    this.#previewForm();
     this.render();
   }
 
-  #previewAxis() {
-    const { form, latlng } = this.#state;
-    if (form?.kind === "gap" && form.axis !== null) this.onPreview(latlng, form.axis);
-    else this.onPreview(null);
+  /** What the map shows for the form: the picked points and, once the node has found the road, the stretch between them in grey. */
+  #previewForm() {
+    const { form } = this.#state;
+    if (form?.kind !== "interval") {
+      this.onPreview(null);
+      return;
+    }
+    const points = [form.from, form.to].filter(Boolean);
+    this.onPreview({ points, line: form.resolved?.geometry?.coordinates ?? null });
+  }
+
+  #cancelPick() {
+    const form = this.#state.form;
+    if (form?.picking) {
+      form.picking = null;
+      this.onPickPoint(null);
+    }
+  }
+
+  /** Asks the page to take the next tap on the map as "from" or "to" of the stretch. */
+  #pick(which) {
+    const f = this.#state.form;
+    if (f?.kind !== "interval" || f.sending) return;
+    f.picking = which;
+    f.error = null;
+    this.onPickPoint({
+      hintKey: which === "from" ? "limit.points.picking.from" : "limit.points.picking.to",
+      resolve: (latlng) => {
+        if (this.#state.form !== f) return;
+        f.picking = null;
+        f[which] = latlng;
+        void this.#resolveStretch();
+      },
+      cancel: () => {
+        if (this.#state.form !== f) return;
+        f.picking = null;
+        this.#focusNext = false;
+        this.render();
+      },
+    });
+    this.#focusNext = false;
+    this.render();
+  }
+
+  /** Asks the node which stretch of which road the two points name. Nothing is stored by this; the answer is only a preview. */
+  async #resolveStretch() {
+    const f = this.#state.form;
+    if (f?.kind !== "interval") return;
+    f.resolved = null;
+    f.resolveError = null;
+    if (!f.from || !f.to) {
+      this.#previewForm();
+      this.#focusNext = false;
+      this.render();
+      return;
+    }
+    const ticket = (f.resolveTicket += 1);
+    f.resolving = true;
+    this.#previewForm();
+    this.#focusNext = false;
+    this.render();
+    const round = (p) => ({ lat: Number(p.lat.toFixed(6)), lng: Number(p.lng.toFixed(6)) });
+    try {
+      const { data } = await this.api.post("/v1/roads/resolve", { from: round(f.from), to: round(f.to) });
+      if (ticket !== f.resolveTicket || this.#state.form !== f) return;
+      f.resolved = data;
+      // the unit a stretch already has is the one that is offered first
+      const first = (data.covered ?? [])[0];
+      if (first && f.value === "") f.unit = first.unit;
+      // something is recorded there: the likely reason is that it is wrong, not that it is missing
+      if (first && f.reason === "missing") f.reason = "wrong_value";
+    } catch (error) {
+      if (ticket !== f.resolveTicket || this.#state.form !== f) return;
+      f.resolveError = this.#errorText(currentTranslator(), error).text;
+    }
+    f.resolving = false;
+    this.#previewForm();
+    this.#focusNext = false;
+    this.render();
   }
 
   #renderForm(tr, s) {
     const settings = this.settings;
     const f = s.form;
-    const isGap = f.kind === "gap";
+    const isGap = f.kind === "interval";
     const current = f.segment ? f.segment.speedLimit : null;
     const valueId = uid("limit-value");
     const errorId = uid("limit-error");
@@ -321,6 +397,7 @@ export class LimitDetail {
       "aria-describedby": f.error ? errorId : undefined,
       "aria-invalid": f.error ? "true" : undefined,
       "data-autofocus": isGap ? undefined : "",
+      disabled: isGap && !f.resolved ? true : undefined,
     });
     input.addEventListener("input", () => {
       f.value = input.value;
@@ -354,7 +431,7 @@ export class LimitDetail {
         )
       : h("p", { class: "hint" }, tr.t("limit.form.unitFixed", { unit: tr.t(`unit.${f.unit}`) }));
 
-    const reasons = isGap ? MISSING_REASONS : WRONG_REASONS;
+    const reasons = isGap ? INTERVAL_REASONS : WRONG_REASONS;
     const reasonId = uid("limit-reason");
     const reason = h(
       "div",
@@ -367,47 +444,16 @@ export class LimitDetail {
       ),
     );
 
-    let axisBlock = null;
-    if (isGap) {
-      axisBlock = h(
-        "fieldset",
-        { class: "axis-choice" },
-        h("legend", null, tr.t("limit.form.axis")),
-        h("p", { class: "hint" }, tr.t("limit.form.axis.hint")),
-        h(
-          "div",
-          { class: "axis-grid" },
-          AXES.map((axis) =>
-            h(
-              "label",
-              { class: "axis-option" },
-              h("input", {
-                type: "radio",
-                name: "limit-axis",
-                value: axis.id,
-                checked: f.axis === axis.bearingDegrees ? true : undefined,
-                onchange: () => {
-                  f.axis = axis.bearingDegrees;
-                  f.error = null;
-                  this.#previewAxis();
-                },
-              }),
-              axisPicture(axis.bearingDegrees),
-              h("span", null, tr.t(`limit.axis.${axis.id}`)),
-            ),
-          ),
-        ),
-      );
-    }
+    const pointsBlock = isGap ? this.#renderPoints(tr, s, f) : null;
 
     const form = h(
       "form",
       { class: "limit-form", novalidate: true, onsubmit: (event) => void this.#submitForm(event) },
-      h("h3", { tabindex: "-1", "data-autofocus": isGap ? "" : undefined }, tr.t(isGap ? "limit.form.title.gap" : "limit.form.title.wrong")),
+      h("h3", { tabindex: "-1", "data-autofocus": isGap ? "" : undefined }, tr.t(isGap ? "limit.form.title.interval" : "limit.form.title.wrong")),
       f.info ? h("p", { class: "hint", role: "status" }, f.info) : null,
       !isGap ? h("p", null, tr.t("limit.form.current", { value: current, unit: tr.t(`unit.${f.unit}`) })) : null,
       h("p", { class: "limit-safety", role: "note" }, tr.t("limit.form.safety")),
-      axisBlock,
+      pointsBlock,
       unitBlock,
       h("fieldset", { class: "value-choice" }, h("legend", null, tr.t("limit.form.value", { unit: tr.t(`unit.${f.unit}`) })), chips, h("div", { class: "field" }, h("label", { for: valueId }, tr.t("limit.form.other", { step: settings.step })), input)),
       reason,
@@ -421,6 +467,41 @@ export class LimitDetail {
       ),
     );
     return form;
+  }
+
+  /** Step "which stretch": the two points, what the node found between them, what is on record there and what is proposed. */
+  #renderPoints(tr, s, f) {
+    const row = (which) => {
+      const point = f[which];
+      const picking = f.picking === which;
+      const label = tr.t(which === "from" ? "limit.points.from" : "limit.points.to");
+      const state = picking ? tr.t(which === "from" ? "limit.points.picking.from" : "limit.points.picking.to") : point ? tr.t("limit.points.set") : tr.t("limit.points.unset");
+      const action = point ? tr.t(which === "from" ? "limit.points.changeFrom" : "limit.points.changeTo") : tr.t("limit.points.pickTo");
+      return h(
+        "div",
+        { class: "point-row" },
+        h("span", { class: "point-label" }, h("strong", null, label), ": ", state),
+        h("button", { type: "button", class: point ? "small" : "small primary", disabled: picking || f.sending ? true : undefined, onclick: () => this.#pick(which), "data-autofocus": which === "to" && !point ? "" : undefined }, action),
+      );
+    };
+    const children = [h("legend", null, tr.t("limit.points.title")), h("p", { class: "hint" }, tr.t("limit.points.hint")), row("from"), row("to")];
+
+    if (f.resolving) children.push(h("p", { class: "hint", role: "status" }, tr.t("limit.points.resolving")));
+    else if (f.resolveError) children.push(h("p", { class: "result bad", role: "alert" }, f.resolveError));
+    else if (f.resolved) {
+      const r = f.resolved;
+      const road = r.road?.name ?? r.road?.ref ?? tr.t("limit.points.unnamed");
+      children.push(h("p", { class: "result ok", role: "status" }, tr.t("limit.points.found", { road, length: r.lengthM })));
+      const covered = r.covered ?? [];
+      if (covered.length === 0) children.push(h("p", { class: "hint" }, tr.t("limit.points.none")));
+      else {
+        const items = covered.map((c) => tr.t("limit.points.covered.item", { value: c.speedLimit, unit: tr.t(`unit.${c.unit}`), m: c.coveredMeters }));
+        children.push(h("p", { class: "hint" }, tr.t("limit.points.covered", { items: items.join("; ") })));
+      }
+      const proposals = openProposals(r.proposals);
+      if (proposals.length > 0) children.push(this.#proposalBox(tr, s, proposals));
+    }
+    return h("fieldset", { class: "points-choice" }, ...children);
   }
 
   async #submitForm(event) {
@@ -440,10 +521,10 @@ export class LimitDetail {
       this.element.querySelector("input[type=text]")?.focus();
       return;
     }
-    if (f.kind === "gap" && f.axis === null) {
-      f.error = tr.t("limit.form.error.axis");
+    if (f.kind === "interval" && !f.resolved) {
+      f.error = tr.t("limit.form.error.points");
+      this.#focusNext = false;
       this.render();
-      this.element.querySelector("input[name=limit-axis]")?.focus();
       return;
     }
 
@@ -455,7 +536,9 @@ export class LimitDetail {
       if (f.kind === "wrong") {
         response = await this.api.post(`/v1/speed-limit-segments/${encodeURIComponent(f.segment.id)}/corrections`, { value: checked.value, unit: f.unit, reason: f.reason });
       } else {
-        response = await this.api.post("/v1/speed-limit-gaps", { lat: Number(s.latlng.lat.toFixed(6)), lng: Number(s.latlng.lng.toFixed(6)), bearingDegrees: f.axis, value: checked.value, unit: f.unit, reason: f.reason });
+        // The two picked points, not the road the node found: the node resolves them again for itself.
+        const round = (p) => ({ lat: Number(p.lat.toFixed(6)), lng: Number(p.lng.toFixed(6)) });
+        response = await this.api.post("/v1/speed-limit-intervals", { from: round(f.from), to: round(f.to), value: checked.value, unit: f.unit, reason: f.reason });
       }
       const outcome = describeVoteResult(response.data, settings.required);
       this.onPreview(null);
@@ -497,8 +580,112 @@ export class LimitDetail {
     );
   }
 
+  // ---- "this entry is wrong" ---------------------------------------------------------------------------------------
+
+  async #openDefects() {
+    const ticket = ++this.#ticket;
+    this.#cancelPick();
+    const { latlng } = this.#state;
+    const defects = { loading: true, items: [], reason: DEFECT_REASONS[0], results: {}, sending: {}, error: false };
+    this.#state = { ...this.#state, phase: "defects", defects };
+    this.onPreview(null);
+    this.#focusNext = true;
+    this.render();
+    try {
+      const { data } = await this.api.get("/v1/data-defects/near", { lat: latlng.lat.toFixed(6), lng: latlng.lng.toFixed(6), radiusM: 40 });
+      if (ticket !== this.#ticket) return;
+      defects.items = data.items ?? [];
+    } catch {
+      if (ticket !== this.#ticket) return;
+      defects.error = true;
+    }
+    defects.loading = false;
+    this.#focusNext = true;
+    this.render();
+  }
+
+  #renderDefects(tr, s) {
+    const d = s.defects;
+    const threshold = this.defects?.threshold ?? 3;
+    const reasonId = uid("defect-reason");
+    const children = [
+      h("h3", { tabindex: "-1", "data-autofocus": "" }, tr.t("defect.title")),
+      h("p", { class: "hint" }, tr.t("defect.hint", { threshold })),
+    ];
+    if (d.loading) children.push(h("p", { class: "hint", role: "status" }, tr.t("limit.loading")));
+    else if (d.error) children.push(h("p", { role: "alert" }, tr.t("defect.error")));
+    else if (d.items.length === 0) children.push(h("p", { role: "status" }, tr.t("defect.none")));
+    else {
+      children.push(
+        h(
+          "div",
+          { class: "field" },
+          h("label", { for: reasonId }, tr.t("defect.reason")),
+          h("select", { id: reasonId, onchange: (event) => (d.reason = event.target.value) }, DEFECT_REASONS.map((r) => h("option", { value: r, selected: d.reason === r ? true : undefined }, tr.t(`defect.reason.${r}`)))),
+        ),
+      );
+      const list = h("ul", { class: "defect-list" });
+      for (const item of d.items) {
+        const text =
+          item.targetType === "speedLimitSegment"
+            ? tr.t("defect.item.segment", { value: item.speedLimit, unit: tr.t(`unit.${item.speedLimitUnit}`), m: item.distanceMeters })
+            : tr.t("defect.item.sign", { type: item.signType, m: item.distanceMeters });
+        const result = d.results[item.targetId];
+        const done = result !== undefined && d.sending[item.targetId] !== true;
+        list.append(
+          h(
+            "li",
+            null,
+            h("div", { class: "proposal-text" }, text, " ", h("span", { class: "hint" }, tr.t("defect.item.reports", { reports: item.reports ?? 0, threshold: item.threshold ?? threshold }))),
+            h(
+              "div",
+              { class: "vote-row" },
+              h("button", { type: "button", class: "small", onclick: () => this.#showDefect(item) }, tr.t("defect.show")),
+              h("button", { type: "button", class: "small", disabled: d.sending[item.targetId] || done ? true : undefined, onclick: () => void this.#reportDefect(item) }, tr.t("defect.report")),
+              h("span", { class: "vote-status", role: "status", "aria-live": "polite" }, result ?? ""),
+            ),
+          ),
+        );
+      }
+      children.push(list);
+    }
+    children.push(h("div", { class: "dialog-actions" }, h("button", { type: "button", class: "primary", onclick: () => void this.#reload() }, tr.t("defect.back"))));
+    return h("div", { class: "defect-box" }, ...children);
+  }
+
+  /** Marks the entry on the map so the visitor can see which one is meant before reporting it. */
+  #showDefect(item) {
+    if (item.targetType === "speedLimitSegment" && item.geometry?.coordinates) this.onPreview({ line: item.geometry.coordinates, tone: "defect" });
+    else if (item.position?.coordinates) this.onPreview({ points: [{ lat: item.position.coordinates[1], lng: item.position.coordinates[0] }], tone: "defect" });
+  }
+
+  async #reportDefect(item) {
+    const d = this.#state.defects;
+    const tr = currentTranslator();
+    d.sending[item.targetId] = true;
+    d.results[item.targetId] = tr.t("limit.sending");
+    this.#focusNext = false;
+    this.render();
+    try {
+      const { data } = await this.api.post("/v1/data-defects", { targetType: item.targetType, targetId: item.targetId, reason: d.reason });
+      const outcome = describeDefectResult(data);
+      item.reports = outcome.reports;
+      d.results[item.targetId] = tr.t(`defect.result.${outcome.kind}`, { reports: outcome.reports, threshold: outcome.threshold });
+      if (outcome.kind === "removed") {
+        this.onPreview(null);
+        this.onChanged();
+      }
+    } catch (error) {
+      d.results[item.targetId] = this.#errorText(tr, error).text;
+    }
+    d.sending[item.targetId] = false;
+    this.#focusNext = false;
+    this.render();
+  }
+
   /** The visitor left the detail (closed the popup or the sheet view): forget it and clear the preview line. */
   reset() {
+    this.#cancelPick();
     this.#ticket += 1;
     this.#state = { phase: "idle" };
     this.onPreview(null);

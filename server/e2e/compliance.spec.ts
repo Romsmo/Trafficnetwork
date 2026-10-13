@@ -71,6 +71,8 @@ test.describe("legal pages", () => {
     await expect(english).toContainText("about 15 minutes"); // WEB_SESSION_TTL_SECONDS=900
     await expect(english).toContainText("neither the query string nor your IP address"); // LOG_PRIVACY_MODE on
     await expect(english).toContainText("3 days");
+    // this node's e2e setup has the road lookup off: it says it asks nobody for road data
+    await expect(english).toContainText("asks no service for road data");
     await expect(english.locator("[data-fill]").first()).not.toBeEmpty();
   });
 
@@ -80,6 +82,11 @@ test.describe("legal pages", () => {
     await page.goto(`${none}/privacy`);
     await expect(page.locator("main .lang-block[lang=de]")).toContainText("keinen Kartenhintergrund");
     await expect(page.locator("main .lang-block[lang=de]")).not.toContainText("tile.openstreetmap.org");
+    // this one has a road service: the notice names it, says the node (not the browser) asks, and what it receives
+    const german = page.locator("main .lang-block[lang=de]");
+    await expect(german).toContainText("127.0.0.1:9");
+    await expect(german).toContainText("fragt der Knoten selbst");
+    await expect(german).toContainText("nicht deine IP-Adresse");
   });
 
   test("the terms say what the draft status is and do not promise anything the service does not do", async ({ page }) => {

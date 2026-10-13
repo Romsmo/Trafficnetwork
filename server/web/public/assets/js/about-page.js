@@ -47,6 +47,7 @@ function render() {
         h("li", null, t("about.privacy.ip")),
         h("li", null, config.privacyLogging === false ? t("about.privacy.logs.off") : t("about.privacy.logs.on")),
         h("li", null, host ? t("about.privacy.tiles", { host }) : t("about.privacy.tiles.none")),
+        config.roadLookupHost ? h("li", null, t("about.privacy.roads", { host: config.roadLookupHost })) : null,
       ),
       h("p", null, t("about.privacy.more"), " ", h("a", { href: "/privacy" }, t("about.privacy.link")), " · ", h("a", { href: "/terms" }, t("about.terms.link"))),
     ),

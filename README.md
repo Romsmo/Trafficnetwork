@@ -1,3 +1,5 @@
+<p align="center"><img src="server/web/public/assets/img/logo.svg" alt="Trafficnetwork" width="220"></p>
+
 # Trafficnetwork
 
 Offenes, quelloffenes Verkehrsdaten-Netzwerk (Local-First): Tempolimits, Verkehrszeichen und Live-Gefahrenmeldungen (Stau, Unfall, Baustelle, Glätte, Panne, Hindernis, Blitzer). Start-Scope: Europa, Architektur für weltweite Ausweitung vorbereitet.

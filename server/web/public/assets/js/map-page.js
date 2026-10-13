@@ -5,7 +5,7 @@ import { readCameraPolicy } from "./camera-policy.js";
 import { CameraNotice } from "./camera-notice.js";
 import { anyCameraEnabled, isCameraType, selectableTypes, sortNewestFirst, zoneLatLngs } from "./filter.js";
 import { formatAge, formatKm, formatRemaining } from "./format.js";
-import { lineThrough, tapToleranceMeters } from "./geo.js";
+import { tapToleranceMeters } from "./geo.js";
 import { HazardLayer, reportLatLng } from "./hazard-layer.js";
 import { applyTranslations, currentTranslator, initI18n, onLangChange, t } from "./i18n.js";
 import { mountLayout } from "./layout.js";
@@ -308,13 +308,50 @@ const limitDetail = new LimitDetail({
     const { latLngToCell, gridDisk } = await (h3 ??= import("/web/vendor/h3/h3-js.es.js"));
     return gridDisk(latLngToCell(latlng.lat, latlng.lng, GAP_DISCOVERY_RESOLUTION), 1);
   },
-  onPreview: (latlng, bearing) => {
+  // What the visitor is looking at: the two picked points and the stretch of road between them (drawn grey over the road colours),
+  // or an entry that is being marked as wrong (red). The geometry comes from the node, which found the road.
+  onPreview: (preview) => {
     previewLine?.remove();
     previewLine = null;
-    if (!latlng) return;
-    // The node rounds the spot to a cell and the stretch to 120 m: the line shows what is meant, not an exact place.
-    const [a, b] = lineThrough(latlng, bearing, 120);
-    previewLine = L.polyline([[a.lat, a.lng], [b.lat, b.lng]], { className: "axis-preview", color: "#0b5cd5", weight: 6, opacity: 0.9, dashArray: "8 8", interactive: false }).addTo(map);
+    if (!preview) return;
+    const group = L.layerGroup();
+    const defect = preview.tone === "defect";
+    if (preview.line && preview.line.length > 1) {
+      L.polyline(
+        preview.line.map(([lng, lat]) => [lat, lng]),
+        { className: defect ? "defect-preview" : "interval-preview", color: defect ? "#c62828" : "#6b7280", weight: 9, opacity: 0.85, lineCap: "round", lineJoin: "round", interactive: false },
+      ).addTo(group);
+    }
+    (preview.points ?? []).forEach((p, index) => {
+      L.circleMarker([p.lat, p.lng], { className: "interval-point", radius: 8, color: defect ? "#c62828" : "#374151", weight: 3, fillColor: "#ffffff", fillOpacity: 1, interactive: false })
+        .bindTooltip(defect ? "" : String(index + 1), { permanent: !defect, direction: "top", offset: [0, -8], className: "interval-point-label" })
+        .addTo(group);
+    });
+    previewLine = group.addTo(map);
+  },
+  // The next tap on the map is a picked point (the first of the two is the tap that opened the detail). The sheet gets out of the
+  // way while a point is picked and comes back once it is.
+  onPickPoint: (request) => {
+    if (!request) {
+      if (pendingPick?.limit) {
+        endPick();
+      }
+      return;
+    }
+    putPopupAway();
+    beginPick(
+      (latlng) => {
+        raiseSheet("half");
+        bringPopupBack();
+        request.resolve(latlng);
+      },
+      () => {
+        raiseSheet("half");
+        bringPopupBack();
+        request.cancel();
+      },
+      { hintKey: request.hintKey, limit: true },
+    );
   },
   onChanged: () => limits?.invalidate(),
   onLayout: () => {
@@ -324,11 +361,27 @@ const limitDetail = new LimitDetail({
 
 // Popup (wide screens): kept open on map clicks so a half-filled form is not lost; a new tap shows the new place.
 const limitPopup = L.popup({ autoPanPadding: [30, 60], minWidth: 270, maxWidth: 380, closeOnClick: false, autoClose: true });
+// While a second point is picked the popup is put away (it would cover the map) and comes back, with its form, once it is picked.
+let popupPutAway = false;
+let popupOrigin = null;
 limitPopup.on("remove", () => {
-  if (!detailOpen) limitDetail.reset();
+  if (!detailOpen && !popupPutAway) limitDetail.reset();
 });
 
+function putPopupAway() {
+  if (sheet.mode === "sheet" || !limitPopup.isOpen()) return;
+  popupPutAway = true;
+  map.closePopup(limitPopup);
+  popupPutAway = false;
+}
+
+function bringPopupBack() {
+  if (sheet.mode === "sheet" || !limitDetail.active || !popupOrigin) return;
+  limitPopup.setLatLng(popupOrigin).setContent(limitDetail.element).openOn(map);
+}
+
 function openLimitAt(latlng) {
+  popupOrigin = latlng;
   const tolerance = tapToleranceMeters(map.getZoom(), latlng.lat);
   if (sheet.mode === "sheet") {
     map.closePopup();
@@ -495,10 +548,10 @@ async function submitReport({ type, lat, lng, expiresInSeconds }) {
   }
 }
 
-function beginPick(resolve, cancel) {
-  pendingPick = { resolve, cancel };
+function beginPick(resolve, cancel, { hintKey = "reportDialog.pick.hint", limit = false } = {}) {
+  pendingPick = { resolve, cancel, hintKey, limit };
   $("map").classList.add("picking");
-  setChip("pick-chip", t("reportDialog.pick.hint"));
+  setChip("pick-chip", t(hintKey));
   $("pick-cancel").hidden = false;
   // The sheet gets out of the way while a spot is picked.
   if (sheet.mode === "sheet") sheet.setDetent("small", { announce: false });
@@ -589,7 +642,7 @@ onLangChange(() => {
   limits.renderLegend();
   $("map").setAttribute("aria-label", t("map.aria"));
   $("limits-hint").textContent = limitsStateText(limitsState);
-  if (pendingPick) setChip("pick-chip", t("reportDialog.pick.hint"));
+  if (pendingPick) setChip("pick-chip", t(pendingPick.hintKey));
   applyTranslations(document);
   labelMapControls();
   labelSheet();
