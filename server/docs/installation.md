@@ -70,9 +70,51 @@ docker compose --profile with-caddy up -d
 ```
 
 Caddy provisions and renews its Let's Encrypt certificate automatically — no
-separate certbot step. Update by pulling the latest code and re-running
-`docker compose up -d --build` (rebuilds the image, re-runs migrations,
-restarts with zero manual steps).
+separate certbot step. To update an existing node, follow
+[Updating an existing node](#updating-an-existing-node-docker) below.
+
+### Updating an existing node (Docker)
+
+The compose file **builds the image locally** from `server/Dockerfile` (there is no `image:` entry for the
+server, so nothing is pulled from GHCR; the images that `release.yml` publishes as
+`ghcr.io/romsmo/trafficnetwork-server` are for people who run the image without this compose file).
+Migrations run in the container's `CMD` before the server listens, so an update is "new code, rebuild, restart" —
+but a migration cannot be undone by going back to old code, so **take a database dump first**. Run everything
+in the directory that holds `docker-compose.yml` (`server/`). Service names: `server`, `postgres`; database
+user and name default to `trafficnetwork` (`POSTGRES_USER`, `POSTGRES_DB`); the server listens on `PORT` (3000).
+
+1. **Read what changes**: `git fetch` then `git log --oneline HEAD..origin/main` and the `CHANGELOG.md`
+   sections for `server`. Note migrations among the new files (`git diff --stat HEAD origin/main -- server/src/db/migrations`);
+   a heavy-lock one is listed in [`operating.md`](operating.md#migrations-that-take-a-heavy-lock).
+2. **Check your `.env`** for leftovers of older versions:
+   `SPEED_CAMERA_NAMESPACE_ENABLED=false` (the old default; it now switches *all* camera data off — remove the line or
+   set `true`), `HAZARD_EXPIRY_SHORT_MINUTES=12` from an old `.env.example` (only affects red-light/distance reports
+   since 1.1.0). `docker compose config` must run without an error: `POSTGRES_PASSWORD` and `JWT_SECRET` are
+   required, everything else has a default. Never change `STATIC_DATA_PARTITION_H3_RESOLUTION` on a node with users.
+3. **Back up**: `pg_dump` inside the container, then copy the file out (`>` redirection is not binary-safe in
+   Windows PowerShell, so the dump is not piped through the host shell):
+   ```bash
+   docker compose exec -T postgres pg_dump -U trafficnetwork -d trafficnetwork -Fc -f /tmp/before-update.dump
+   docker compose cp postgres:/tmp/before-update.dump ./before-update.dump
+   git rev-parse HEAD            # write this commit down: it is what you roll back to
+   ```
+4. **Update**: `git pull --ff-only` and `docker compose up -d --build`. Watch `docker compose logs -f server` for
+   `Migrations complete.`; a big migration keeps the container `starting`/`unhealthy` until it is done — do not interrupt it.
+5. **Check**: `curl http://localhost:3000/v1/health` → `{"status":"ok","database":"ok"}` (no token needed). With a
+   token (`POST /v1/auth/token`), `GET /v1/config` answers 200 and shows `cameraPolicy`, `reportExpiry` and
+   `staticDataPartitionH3Resolution`; it needs a token, unlike `/v1/health`.
+6. **Roll back**: if only code is wrong and no migration ran, `git checkout <old commit>` and
+   `docker compose up -d --build`. If migrations ran, restore the dump into an empty database first (this deletes
+   everything written since the dump):
+   ```bash
+   docker compose stop server
+   docker compose cp ./before-update.dump postgres:/tmp/restore.dump
+   docker compose exec -T postgres psql -U trafficnetwork -d postgres -c "DROP DATABASE trafficnetwork WITH (FORCE)" -c "CREATE DATABASE trafficnetwork TEMPLATE template0"
+   docker compose exec -T postgres pg_restore -U trafficnetwork -d trafficnetwork --no-owner /tmp/restore.dump
+   git checkout <old commit>
+   docker compose up -d --build
+   ```
+   The `static-packages` volume is derived data and is rebuilt by the server if it no longer matches.
 
 **Multi-arch**: the image builds for both `linux/amd64` and `linux/arm64`
 (validated in CI), so this works unmodified on a Raspberry Pi or an ARM VPS,
