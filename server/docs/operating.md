@@ -493,8 +493,9 @@ repeat by hand" needs: nothing stands on the map for longer than a year without 
 
 ## Restarting, upgrading, backing up
 
-An upgrade that includes a migration with a heavy lock (0007, above) needs a maintenance window on a big node;
-take a database backup first, as for any migration.
+The step-by-step procedure (backup, update, health check, rollback) is in
+[`installation.md`](installation.md#updating-an-existing-node-docker). An upgrade that includes a migration
+with a heavy lock (0007, above) needs a maintenance window on a big node; take a database backup first, as for any migration.
 
 Your **node identity** (the Ed25519 keypair other servers know you by) lives
 in your database (`node_identity` table), not on disk or in an env var — it
@@ -506,7 +507,7 @@ else — the same backup discipline that already protects your report/static
 data protects this too; there's nothing federation-specific to back up
 separately.
 
-Upgrading (`docker compose up -d --build` after pulling new code, or the
+Upgrading (see the procedure linked above, or the
 equivalent for a non-Docker install) is safe to do without coordinating with
 peers — every federation endpoint is additive-only so far (no breaking wire
 changes are planned without a protocol version bump, `FEDERATION_PROTOCOL_VERSION`
