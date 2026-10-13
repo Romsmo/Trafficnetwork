@@ -153,14 +153,77 @@ export interface ReportLimits {
   maxSeconds: number | null;
 }
 
-export interface MissingSpeedLimitReport {
+/** A point picked on the map. */
+export interface RoadPoint {
   lat: number;
   lng: number;
+}
+
+/** A limit for a stretch of road, named by two points on it. The device needs no road data: the server finds the road. */
+export interface SpeedLimitIntervalReport {
+  from: RoadPoint;
+  to: RoadPoint;
   value: number;
   unit: SpeedLimitUnit;
-  /** A heading along the road, either direction of travel (0..360); the last heading given is used when absent. */
-  bearing?: number;
   reason?: string;
+}
+
+/** What the server found for two picked points (`resolveRoadInterval`). */
+export interface RoadInterval {
+  /** `ivl:…` reference of the two points (what a device signs). */
+  ref: string;
+  segmentKey: string;
+  /** The stretch along the road's own shape, between the two points on the road: draw this. */
+  geometry: { type: "LineString"; coordinates: [number, number][] };
+  lengthM: number;
+  road: { name: string | null; ref: string | null; class: string | null };
+  /** Limits already on record under the stretch (what a proposal would replace). */
+  covered: {
+    segmentId: string;
+    segmentKey: string;
+    speedLimit: number;
+    unit: SpeedLimitUnit;
+    source: string;
+    coveredMeters: number;
+  }[];
+  /** Proposals and applied values for exactly this stretch. */
+  proposals: Correction[];
+}
+
+/** An entry near a point that can be marked as wrong. */
+export interface DataDefect {
+  targetType: "speedLimitSegment" | "staticSign";
+  targetId: string;
+  distanceMeters: number;
+  speedLimit?: number;
+  speedLimitUnit?: SpeedLimitUnit;
+  signType?: string;
+  source?: string;
+  /** The line of a speed-limit entry. */
+  geometry?: { type: "LineString"; coordinates: [number, number][] };
+  /** The place of a sign. */
+  position?: { type: "Point"; coordinates: [number, number] };
+  /** How many distinct devices have marked it so far. */
+  reports: number;
+  /** How many it takes to take the entry out. */
+  threshold: number;
+}
+
+export type DataDefectReason = "not_on_a_road" | "wrong_place" | "does_not_exist" | "wrong_value" | "other";
+
+export interface DataDefectReport {
+  targetType: "speedLimitSegment" | "staticSign";
+  targetId: string;
+  reason?: DataDefectReason;
+}
+
+export interface DataDefectAnswer {
+  /** `false`: this device had marked the entry before. */
+  recorded: boolean;
+  reports: number;
+  threshold: number;
+  /** The entry is out now. */
+  removed: boolean;
 }
 
 /** The answer of `lookupSpeedLimit`: always an answer, never a bare "nothing". */
@@ -375,8 +438,16 @@ export type ErrorCode =
   | "unavailable"
   /** A duration asked for a report is outside the server's bounds for its type (`getReportLimits`). */
   | "ttlOutOfRange"
-  /** "No limit here" was reported where a road with a limit is stored: correct that segment instead. */
-  | "roadAlreadyHasLimit"
+  /** The server has no road data for that area and cannot look it up (`resolveRoadInterval`). */
+  | "noRoadData"
+  /** No road was found near one of the two points: tap closer to the road. */
+  | "noRoadFound"
+  /** The two points are not on one road that runs between them. */
+  | "noRoadBetweenPoints"
+  /** The two points are further apart than one stretch may be (the server's `roadNetwork.intervalMaxMeters`). */
+  | "intervalTooLong"
+  /** The two points are closer together than a stretch can be. */
+  | "intervalTooShort"
   | "closed"
   | "internal";
 
@@ -443,8 +514,18 @@ export interface TrafficNetworkClient {
   confirmReport(reportId: string, stillThere: boolean): Promise<string>;
   reportCameraRemoved(cameraId: string): Promise<string>;
   reportWrongSpeedLimit(report: WrongSpeedLimitReport): Promise<Proposal>;
-  /** "There is no speed limit on record for this road" — a value for a road the import has none for. */
-  reportMissingSpeedLimit(report: MissingSpeedLimitReport): Promise<Proposal>;
+  /**
+   * "On this stretch of road the limit is X": a limit for a stretch named by two points on it — for a road the import has
+   * no limit for, or to change a limit that is wrong on part of a road. Effective for this device at once (as its own,
+   * unconfirmed proposal), sent signed on the next sync.
+   */
+  reportSpeedLimitInterval(report: SpeedLimitIntervalReport): Promise<Proposal>;
+  /** Which stretch of which road two picked points name — draw `geometry` before anybody proposes a value. Needs the network. */
+  resolveRoadInterval(from: RoadPoint, to: RoadPoint): Promise<RoadInterval>;
+  /** The entries near a point that can be marked as wrong, with how many devices have marked each. Needs the network. */
+  dataDefectsNear(lat: number, lng: number, radiusMeters?: number): Promise<DataDefect[]>;
+  /** "This entry is wrong": one mark per device and entry; enough distinct devices take it out. Needs the network. */
+  reportDataDefect(report: DataDefectReport): Promise<DataDefectAnswer>;
   /** The limit here: from the offline data, or from the server when the place is outside the offline area. */
   lookupSpeedLimit(lat: number, lng: number, heading?: number): Promise<SpeedLimitLookup>;
   /** Resolves `null` when the vote only withdrew this device's own still-queued proposal. */
@@ -518,7 +599,10 @@ export class BaseClient {
   confirmReport(reportId: string, stillThere: boolean): Promise<string>;
   reportCameraRemoved(cameraId: string): Promise<string>;
   reportWrongSpeedLimit(report: WrongSpeedLimitReport): Promise<Proposal>;
-  reportMissingSpeedLimit(report: MissingSpeedLimitReport): Promise<Proposal>;
+  reportSpeedLimitInterval(report: SpeedLimitIntervalReport): Promise<Proposal>;
+  resolveRoadInterval(from: RoadPoint, to: RoadPoint): Promise<RoadInterval>;
+  dataDefectsNear(lat: number, lng: number, radiusMeters?: number): Promise<DataDefect[]>;
+  reportDataDefect(report: DataDefectReport): Promise<DataDefectAnswer>;
   lookupSpeedLimit(lat: number, lng: number, heading?: number): Promise<SpeedLimitLookup>;
   confirmSpeedLimitCorrection(vote: SpeedLimitVote): Promise<string | null>;
   fetchCorrections(): Promise<Correction[]>;

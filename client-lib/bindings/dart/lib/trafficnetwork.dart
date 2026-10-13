@@ -264,22 +264,55 @@ class TrafficNetworkClient {
         if (reason != null) 'reason': reason,
       });
 
-  /// "There is no speed limit on record for this road": a value for a road
-  /// the import has none for.
-  Future<Map<String, Object?>> reportMissingSpeedLimit({
-    required double lat,
-    required double lng,
+  /// "On this stretch of road the limit is X": a limit for a stretch named by
+  /// two points on it (each `{'lat': .., 'lng': ..}`). The server finds the
+  /// road between them; the device needs no road data.
+  Future<Map<String, Object?>> reportSpeedLimitInterval({
+    required Map<String, double> from,
+    required Map<String, double> to,
     required int value,
     required String unit,
-    double? bearing,
     String? reason,
   }) =>
-      _object('reportMissingSpeedLimit', {
-        'lat': lat,
-        'lng': lng,
+      _object('reportSpeedLimitInterval', {
+        'from': from,
+        'to': to,
         'value': value,
         'unit': unit,
-        if (bearing != null) 'bearing': bearing,
+        if (reason != null) 'reason': reason,
+      });
+
+  /// Which stretch of which road two picked points name (needs the network):
+  /// `geometry` is the stretch along the road's own shape, `covered` what is
+  /// on record under it.
+  Future<Map<String, Object?>> resolveRoadInterval({
+    required Map<String, double> from,
+    required Map<String, double> to,
+  }) =>
+      _object('resolveRoadInterval', {'from': from, 'to': to});
+
+  /// The entries near a point that can be marked as wrong (needs the network).
+  Future<List<Object?>> dataDefectsNear(
+    double lat,
+    double lng, {
+    double? radiusMeters,
+  }) async =>
+      (await _call('dataDefectsNear', {
+        'lat': lat,
+        'lng': lng,
+        if (radiusMeters != null) 'radiusMeters': radiusMeters,
+      })) as List<Object?>;
+
+  /// "This entry is wrong" (`speedLimitSegment` or `staticSign`): one mark per
+  /// device and entry; enough distinct devices take it out.
+  Future<Map<String, Object?>> reportDataDefect({
+    required String targetType,
+    required String targetId,
+    String? reason,
+  }) =>
+      _object('reportDataDefect', {
+        'targetType': targetType,
+        'targetId': targetId,
         if (reason != null) 'reason': reason,
       });
 

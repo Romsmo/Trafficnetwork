@@ -10,8 +10,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 use crate::sync::{
-    Correction, CorrectionReason, CorrectionTarget, MissingSpeedLimitReport, SpeedLimitUnit,
-    WrongSpeedLimitReport,
+    Correction, CorrectionReason, CorrectionTarget, IntervalPoint, SpeedLimitIntervalReport,
+    SpeedLimitUnit, WrongSpeedLimitReport,
 };
 
 use super::client::{segment_ref, TrafficNetworkClient};
@@ -94,15 +94,51 @@ struct WrongLimitArgs {
 }
 
 #[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct MissingLimitArgs {
+struct PointArgs {
     lat: f64,
     lng: f64,
-    /// A heading along the road, either direction (0..360); the last heading given is used when absent.
-    bearing: Option<f64>,
+}
+
+impl From<PointArgs> for IntervalPoint {
+    fn from(p: PointArgs) -> Self {
+        IntervalPoint {
+            lat: p.lat,
+            lng: p.lng,
+        }
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct IntervalLimitArgs {
+    /// The two ends of the stretch, picked on the road.
+    from: PointArgs,
+    to: PointArgs,
     value: u32,
     unit: SpeedLimitUnit,
     reason: Option<CorrectionReason>,
+}
+
+#[derive(Deserialize)]
+struct ResolveIntervalArgs {
+    from: PointArgs,
+    to: PointArgs,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct DefectsNearArgs {
+    lat: f64,
+    lng: f64,
+    radius_meters: Option<f64>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct DefectArgs {
+    target_type: String,
+    target_id: String,
+    reason: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -201,16 +237,36 @@ impl TrafficNetworkClient {
                 })?;
                 to_json(proposal)
             }
-            "reportMissingSpeedLimit" => {
-                let a: MissingLimitArgs = parse(method, args)?;
-                to_json(self.report_missing_speed_limit(&MissingSpeedLimitReport {
-                    lat: a.lat,
-                    lng: a.lng,
-                    bearing_degrees: a.bearing,
+            "reportSpeedLimitInterval" => {
+                let a: IntervalLimitArgs = parse(method, args)?;
+                to_json(self.report_speed_limit_interval(&SpeedLimitIntervalReport {
+                    from: a.from.into(),
+                    to: a.to.into(),
                     value: a.value,
                     unit: a.unit,
                     reason: a.reason,
                 })?)
+            }
+            "resolveRoadInterval" => {
+                let a: ResolveIntervalArgs = parse(method, args)?;
+                to_json(
+                    self.resolve_road_interval(a.from.into(), a.to.into())
+                        .await?,
+                )
+            }
+            "dataDefectsNear" => {
+                let a: DefectsNearArgs = parse(method, args)?;
+                to_json(
+                    self.data_defects_near(a.lat, a.lng, a.radius_meters)
+                        .await?,
+                )
+            }
+            "reportDataDefect" => {
+                let a: DefectArgs = parse(method, args)?;
+                to_json(
+                    self.report_data_defect(&a.target_type, &a.target_id, a.reason.as_deref())
+                        .await?,
+                )
             }
             "lookupSpeedLimit" => {
                 let a: PositionArgs = parse(method, args)?;

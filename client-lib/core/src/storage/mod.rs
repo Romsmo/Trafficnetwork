@@ -154,8 +154,12 @@ pub enum WriteKind {
         unit: SpeedLimitUnit,
         agrees: bool,
     },
-    /// `POST /v1/speed-limit-gaps` — a limit for a road the import has none for (server 1.1.0). `gap_ref` is the
-    /// `gap:<cell>:<axis>` reference the signed vote names; the request body carries the position and direction.
+    /// `POST /v1/speed-limit-intervals` — a limit for a stretch of road named by two points on it (server 1.1.0,
+    /// `server/docs/road-network.md`). `interval_ref` is the `ivl:<lat>,<lng>:<lat>,<lng>` reference the signed vote names;
+    /// the request body carries the two points.
+    SpeedLimitInterval { interval_ref: String },
+    /// Legacy: a "no limit here" proposal by place and direction (`POST /v1/speed-limit-gaps`), which servers no longer take.
+    /// Kept only so a queue written by an earlier build still reads; the server refuses it and it is dropped.
     SpeedLimitGap { gap_ref: String },
     /// `POST /v1/hazard-reports/:id/confirmations` — "still there" or "gone".
     HazardConfirmation { report_id: String },

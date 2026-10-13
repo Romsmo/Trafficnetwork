@@ -89,7 +89,7 @@ await client.setStorageLimits({ maxBytes: 150 * 1024 * 1024 });
 In a browser the store is IndexedDB, which the browser may evict under storage pressure — set a `maxBytes` that is polite.
 
 Also new: `getReportLimits(type)` and an optional duration on `submitReport` (`api.md`, "Writes"),
-`reportMissingSpeedLimit` for a road with no limit on record, and `lookupSpeedLimit`, which says *outside the offline area*
+`reportSpeedLimitInterval` for a stretch of road named by two points (with `resolveRoadInterval` to preview it and `dataDefectsNear`/`reportDataDefect` for wrong entries), and `lookupSpeedLimit`, which says *outside the offline area*
 instead of "no limit" where nothing could be looked at.
 
 ## What a browser cannot do (or does worse) than a native build

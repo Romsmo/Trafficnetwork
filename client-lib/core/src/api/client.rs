@@ -25,8 +25,8 @@ use crate::discovery::{DiscoveryConfig, DiscoveryService};
 use crate::platform::{Clock, HttpTransport, Sleep, WsTransport};
 use crate::status::OnlineStatusService;
 use crate::storage::{PendingWrite, Store, WriteKind};
-use crate::sync::gaps::own_gap_proposal;
-use crate::sync::report_missing_speed_limit;
+use crate::sync::intervals::own_interval_proposal;
+use crate::sync::report_speed_limit_interval;
 use crate::sync::{
     bind_device_key, check_ttl, confirm_hazard_report, confirm_speed_limit_correction,
     effective_camera_policy, exchange_client_secret, expiry_ms_for, fetch_corrections,
@@ -34,8 +34,12 @@ use crate::sync::{
     register_device, report_camera_removed, report_wrong_speed_limit,
     run_realtime as run_realtime_protocol, speed_limit_at, submit_report, CameraLevel,
     CameraNotice, ClientConfig, Correction, CorrectionTarget, EffectiveCameraPolicy, FlushOutcome,
-    HazardType, MissingSpeedLimitReport, NetworkConfigPayload, ReportLimits, ReportSubmission,
-    SegmentRef, SyncEngine, TtlDecision, WrongSpeedLimitReport,
+    HazardType, NetworkConfigPayload, ReportLimits, ReportSubmission, SegmentRef,
+    SpeedLimitIntervalReport, SyncEngine, TtlDecision, WrongSpeedLimitReport,
+};
+use crate::sync::{
+    fetch_data_defects_near, report_data_defect, resolve_road_interval, DataDefect,
+    DefectReportAnswer, IntervalPoint, RoadInterval,
 };
 
 use super::error::{code, ApiError};
@@ -643,10 +647,9 @@ impl TrafficNetworkClient {
         if let Some(nearest) = nearest {
             return Ok(Some(SpeedLimitAnswer::from(nearest)));
         }
-        // No segment is close: this device's own "no limit on record here" proposal for the place, if it made one.
-        let heading = _heading.or(self.state().last_heading);
+        // No segment is close: this device's own proposal for a stretch of road that runs by here, if it made one.
         Ok(
-            own_gap_proposal(&*self.store, lat, lng, heading)?.map(|proposal| SpeedLimitAnswer {
+            own_interval_proposal(&*self.store, lat, lng)?.map(|proposal| SpeedLimitAnswer {
                 value: f64::from(proposal.value),
                 unit: proposal.unit.as_str().to_string(),
                 segment_id: proposal.segment_key.clone(),
@@ -992,24 +995,73 @@ impl TrafficNetworkClient {
         Ok(ProposalView::from(&proposal))
     }
 
-    /// "There is no speed limit on record for this road, it is X" — a value for a road the import has none for
-    /// (server 1.1.0). The position and the direction of the road name the place (`bearing_degrees`, any heading
-    /// along it; the last heading the host app gave is used when none is passed). Effective for this device at
-    /// once as its own unconfirmed proposal, sent signed on the next sync; at three distinct devices the server
-    /// makes it a stretch of road everybody gets. Fails with `roadAlreadyHasLimit` when a road with a limit is
-    /// stored right there running the same way (correct that segment instead).
-    pub fn report_missing_speed_limit(
+    /// "On this stretch of road the limit is X" — a limit for a stretch named by two points on it (server 1.1.0): for a
+    /// road the import has no limit for, or to change a limit that is wrong on part of a road. The device needs no road
+    /// data: the server finds the road that runs between the points and the stretch's own shape. Effective for this
+    /// device at once as its own unconfirmed proposal, sent signed on the next sync; at three distinct devices the
+    /// server writes the limit along the road, replacing what the import says under it. Use
+    /// [`resolve_road_interval`](Self::resolve_road_interval) first to show the visitor which stretch the two points mean.
+    pub fn report_speed_limit_interval(
         &self,
-        report: &MissingSpeedLimitReport,
+        report: &SpeedLimitIntervalReport,
     ) -> Result<ProposalView, ApiError> {
         self.check_open()?;
         let config = self.corrections_config()?;
-        let mut report = report.clone();
-        if report.bearing_degrees.is_none() {
-            report.bearing_degrees = self.state().last_heading;
-        }
-        let proposal = report_missing_speed_limit(&*self.store, &*self.clock, &config, &report)?;
+        let proposal = report_speed_limit_interval(&*self.store, &*self.clock, &config, report)?;
         Ok(ProposalView::from(&proposal))
+    }
+
+    /// Which stretch of which road two picked points name — the preview to draw (along the road's own shape) before
+    /// anybody proposes a value, with the limits on record under it and the proposals for it. Needs the network.
+    /// Fails with `noRoadFound`, `noRoadBetweenPoints`, `intervalTooShort`, `intervalTooLong` or `noRoadData`.
+    pub async fn resolve_road_interval(
+        &self,
+        from: IntervalPoint,
+        to: IntervalPoint,
+    ) -> Result<RoadInterval, ApiError> {
+        self.check_open()?;
+        if !from.is_valid() || !to.is_valid() {
+            return Err(ApiError::invalid("the position is not valid"));
+        }
+        let token = self.ensure_token().await?;
+        Ok(resolve_road_interval(&self.discovery, &token, from, to).await?)
+    }
+
+    /// The entries near a position that can be marked as wrong (speed-limit lines and signs), with how many devices
+    /// have marked each. Needs the network; `notOffered` where the server does not take such marks.
+    pub async fn data_defects_near(
+        &self,
+        lat: f64,
+        lng: f64,
+        radius_meters: Option<f64>,
+    ) -> Result<Vec<DataDefect>, ApiError> {
+        self.check_open()?;
+        check_position(lat, lng)?;
+        let radius = radius_meters.unwrap_or(30.0);
+        if !radius.is_finite() || radius <= 0.0 || radius > 100.0 {
+            return Err(ApiError::invalid("radiusMeters must be between 1 and 100"));
+        }
+        let token = self.ensure_token().await?;
+        Ok(fetch_data_defects_near(&self.discovery, &token, lat, lng, radius).await?)
+    }
+
+    /// "This entry is wrong": marks a speed-limit line or a sign (`target_type` `speedLimitSegment` or `staticSign`, the
+    /// id from [`data_defects_near`](Self::data_defects_near)). One mark per device and entry; when enough distinct
+    /// devices have marked it the server takes it out (`removed` in the answer). Needs the network.
+    pub async fn report_data_defect(
+        &self,
+        target_type: &str,
+        target_id: &str,
+        reason: Option<&str>,
+    ) -> Result<DefectReportAnswer, ApiError> {
+        self.check_open()?;
+        if target_type != "speedLimitSegment" && target_type != "staticSign" {
+            return Err(ApiError::invalid(
+                "targetType must be speedLimitSegment or staticSign",
+            ));
+        }
+        let token = self.ensure_token().await?;
+        Ok(report_data_defect(&self.discovery, &token, target_type, target_id, reason).await?)
     }
 
     /// Agrees or disagrees with a community correction. Returns the local

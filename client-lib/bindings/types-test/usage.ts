@@ -69,7 +69,14 @@ async function useAnyBinding(client: TrafficNetworkClient): Promise<void> {
   const queued = await client.submitReportWithDuration("accident", 52.52, 13.405, { ttlSeconds: asked });
   console.log(queued.localId, queued.expiresInSeconds, queued.durationHonoured);
   await client.submitReport("accident", 52.52, 13.405, undefined, asked);
-  await client.reportMissingSpeedLimit({ lat: 52.52, lng: 13.405, value: 30, unit: "kmh", bearing: 90 });
+  await client.reportSpeedLimitInterval({ from: { lat: 52.52, lng: 13.405 }, to: { lat: 52.52, lng: 13.409 }, value: 30, unit: "kmh" });
+  const stretch = await client.resolveRoadInterval({ lat: 52.52, lng: 13.405 }, { lat: 52.52, lng: 13.409 });
+  console.log(stretch.road.name, stretch.lengthM, stretch.geometry.coordinates.length, stretch.covered[0]?.speedLimit);
+  const defects = await client.dataDefectsNear(52.52, 13.405, 40);
+  if (defects[0]) {
+    const marked = await client.reportDataDefect({ targetType: defects[0].targetType, targetId: defects[0].targetId, reason: "not_on_a_road" });
+    console.log(marked.reports, marked.threshold, marked.removed);
+  }
   const lookup = await client.lookupSpeedLimit(52.52, 13.405, 90);
   if (lookup.status === "found") console.log(lookup.value, lookup.source);
   else if (lookup.status === "outsideOfflineArea") console.log("outside the offline area");

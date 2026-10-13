@@ -25,6 +25,7 @@ use crate::storage::{
     LocalCorrectionProposal, PendingWrite, ProposalState, Store, StoreError, WriteKind,
 };
 
+use super::intervals::IntervalPoint;
 use super::matching::nearest_speed_limit;
 use super::types::{
     ClientConfig, CommunityCorrectionsConfig, CorrectionReason, Geometry, SpeedLimitSegment,
@@ -54,16 +55,11 @@ pub enum CorrectionError {
     /// The proposed value is the imported one. To dispute an existing
     /// correction, confirm it with `agrees: false` instead.
     NoChange,
-    /// A road with a limit on record runs here in this direction: the road is not missing, correct that
-    /// segment instead (`reportWrongSpeedLimit` with this id).
-    RoadAlreadyHasLimit {
-        segment_id: String,
-        speed_limit: f64,
+    /// The two points are closer together than a stretch can be.
+    IntervalTooShort {
+        min_meters: u32,
     },
-    /// "No limit here" needs the direction of the road (a heading along it, either way) to place the
-    /// stretch it is about; none was given and none is known.
-    BearingRequired,
-    /// The position is not a position.
+    /// A position is not a position.
     InvalidPosition,
     Store(String),
 }
@@ -92,16 +88,9 @@ impl std::fmt::Display for CorrectionError {
                 write!(f, "value must be a multiple of {step}")
             }
             CorrectionError::NoChange => write!(f, "the value equals the imported one"),
-            CorrectionError::RoadAlreadyHasLimit {
-                segment_id,
-                speed_limit,
-            } => write!(
+            CorrectionError::IntervalTooShort { min_meters } => write!(
                 f,
-                "a road with a limit of {speed_limit} is on record here (segment {segment_id}); correct that segment instead"
-            ),
-            CorrectionError::BearingRequired => write!(
-                f,
-                "the direction of the road is needed: give a bearing, or a position update with a heading first"
+                "the two points are too close together: a stretch is at least {min_meters} m"
             ),
             CorrectionError::InvalidPosition => write!(f, "the position is not valid"),
             CorrectionError::Store(msg) => write!(f, "storage error: {msg}"),
@@ -310,14 +299,12 @@ pub fn report_wrong_speed_limit(
     Ok(proposal)
 }
 
-/// "There is no speed limit on record for this road" (server 1.1.0, D13): a value for a road the import has
-/// none for, named by position and direction.
+/// A speed limit for a stretch of road, named by two points on it (server 1.1.0, `server/docs/road-network.md`). The
+/// device needs no road data: the server finds the road that runs between the points and the stretch's own shape.
 #[derive(Debug, Clone, PartialEq)]
-pub struct MissingSpeedLimitReport {
-    pub lat: f64,
-    pub lng: f64,
-    /// A heading along the road, either direction of travel (0..360).
-    pub bearing_degrees: Option<f64>,
+pub struct SpeedLimitIntervalReport {
+    pub from: IntervalPoint,
+    pub to: IntervalPoint,
     pub value: u32,
     pub unit: SpeedLimitUnit,
     pub reason: Option<CorrectionReason>,
@@ -347,52 +334,38 @@ fn validate_range_and_step(
     Ok(())
 }
 
-/// Queues "no speed limit is recorded here, it is X" and records it as this device's own
-/// [`LocalCorrectionProposal`] — shown for this place at once (as the device's own, unconfirmed), sent on the next
-/// sync with the device signature. A device supports one value per place: a newer report for the same cell and
-/// direction replaces a still-queued older one.
+/// Queues "the limit on this stretch of road is X" and records it as this device's own [`LocalCorrectionProposal`] -
+/// shown for that stretch at once (as the device's own, unconfirmed), sent on the next sync with the device signature. A
+/// device supports one value per stretch: a newer report for the same two points replaces a still-queued older one.
 ///
-/// Refused locally, before anything is queued, when the stored data already has a road with a limit there
-/// running the same way (the server would refuse it too, and the host should correct that segment).
-pub fn report_missing_speed_limit(
+/// Nothing is looked up locally: the two points are the whole proposal. Which road they are on, what is there already and
+/// whether the value changes anything is the server's to say (`POST /v1/roads/resolve` shows it beforehand, see
+/// [`super::roads`]).
+pub fn report_speed_limit_interval(
     store: &dyn Store,
     clock: &dyn Clock,
     config: &ClientConfig,
-    report: &MissingSpeedLimitReport,
+    report: &SpeedLimitIntervalReport,
 ) -> Result<LocalCorrectionProposal, CorrectionError> {
     let rules = config
         .community_corrections
         .filter(|c| c.enabled)
         .ok_or(CorrectionError::NotOffered)?;
-    let bearing = report
-        .bearing_degrees
-        .ok_or(CorrectionError::BearingRequired)?;
-    let place = super::gaps::place_of(report.lat, report.lng, bearing)
+    let reference = super::intervals::interval_ref(report.from, report.to)
         .ok_or(CorrectionError::InvalidPosition)?;
     validate_range_and_step(&rules, report.value, report.unit)?;
-
-    let nearby = store
-        .speed_limit_segments_near(
-            report.lat,
-            report.lng,
-            super::gaps::ROAD_ALREADY_THERE_RADIUS_METERS * 2.0,
-        )
-        .map_err(store_error)?;
-    if let Some(road) =
-        super::gaps::road_already_there(&nearby, report.lat, report.lng, place.axis_degrees())
+    if super::intervals::straight_meters(report.from, report.to)
+        < super::intervals::MIN_INTERVAL_METERS
     {
-        return Err(CorrectionError::RoadAlreadyHasLimit {
-            segment_id: road.id,
-            speed_limit: road.speed_limit,
+        return Err(CorrectionError::IntervalTooShort {
+            min_meters: super::intervals::MIN_INTERVAL_METERS as u32,
         });
     }
 
-    let reference = place.reference();
     let now = clock.now_unix_ms();
     let mut body = serde_json::json!({
-        "lat": report.lat,
-        "lng": report.lng,
-        "bearingDegrees": bearing,
+        "from": { "lat": report.from.lat, "lng": report.from.lng },
+        "to": { "lat": report.to.lat, "lng": report.to.lng },
         "value": report.value,
         "unit": report.unit,
     });
@@ -402,11 +375,11 @@ pub fn report_missing_speed_limit(
 
     drop_queued_writes(
         store,
-        |kind| matches!(kind, WriteKind::SpeedLimitGap { gap_ref } if gap_ref == &reference),
+        |kind| matches!(kind, WriteKind::SpeedLimitInterval { interval_ref } if interval_ref == &reference),
     )?;
 
     let id = local_write_id(
-        &serde_json::json!({ "gap": reference, "request": body }),
+        &serde_json::json!({ "interval": reference, "request": body }),
         now,
     );
     store
@@ -415,8 +388,8 @@ pub fn report_missing_speed_limit(
             request_body: body,
             created_at_unix_ms: now,
             attempts: 0,
-            kind: WriteKind::SpeedLimitGap {
-                gap_ref: reference.clone(),
+            kind: WriteKind::SpeedLimitInterval {
+                interval_ref: reference.clone(),
             },
         })
         .map_err(store_error)?;
@@ -710,7 +683,10 @@ fn vote_payload(
             let vote = if *agrees { "support" } else { "deny" };
             (vote, segment_key.clone(), *value, *unit, None)
         }
-        WriteKind::SpeedLimitGap { gap_ref } => {
+        WriteKind::SpeedLimitInterval {
+            interval_ref: gap_ref,
+        }
+        | WriteKind::SpeedLimitGap { gap_ref } => {
             let unit_json = item.request_body.get("unit")?.clone();
             let unit = serde_json::from_value::<SpeedLimitUnit>(unit_json).ok()?;
             let reason = item
@@ -815,6 +791,17 @@ async fn send_to_server(
                 _ => Ok(first),
             }
         }
+        WriteKind::SpeedLimitInterval { .. } => {
+            post(
+                discovery,
+                server,
+                bearer_token,
+                "/v1/speed-limit-intervals",
+                body,
+            )
+            .await
+        }
+        // Legacy (see `WriteKind`): servers no longer have this route; the refusal drops the write.
         WriteKind::SpeedLimitGap { .. } => {
             post(
                 discovery,
@@ -879,7 +866,10 @@ fn record_accepted(
 ) -> Result<(), WriteBufferError> {
     let segment_key = match &item.kind {
         WriteKind::SpeedLimitCorrection { segment_key, .. } => segment_key,
-        WriteKind::SpeedLimitGap { gap_ref } => gap_ref,
+        WriteKind::SpeedLimitInterval {
+            interval_ref: gap_ref,
+        }
+        | WriteKind::SpeedLimitGap { gap_ref } => gap_ref,
         _ => return Ok(()),
     };
     let proposals = store.local_proposals().map_err(WriteBufferError::Store)?;
@@ -912,7 +902,10 @@ fn record_accepted(
 fn drop_rejected_proposal(store: &dyn Store, item: &PendingWrite) -> Result<(), WriteBufferError> {
     let segment_key = match &item.kind {
         WriteKind::SpeedLimitCorrection { segment_key, .. } => segment_key,
-        WriteKind::SpeedLimitGap { gap_ref } => gap_ref,
+        WriteKind::SpeedLimitInterval {
+            interval_ref: gap_ref,
+        }
+        | WriteKind::SpeedLimitGap { gap_ref } => gap_ref,
         _ => return Ok(()),
     };
     let proposals = store.local_proposals().map_err(WriteBufferError::Store)?;

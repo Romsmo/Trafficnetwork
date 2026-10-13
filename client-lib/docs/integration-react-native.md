@@ -125,7 +125,7 @@ await client.call("setConnectionMetered", { metered: false });
 ```
 
 Also new: `getReportLimits(type)` and an optional duration on `submitReport` (`api.md`, "Writes"),
-`reportMissingSpeedLimit` for a road with no limit on record, and `lookupSpeedLimit`, which says *outside the offline area*
+`reportSpeedLimitInterval` for a stretch of road named by two points (with `resolveRoadInterval` to preview it and `dataDefectsNear`/`reportDataDefect` for wrong entries), and `lookupSpeedLimit`, which says *outside the offline area*
 instead of "no limit" where nothing could be looked at.
 
 ## How it behaves

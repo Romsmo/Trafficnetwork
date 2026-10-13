@@ -506,8 +506,49 @@ function handleInstance(instance, req, res, path, query, body) {
       }
       return json(res, 404, { error: { code: "NOT_FOUND", message: "no speed limit here" } });
     }
-    case "POST /v1/speed-limit-gaps":
-      return json(res, 201, { correction: { id: "gap-1", state: "open", confirmations: 1 } });
+    case "POST /v1/speed-limit-intervals":
+      return json(res, 201, { correction: { id: "ivl-1", status: "proposed", confirmations: 1 }, recorded: true, merged: false, segment: null });
+    case "POST /v1/roads/resolve": {
+      const from = body?.from;
+      const to = body?.to;
+      if (!from || !to) return json(res, 400, { error: { code: "VALIDATION_ERROR", message: "from and to" } });
+      // points in the far south are on no common road
+      if (from.lat < 40) return json(res, 422, { error: { code: "NO_ROAD_BETWEEN_POINTS", message: "no road between the points" } });
+      return json(res, 200, {
+        ref: "ivl:1,1:2,2",
+        segmentKey: "0123456789abcdef0123456789abcdef",
+        geometry: {
+          type: "LineString",
+          coordinates: [
+            [from.lng, from.lat],
+            [(from.lng + to.lng) / 2, (from.lat + to.lat) / 2 + 0.0002],
+            [to.lng, to.lat],
+          ],
+        },
+        lengthM: 300,
+        road: { name: "Feldweg", ref: null, class: "track" },
+        covered: [],
+        proposals: [],
+      });
+    }
+    case "GET /v1/data-defects/near":
+      return json(res, 200, {
+        items: [
+          {
+            targetType: "speedLimitSegment",
+            targetId: "defect-seg-1",
+            distanceMeters: 7,
+            speedLimit: 51,
+            speedLimitUnit: "kmh",
+            source: "osm",
+            geometry: { type: "LineString", coordinates: [[13.2, 52.3], [13.201, 52.3]] },
+            reports: 1,
+            threshold: 3,
+          },
+        ],
+      });
+    case "POST /v1/data-defects":
+      return json(res, 201, { recorded: true, reports: 2, threshold: 3, removed: false });
     case "GET /v1/snapshot":
       return json(res, 200, {
         snapshotSequence: instance.sequence,
