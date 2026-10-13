@@ -10,12 +10,18 @@ import { StateStore } from "./state/store.js";
 import { verifyRun } from "./verify/verify.js";
 import { collectSourceQuality } from "./report/quality.js";
 import { runRoadworksCommand } from "./roadworks-command.js";
+import { runRoadsCommand } from "./roads-command.js";
 import { BULK_IMPORT_KINDS, type BulkImportKind } from "./api/types.js";
 
 /**
  * Usage:
  *   npm run ingest -- --region bayern [--dry-run] [--fresh] [--batch-size N]
  *   npm run ingest -- --roadworks [--feed id[,id…]] [--dry-run]
+ *   npm run ingest -- --roads --region bayern [--dry-run]
+ *
+ * --roads       the road network of the region's OSM extract (every drivable way, `docs/roads.md`): lets the server tie signs,
+ *               cameras and community limits to roads and find the road two picked points lie on. A run of its own, idempotent
+ *               (an upsert per way), to do once per region and again after a new extract
  *
  * --roadworks   one poll pass over the enabled roadworks feeds (config/roadworks-feeds.json), then exit — run it periodically
  *               from cron / a systemd timer / the Windows task scheduler; --feed limits it to some feeds, --dry-run reads and
@@ -32,9 +38,10 @@ import { BULK_IMPORT_KINDS, type BulkImportKind } from "./api/types.js";
  * --section     comma-separated section ids: import only those (regions with "sections" in
  *               config/regions.json); the run is then not marked complete
  */
-function parseArgs(argv: string[]): { region?: string; roadworks: boolean; onlyFeeds?: string[]; dryRun: boolean; fresh: boolean; allowNonEmpty: boolean; onlySections?: string[]; batchSizeOverride?: number } {
+function parseArgs(argv: string[]): { region?: string; roadworks: boolean; roads: boolean; onlyFeeds?: string[]; dryRun: boolean; fresh: boolean; allowNonEmpty: boolean; onlySections?: string[]; batchSizeOverride?: number } {
   let region: string | undefined;
   let roadworks = false;
+  let roads = false;
   let onlyFeeds: string[] | undefined;
   let dryRun = false;
   let fresh = false;
@@ -47,6 +54,8 @@ function parseArgs(argv: string[]): { region?: string; roadworks: boolean; onlyF
       region = argv[++i];
     } else if (argv[i] === "--roadworks") {
       roadworks = true;
+    } else if (argv[i] === "--roads") {
+      roads = true;
     } else if (argv[i] === "--feed") {
       onlyFeeds = (argv[++i] ?? "").split(",").map((f) => f.trim()).filter((f) => f.length > 0);
       if (onlyFeeds.length === 0) throw new Error("--feed needs at least one feed id");
@@ -69,11 +78,13 @@ function parseArgs(argv: string[]): { region?: string; roadworks: boolean; onlyF
 
   if (!region && !roadworks) throw new Error("--region is required (see ingestion/config/regions.json for valid ids), or use --roadworks");
   if (region && roadworks) throw new Error("--region and --roadworks are separate runs — pick one");
-  return { region, roadworks, onlyFeeds, dryRun, fresh, allowNonEmpty, onlySections, batchSizeOverride };
+  if (roads && roadworks) throw new Error("--roads and --roadworks are separate runs — pick one");
+  if (roads && !region) throw new Error("--roads needs --region (the extract whose roads are imported)");
+  return { region, roadworks, roads, onlyFeeds, dryRun, fresh, allowNonEmpty, onlySections, batchSizeOverride };
 }
 
 async function main() {
-  const { region: regionId, roadworks, onlyFeeds, dryRun, fresh, allowNonEmpty, onlySections, batchSizeOverride } = parseArgs(process.argv.slice(2));
+  const { region: regionId, roadworks, roads, onlyFeeds, dryRun, fresh, allowNonEmpty, onlySections, batchSizeOverride } = parseArgs(process.argv.slice(2));
 
   const env = loadEnv();
   const logger = createLogger(env);
@@ -84,6 +95,10 @@ async function main() {
   }
   if (!regionId) throw new Error("--region is required");
   const region = resolveRegion(loadRegions(env.REGIONS_CONFIG_PATH), regionId);
+  if (roads) {
+    await runRoadsCommand(env, logger, { regionId, region, dryRun });
+    return;
+  }
   const sources = resolveSources(env);
   const batchSize = batchSizeOverride ?? env.BATCH_SIZE;
 

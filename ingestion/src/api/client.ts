@@ -8,6 +8,7 @@ import {
   type BulkImportResponse,
   type BulkImportRow,
   type NearbySpeedLimitSegment,
+  type RoadWayRow,
   type SeedReportsRequest,
   type SeedReportsResponse,
   type StaticDataManifest,
@@ -102,6 +103,34 @@ export class ApiClient {
       throw new ApiError(`Bulk import failed: ${res.status} ${body?.error?.message ?? res.statusText}`, res.status, body);
     }
     return (await res.json()) as BulkImportResponse;
+  }
+
+  /** Upserts one batch of drivable ways (the road network). An upsert per OSM way id, so a retry is harmless. */
+  async postRoadWays(rows: RoadWayRow[]): Promise<{ inserted: number }> {
+    const res = await this.authedFetch("/v1/bulk-import/roads", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ rows }),
+    });
+    if (!res.ok) {
+      const body = await safeJson<ApiErrorBody>(res);
+      throw new ApiError(`Road import failed: ${res.status} ${body?.error?.message ?? res.statusText}`, res.status, body);
+    }
+    return (await res.json()) as { inserted: number };
+  }
+
+  /** Tells the server which areas (H3 resolution 8) the imported road network holds completely. */
+  async postRoadCoverage(tiles: string[]): Promise<{ covered: number }> {
+    const res = await this.authedFetch("/v1/bulk-import/road-coverage", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ tiles }),
+    });
+    if (!res.ok) {
+      const body = await safeJson<ApiErrorBody>(res);
+      throw new ApiError(`Road coverage failed: ${res.status} ${body?.error?.message ?? res.statusText}`, res.status, body);
+    }
+    return (await res.json()) as { covered: number };
   }
 
   /** Upserts one batch of seed reports (roadworks). Idempotent, so the generic retry-on-5xx is safe here. */

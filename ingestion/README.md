@@ -10,6 +10,7 @@ Optional bulk-import client that seeds a Trafficnetwork server's database from O
 **Europe (add-on A, branch `phase3/europe-basemap`)**: the same tool imports the whole continent from one pinned Geofabrik extract — resumable Range download, a narrow tag filter, geographic sections with their own progress markers, streaming state with a compact dedup set, client-side validation with bisect-and-quarantine of rejected rows, and a "target must be empty" guard. Feasibility, measurements and decisions: [`docs/europe-feasibility.md`](docs/europe-feasibility.md); procedure: [`docs/europe-runbook.md`](docs/europe-runbook.md); a ready-made runner image is the [`Dockerfile`](Dockerfile).
 
 **Source catalogue (add-on Q, branch `phase3/source-catalogue`)**: three more kinds of data, each behind its own switch and each with its license evidence in [`docs/sources.md`](docs/sources.md):
+- **Road network** — every drivable way of an extract and the areas it holds completely, so the server can tie signs, cameras and community limits to roads and find the road two picked points lie on (`npm run ingest -- --roads --region bayern`; a run of its own, idempotent). Operation and limits: [`docs/roads.md`](docs/roads.md).
 - **Roadworks** — time-limited `construction` reports from a generic DATEX II reader (v2/v3) and the Autobahn GmbH JSON API, run *periodically* (one poll pass per invocation; `npm run ingest -- --roadworks`). France is on, the Netherlands and Germany ship off (`ungeklärt`). Operation, cost of a permanent run and safety rules: [`docs/roadworks.md`](docs/roadworks.md).
 - **Official traffic signs** — NVDB Norway (`--region norway`, license NLOD), with the national sign codes kept verbatim behind a country prefix and a per-country mapping table in [`config/sign-mappings/`](config/sign-mappings/).
 - **Speed cameras and signs from OSM** are part of the Europe import above; the camera namespace stays closed.
@@ -43,6 +44,7 @@ npm run ingest -- --region bayern --batch-size 500
 npm run ingest -- --region europe --section x10_y40   # only some sections (regions with "sections"); the run is then not marked complete
 npm run ingest -- --region bayern --allow-non-empty   # deliberately import into a server that already holds data (see below)
 npm run ingest -- --roadworks [--feed fr-tipi-rrn] [--dry-run]   # one roadworks poll pass, then exit — schedule it (docs/roadworks.md)
+npm run ingest -- --roads --region bayern [--dry-run]            # the road network of the extract (docs/roads.md)
 npm run ingest -- --region norway --allow-non-empty   # NVDB sign plates; set OSM_ENABLED=false NVDB_NO_ENABLED=true (docs/sources.md)
 npm run report:quality                        # per-source report: taken over / discarded / merged
 ```
