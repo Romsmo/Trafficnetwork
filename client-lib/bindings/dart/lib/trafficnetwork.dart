@@ -297,7 +297,7 @@ class TrafficNetworkClient {
     double lng, {
     double? radiusMeters,
   }) async =>
-      (await _call('dataDefectsNear', {
+      (await call('dataDefectsNear', {
         'lat': lat,
         'lng': lng,
         if (radiusMeters != null) 'radiusMeters': radiusMeters,
