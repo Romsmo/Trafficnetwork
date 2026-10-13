@@ -2,7 +2,7 @@
 
 Versionierung je Paket, kein gemeinsames Release-Datum oder gemeinsame Versionsnummer: `server/` (inklusive der eingebauten Weboberfläche), `ingestion/` und `client-lib/` folgen SemVer eigenständig.
 
-## server v1.1.0 — 2026-10-11
+## server v1.1.0 — 2026-10-13
 
 Rein additiv: `apiVersion`, bestehende Endpunkte und Ergebnisformate ändern sich nicht; ältere Clients und Knoten funktionieren weiter. Zwei additive Migrationen (`0012`, `0013`: neue Tabellen und Spalten mit Vorgabewerten, keine Tabelle wird umgeschrieben).
 
@@ -32,7 +32,7 @@ Rein additiv: `apiVersion`, bestehende Endpunkte und Ergebnisformate ändern sic
 - **Texte berichtigt:** die Datenschutz-Kurzfassung sagte, eine Meldung werde nur „für die Dauer ihrer Gültigkeit“ gespeichert (sie bleibt noch kurz, Standard 3 Tage); die Quellenangabe nannte nur OpenStreetMap (jetzt mit den Quellen der Baustellen); der Datenschutz-Link zeigte auf eine Datei im (privaten) Repository.
 - **Belegt als Test (`e2e/compliance.spec.ts`, 44 Tests):** Fußzeile auf jeder Seite; Impressum zeigt genau die konfigurierten Angaben bzw. die Warnung; nur der Kachelserver wird je Seite kontaktiert; Speicher-Inventur (keine Cookies, nur drei `localStorage`-Schlüssel); axe WCAG 2.2 AA in Hell und Dunkel auf allen Seiten und den neuen Zuständen; Tastaturdurchlauf mit sichtbarem Fokus; Reflow bei 320 px und 200 %. Prüfbericht mit Inventuren und offenen Rechtsfragen: [`docs/web-compliance.md`](docs/web-compliance.md). **Nicht belegt:** Screenreader-Test mit echten Geräten; jede rechtliche Bewertung.
 
-## ingestion v0.3.0 — 2026-10-11
+## ingestion v0.3.0 — 2026-10-13
 
 Baustellen **einmal jetzt importieren, Wiederholung manuell** (Betriebsentscheidung des Betreibers) — kein Hintergrunddienst, kein Zeitplaner im Repo. Der Anbinder ist idempotent, ein späterer periodischer Lauf ist nur eine Konfiguration.
 
@@ -43,7 +43,7 @@ Baustellen **einmal jetzt importieren, Wiederholung manuell** (Betriebsentscheid
 - **Qualitätsbericht** je Quelle gruppiert: andere Satztypen / gerade nicht in Kraft / nicht nutzbar; dazu `endCapped` des Servers (Enddatum auf `SEED_REPORT_MAX_END_DAYS` begrenzt).
 - **Belegt:** 292 Unit-Tests, Integrationstest `roadworks-cycle` gegen einen echten Server (8 Tests: Erstlauf ohne Doppelte, zweiter Lauf ohne Neues, abgeschnittener/fehlender Feed beendet nichts, verschwundene Baustelle endet, Kill-Switch); `--dry-run` gegen die echten Feeds am 2026-10-11: FR 98 von 607, LU 22 von 34, NL 4.152 von 62.604 Sätzen in Kraft. **Nicht belegt:** ein Lauf gegen den produktiven Server.
 
-## client-lib v1.2.0 — 2026-10-11
+## client-lib v1.2.0 — 2026-10-13
 
 Rein additiv auf der Aufrufseite: `apiVersion` bleibt `1`, bestehende Aufrufe und Ergebnisformate ändern sich nicht. **Eine Verhaltensänderung:** das Standardverhalten der Offline-Daten ist jetzt „automatisch" (siehe unten) — ein Client, der nie eine Position nennt, lädt keine Statikdaten mehr. Wer wie bisher alles will: `setOfflineRegions({ mode: "all" })`.
 
