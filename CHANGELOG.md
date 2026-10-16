@@ -2,6 +2,15 @@
 
 Versionierung je Paket, kein gemeinsames Release-Datum oder gemeinsame Versionsnummer: `server/` (inklusive der eingebauten Weboberfläche), `ingestion/` und `client-lib/` folgen SemVer eigenständig.
 
+## server v1.2.0 — 2026-10-16
+
+Rein additiv: bestehende Endpunkte und Ergebnisformate ändern sich nicht; ältere Clients und Knoten funktionieren weiter. Keine Datenbankmigration.
+
+- **Ortssuche auf der Karte:** ein Suchfeld wie in einer Navi-App (oben links auf der Karte). Ort oder Adresse eintippen, Enter (oder Lupe), einen Treffer wählen — die Karte fährt hin und setzt eine Markierung mit dem Namen; der Treffer-Rahmen bestimmt den Ausschnitt. Bedienbar mit Tastatur (Enter sucht, Pfeiltasten wählen, Esc schließt), auf dem Telefon in voller Breite neben den runden Schaltflächen, Deutsch und Englisch, in Hell und Dunkel; Meldungen in Worten (zu kurz, nichts gefunden, Dienst nicht erreichbar, zu viele Anfragen).
+- **Der Knoten fragt, nicht der Browser:** neuer Endpunkt `GET /v1/places/search?q=&lat=&lng=&lang=` (für jeden Client offen, für Web-Sitzungen als „schwerer Lesezugriff“ begrenzt). Der Knoten fragt einen Nominatim-kompatiblen Dienst (`PLACE_SEARCH_URL`, Standard `nominatim.openstreetmap.org`, `none` = keine Ortssuche); die Sicherheitsrichtlinie der Seite bleibt, der Dienst sieht keine Besucheradresse. Er erfährt den **Suchbegriff** (kann eine Adresse sein) und einen auf etwa 10 km gerundeten Kartenausschnitt als weiche Vorliebe. Nutzungsrichtlinie des öffentlichen Dienstes eingehalten: höchstens eine Anfrage je Sekunde (Warteschlange), erkennbarer User-Agent, zwischengespeicherte Antworten, **keine Suche beim Tippen**. Begriff und Antwort liegen nur im Arbeitsspeicher (`PLACE_SEARCH_CACHE_SECONDS`), nicht in der Datenbank und nicht im Protokoll; Antwort `Cache-Control: no-store`. Datenschutzseite, Über-Seite, `docs/privacy.md` und `docs/web-compliance.md` nennen den Dienst.
+- Neu in `GET /v1/config`: `placeSearch { enabled }`; in `/web-config.json`: `placeSearchHost`. Neue Einstellungen `PLACE_SEARCH_URL`, `_TIMEOUT_MS`, `_MIN_INTERVAL_MS`, `_CACHE_SECONDS` (`.env.example`, `docker-compose.yml`). Doku: [`server/docs/place-search.md`](server/docs/place-search.md).
+- **Belegt:** Unit-Tests (Antwort lesen, Höflichkeit: Takt, Zwischenspeicher, Fehler), Integrationstest gegen einen lokalen Geocoder (Web-Sitzung, Zwischenspeicher, 400/401/502/429, Konfiguration, Abschalten), 8 Playwright-Tests (Suchen, Tastatur, Meldungen, Leeren, Sprache, Tippen auf die Karte, Knoten ohne Dienst, axe hell/dunkel, Telefon). **Nicht belegt:** der echte öffentliche Dienst unter Last; Qualität der Treffer für Hausnummern (liegt an den OpenStreetMap-Daten).
+
 ## server v1.1.0 — 2026-10-13
 
 Rein additiv: `apiVersion`, bestehende Endpunkte und Ergebnisformate ändern sich nicht; ältere Clients und Knoten funktionieren weiter. Zwei additive Migrationen (`0012`, `0013`: neue Tabellen und Spalten mit Vorgabewerten, keine Tabelle wird umgeschrieben).

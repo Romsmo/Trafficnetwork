@@ -13,6 +13,7 @@ import { LimitDetail } from "./limit-detail.js";
 import { LimitsLayer, limitsStateText } from "./limits-layer.js";
 import { LiveConnection } from "./live.js";
 import { LocateController } from "./location.js";
+import { PlaceSearch } from "./place-search.js";
 import { initialSelection, loadFilterPrefs, markNoticeSeen, noticeSeen, saveFilterPref } from "./prefs.js";
 import { describeSubmitFailure, ReportDialog } from "./report-dialog.js";
 import { BottomSheet } from "./sheet.js";
@@ -403,6 +404,42 @@ map.on("click", (event) => {
   openLimitAt(event.latlng);
 });
 $("query-center").addEventListener("click", () => openLimitAt(map.getCenter()));
+
+// ---- place search ----------------------------------------------------------------------------------------------
+// Only where the node has a place service (web-config.json: placeSearchHost); the node asks it, never this page (docs/place-search.md).
+let placeMarker = null;
+function removePlaceMarker() {
+  placeMarker?.remove();
+  placeMarker = null;
+}
+if (config.placeSearchHost) {
+  const form = $("place-search");
+  form.hidden = false;
+  new PlaceSearch({
+    api,
+    form,
+    getNear: () => map.getCenter(),
+    onClear: removePlaceMarker,
+    onSelect: (place) => {
+      removePlaceMarker();
+      placeMarker = L.marker([place.lat, place.lng], {
+        icon: L.divIcon({ className: "place-icon", html: '<span class="place-pin"></span>', iconSize: [32, 38], iconAnchor: [16, 36] }),
+        title: place.label,
+        alt: place.label,
+        keyboard: false,
+      })
+        .bindTooltip(place.name, { permanent: true, direction: "right", offset: [14, -18], className: "place-label" })
+        .addTo(map);
+      if (place.bbox) {
+        const [west, south, east, north] = place.bbox;
+        map.fitBounds([[south, west], [north, east]], { maxZoom: 17, padding: [40, 40] });
+      } else {
+        map.setView([place.lat, place.lng], Math.max(map.getZoom(), 16));
+      }
+      $("map-status").textContent = t("place.shown", { name: place.name });
+    },
+  });
+}
 
 // ---- filters, layer toggle, list --------------------------------------------------------------------------------
 function renderFilters() {

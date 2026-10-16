@@ -28,6 +28,7 @@ import { registerFederationRoutes } from "./modules/federation/routes.js";
 import { registerSpeedLimitCorrectionRoutes } from "./modules/speed-limit-corrections/routes.js";
 import { registerRoadRoutes } from "./modules/roads/routes.js";
 import { registerDefectRoutes } from "./modules/defects/routes.js";
+import { registerPlaceRoutes } from "./modules/places/routes.js";
 import { syncCorrectionsOverlaySwitch } from "./modules/speed-limit-corrections/switch.js";
 import { OnlineTracker } from "./modules/online/tracker.js";
 import { registerOnlineModule } from "./modules/online/plugin.js";
@@ -167,6 +168,10 @@ export async function buildApp(deps: AppDependencies): Promise<FastifyInstance> 
   }
   // The road network (docs/road-network.md): picked points resolved to a road; entries visitors mark as wrong.
   await registerRoadRoutes(app);
+  // Place search for the map page (docs/place-search.md); off with PLACE_SEARCH_URL=none.
+  if (deps.env.PLACE_SEARCH_URL !== "") {
+    await registerPlaceRoutes(app);
+  }
   if (deps.env.DEFECT_REPORTS_ENABLED) {
     await registerDefectRoutes(app);
   }

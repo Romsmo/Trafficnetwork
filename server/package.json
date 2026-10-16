@@ -1,6 +1,6 @@
 {
   "name": "@trafficnetwork/server",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "private": true,
   "type": "module",
   "description": "Relay/moderator server for the Trafficnetwork local-first traffic data network, including the built-in web UI.",

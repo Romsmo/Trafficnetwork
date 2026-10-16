@@ -52,6 +52,10 @@ The Docker image contains the UI (`server/web` is copied into it); `docker-compo
   **grey** over the road colours, with the road's name, its length and what is recorded under it. Then value, unit and reason
   as before; the proposal names the two points (`POST /v1/speed-limit-intervals`). Where the node finds no road or no road
   between the points, the page says which (`NO_ROAD_*`). Open proposals for that exact stretch can be confirmed or denied.
+* **Place search** — a search bar at the top left of the map, like a navigation app's: type a place or an address, press Enter, pick
+  a hit, and the map goes there and marks it with a pin. The node asks a place service for the page (`PLACE_SEARCH_URL`); the search
+  starts when the visitor asks for it, never while typing. Absent on a node with `PLACE_SEARCH_URL=none`. See
+  [`place-search.md`](place-search.md).
 * **Report an entry as wrong** — "Fehlerhaften Eintrag melden": lists the speed-limit lines and signs near the tapped spot
   with "n von 3 gemeldet", shows the chosen one in red on the map, and marks it (`POST /v1/data-defects`). Enough other devices
   confirming it remove it for everybody (`road-network.md`).
@@ -257,7 +261,9 @@ coordinates and no client addresses (`LOG_PRIVACY_MODE`; the About page tells vi
 The visitor's IP address is held in memory for the limits and never written to the database. A report stores only its spot,
 type and times. Where a limit for a stretch needs roads the node does not have, **the node** (not the browser) may ask the
 road service named by `ROAD_LOOKUP_URL` for the roads of that area - the privacy page says so and names the host; `none`
-turns it off. A mark "this entry is wrong" stores which entry and the pseudonymous session identifier, no coordinates. See [`docs/privacy.md`](../../docs/privacy.md) for the privacy notice draft (it is not legal advice; operators
+turns it off. A mark "this entry is wrong" stores which entry and the pseudonymous session identifier, no coordinates. A place search sends its
+term (which can be an address) and the rounded map area from **the node** to the service named by `PLACE_SEARCH_URL` - named on the
+privacy page - and is kept in the node's memory only, not in the database or the log. See [`docs/privacy.md`](../../docs/privacy.md) for the privacy notice draft (it is not legal advice; operators
 remain responsible for their own notice).
 
 ## Performance

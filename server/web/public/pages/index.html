@@ -20,6 +20,20 @@
   <section id="map-panel">
     <div id="map"></div>
     <div class="map-overlay">
+      <form id="place-search" class="place-search" role="search" hidden>
+        <label for="place-q" class="visually-hidden" data-i18n="place.label">Ort suchen</label>
+        <input id="place-q" type="search" name="q" autocomplete="off" autocapitalize="off" spellcheck="false" enterkeyhint="search" maxlength="120" data-i18n-attr="placeholder:place.placeholder">
+        <button type="button" class="icon" data-place-clear hidden data-i18n-attr="aria-label:place.clear;title:place.clear">
+          <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" focusable="false"><path class="icon-line" d="M6 6l12 12M18 6 6 18"/></svg>
+        </button>
+        <button type="submit" class="icon" data-i18n-attr="aria-label:place.go;title:place.go">
+          <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" focusable="false"><circle class="icon-line" cx="10.5" cy="10.5" r="6.5"/><path class="icon-line" d="m15.5 15.5 5 5"/></svg>
+        </button>
+        <div id="place-panel" class="place-panel" data-place-panel hidden>
+          <p class="hint" data-place-status role="status" aria-live="polite"></p>
+          <ul class="place-results" data-place-results data-i18n-attr="aria-label:place.results"></ul>
+        </div>
+      </form>
       <span id="live-chip" class="chip bad"></span>
       <span id="area-chip" class="chip" hidden></span>
       <span id="pick-chip" class="chip" hidden></span>
