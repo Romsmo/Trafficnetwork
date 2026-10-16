@@ -250,6 +250,19 @@ Design and reasons: [`road-network.md`](road-network.md). What an operator decid
   (nothing new is tied or hidden; what was hidden stays), `ROAD_LOOKUP_URL=none`.
 * **Migration `0013`** is additive (new tables, nullable/defaulted columns): no table is rewritten.
 
+## Place search (server 1.2.0)
+
+The map page's search bar ([`place-search.md`](place-search.md)) asks a Nominatim-compatible service **from the node**:
+
+* `PLACE_SEARCH_URL` empty = the public instance of OpenStreetMap (`nominatim.openstreetmap.org`) - fine for a small node. Its usage
+  policy allows about one request a second and no search-as-you-type; the node keeps to that (a queue, `PLACE_SEARCH_MIN_INTERVAL_MS`,
+  a cache, a User-Agent naming the project). A node with many visitors should run its own Nominatim and set the variable to its
+  `…/search` URL. `none` removes the search bar and the endpoint.
+* What the service learns is the search term and the rounded map area, never a visitor's address. Search terms can be addresses: the
+  node's privacy page says so and names the host; check that text against your own notice.
+* A failing service shows the visitor "not reachable" and nothing else; `502 PLACE_SEARCH_UNAVAILABLE` in the API. Nothing is stored
+  that would need cleaning up - the cache is in memory.
+
 ## Migrations that take a heavy lock
 
 **Migration 0007 (community corrections) needs a maintenance window on a node that already holds

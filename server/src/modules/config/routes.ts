@@ -64,6 +64,8 @@ export async function registerConfigRoutes(app: FastifyInstance) {
       },
       // The road network (docs/road-network.md): a stretch of road is proposed by two points on it, which the node resolves to
       // the road's own shape. `lookup` says whether this node can fetch roads it does not have (else only imported ones).
+      // Whether GET /v1/places/search exists on this node (docs/place-search.md).
+      placeSearch: { enabled: env.PLACE_SEARCH_URL !== "" },
       roadNetwork: {
         intervalMaxMeters: env.ROAD_INTERVAL_MAX_M,
         pickToleranceMeters: env.ROAD_PICK_TOLERANCE_M,

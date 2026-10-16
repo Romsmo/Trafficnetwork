@@ -33,6 +33,7 @@ Stand / as of: 2026-09-24 · gilt für / applies to `server/web` (Weboberfläche
   `tile.openstreetmap.org`, betrieben von der OpenStreetMap Foundation). Dieser sieht deine IP-Adresse, deinen Browser und den
   angezeigten Kartenausschnitt und unterliegt seiner eigenen Datenschutzerklärung. Betreiber können einen anderen Kartenserver
   einstellen oder die Karte ganz abschalten (`MAP_TILE_URL=none`).
+* **Ortssuche:** Startest du in der Suche auf der Karte eine Suche, schickt **der Knoten** (nicht dein Browser) Suchbegriff und gerundeten Kartenausschnitt an einen Ortssuchdienst (Standard: nominatim.openstreetmap.org). Der Dienst sieht den Begriff, nicht deine IP-Adresse. Gesucht wird nur auf Auslösen, nicht beim Tippen. Der Knoten hält Begriff und Antwort kurz im Arbeitsspeicher, nicht in Datenbank oder Protokoll. Ein Suchbegriff kann eine Adresse sein. Betreiber können das abstellen (`PLACE_SEARCH_URL=none`) oder einen eigenen Dienst einsetzen.
 * **Straßendaten:** Tippst du für ein Tempolimit zwei Stellen auf der Karte an und kennt der Knoten die Straßen dieser Gegend
   nicht, fragt **der Knoten selbst** (nicht dein Browser) einen Straßendaten-Dienst (Standard: eine öffentliche Overpass-Instanz)
   nach den Straßen rund um diese Stellen. Dieser sieht das Gebiet und die Adresse des Knotens, nicht deine IP-Adresse.
@@ -70,6 +71,7 @@ Abschnitt 8).
 * **Map tiles:** your browser loads tiles **directly from the configured tile server** (default `tile.openstreetmap.org`,
   operated by the OpenStreetMap Foundation). It sees your IP address, browser and the map area shown and is subject to its own
   privacy policy. Operators can configure another tile server or switch the map background off (`MAP_TILE_URL=none`).
+* **Place search:** when you start a search in the map's search box, **the node** (not your browser) sends the search term and the rounded map area to a place-search service (default: nominatim.openstreetmap.org). The service sees the term, not your IP address. Searching starts only when triggered, not while typing. The node keeps term and answer briefly in memory, not in the database or the log. A search term can be an address. Operators can switch this off (`PLACE_SEARCH_URL=none`) or use their own service.
 * **Road data:** when you tap two spots on the map for a speed limit and the node does not have the roads of that area, **the
   node itself** (not your browser) asks a road-data service (default: a public Overpass instance) for the roads around those
   spots. It sees the area and the node's address, not your IP address. Operators can switch this off (`ROAD_LOOKUP_URL=none`) or

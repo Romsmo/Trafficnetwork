@@ -3,6 +3,7 @@ import { isAcceptableFederationAddress } from "../modules/federation/address.js"
 import { DEFAULT_MAP_TILE_URL, isAcceptableTileUrl } from "../modules/web/tile.js";
 
 const DEFAULT_ROAD_LOOKUP_URL = "https://overpass-api.de/api/interpreter";
+const DEFAULT_PLACE_SEARCH_URL = "https://nominatim.openstreetmap.org/search";
 import { CameraPolicyError, parseLocalCaps } from "../modules/cameras/policy/levels.js";
 import { parseExpiryOverrides } from "./report-expiry.js";
 
@@ -368,6 +369,21 @@ const envSchema = z.object({
     .default("true")
     .transform((v) => v === "true"),
   DEFECT_REMOVAL_THRESHOLD: z.coerce.number().int().positive().default(3),
+
+  // Place search on the map page (docs/place-search.md): "where is Postau?". The node asks a Nominatim-compatible geocoder on the
+  // visitor's behalf (the visitor's browser never talks to it). The search term and, to rank near places first, the rounded
+  // centre of the map go to that service; never the visitor's address. Empty = the public instance of OpenStreetMap
+  // (nominatim.openstreetmap.org, whose usage policy allows about one request per second and no search-as-you-type);
+  // "none" = no place search (the search box is not shown and the endpoint does not exist).
+  PLACE_SEARCH_URL: z
+    .string()
+    .default("")
+    .transform((value) => (value.trim() === "" ? DEFAULT_PLACE_SEARCH_URL : value.trim().toLowerCase() === "none" ? "" : value.trim())),
+  PLACE_SEARCH_TIMEOUT_MS: z.coerce.number().int().min(1000).max(60_000).default(8000),
+  // Least time between two requests to the service (the public instance asks for at most one per second).
+  PLACE_SEARCH_MIN_INTERVAL_MS: z.coerce.number().int().min(0).max(60_000).default(1100),
+  // How long an answer is kept in memory (never on disk): the same search twice is one request.
+  PLACE_SEARCH_CACHE_SECONDS: z.coerce.number().int().min(0).max(86_400).default(3600),
 
   // Web sessions (POST /v1/web/session): anonymous, short-lived, unlinkable between renewals.
   WEB_SESSION_TTL_SECONDS: z.coerce.number().int().min(60).max(3600).default(900),

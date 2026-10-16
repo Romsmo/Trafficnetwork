@@ -35,7 +35,7 @@ export const INSTANCES = {
   disabled: { port: PORT_BASE + 3, env: { WEB_UI_ENABLED: "false" } as Record<string, string> } as Instance,
   /** No map background: the page must not talk to anyone but this node (also lets the browser cache be tested without request interception). */
   // No map tiles - and a road service (a closed local port: the node never reaches anybody) so the privacy page's "road data" part shows.
-  notiles: { port: PORT_BASE + 4, env: { MAP_TILE_URL: "none", ROAD_LOOKUP_URL: "http://127.0.0.1:9/api/interpreter" } as Record<string, string> } as Instance,
+  notiles: { port: PORT_BASE + 4, env: { MAP_TILE_URL: "none", ROAD_LOOKUP_URL: "http://127.0.0.1:9/api/interpreter", PLACE_SEARCH_URL: "none" } as Record<string, string> } as Instance,
   /** The signed policy takes Germany back to `zones`: the test town is shown as an area, never as a spot. */
   zones: { port: PORT_BASE + 5, env: { SPEED_CAMERA_NAMESPACE_ENABLED: "true" } as Record<string, string>, policy: { DE: "zones" } } as Instance,
   /** The signed policy takes Germany off, other countries stay `full`: the category exists, but nothing in the test town is delivered. */

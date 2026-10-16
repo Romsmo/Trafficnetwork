@@ -100,6 +100,8 @@ export async function registerWebModule(app: FastifyInstance): Promise<void> {
       // The road service the *node* asks for the roads around two picked points (docs/road-network.md): shown in the privacy
       // notice. null = the node never asks anybody.
       roadLookupHost: env.ROAD_LOOKUP_URL === "" ? null : hostOf(env.ROAD_LOOKUP_URL),
+      // Place search (docs/place-search.md): null = the page shows no search box; else the service the node asks, named in the privacy notice.
+      placeSearchHost: env.PLACE_SEARCH_URL === "" ? null : hostOf(env.PLACE_SEARCH_URL),
       sessionTtlSeconds: env.WEB_SESSION_TTL_SECONDS,
       // How long a report is kept after it ended (matching, moderation), then deleted: shown in the privacy notice.
       retentionDays: env.EVENT_LOG_RETENTION_DAYS_DYNAMIC,

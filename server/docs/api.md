@@ -784,6 +784,19 @@ One mark per reporter and entry; at `DEFECT_REMOVAL_THRESHOLD` distinct reporter
 stays out after a re-import. `404` when the entry is not served (any more). Only registered when `DEFECT_REPORTS_ENABLED`.
 `GET /v1/config` → `defectReports { enabled, removalThreshold }`. See `road-network.md`.
 
+### `GET /v1/places/search` — find a place by name (server 1.2.0)
+
+```
+GET /v1/places/search?q=<2..120 characters>[&lat=&lng=][&lang=de|en]
+  -> { "places": [ { "id", "name", "label", "lat", "lng", "kind": string|null, "bbox": [west, south, east, north]|null } ] }   // at most 6
+```
+
+For the search bar of the map page, open to every client. The node asks a Nominatim-compatible service (`PLACE_SEARCH_URL`) on the
+caller's behalf, at most one request per second, and keeps an answer in memory only. `lat`/`lng` (the map centre, rounded to 0.1° by
+the page) only make places around it rank first. Errors: `400` (term too short or too long, no position), `502
+PLACE_SEARCH_UNAVAILABLE`, `429` for web sessions (heavy-read limit). The response is `no-store`. The endpoint exists only when
+`PLACE_SEARCH_URL` is not `none` (`GET /v1/config` → `placeSearch.enabled`). See [`place-search.md`](place-search.md).
+
 ### `POST /v1/speed-limit-segments/:id/corrections`
 
 Propose a value (or confirm someone else's identical one — same value merges).

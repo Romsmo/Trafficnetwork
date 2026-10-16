@@ -25,6 +25,7 @@ const values = {
   "operator.vatId": operator.vatId ?? "",
   "tiles.host": host ?? "",
   "roads.host": config.roadLookupHost ?? "",
+  "places.host": config.placeSearchHost ?? "",
   "session.minutes": String(Math.max(1, Math.round((config.sessionTtlSeconds ?? 900) / 60))),
   "retention.days": String(config.retentionDays ?? 3),
   repo: config.repoUrl ?? "",
@@ -41,6 +42,8 @@ const conditions = {
   "no-tiles": !host,
   roads: Boolean(config.roadLookupHost),
   "no-roads": !config.roadLookupHost,
+  places: Boolean(config.placeSearchHost),
+  "no-places": !config.placeSearchHost,
   "logging.privacy": config.privacyLogging !== false,
   "logging.full": config.privacyLogging === false,
 };

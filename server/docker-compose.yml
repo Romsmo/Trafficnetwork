@@ -83,6 +83,12 @@ services:
       ROAD_ATTACH_TILES_PER_RUN: ${ROAD_ATTACH_TILES_PER_RUN:-5}
       DEFECT_REPORTS_ENABLED: ${DEFECT_REPORTS_ENABLED:-true}
       DEFECT_REMOVAL_THRESHOLD: ${DEFECT_REMOVAL_THRESHOLD:-3}
+      # Place search on the map page (docs/place-search.md). An empty PLACE_SEARCH_URL means the default public
+      # service; "none" turns the search off.
+      PLACE_SEARCH_URL: ${PLACE_SEARCH_URL:-}
+      PLACE_SEARCH_TIMEOUT_MS: ${PLACE_SEARCH_TIMEOUT_MS:-8000}
+      PLACE_SEARCH_MIN_INTERVAL_MS: ${PLACE_SEARCH_MIN_INTERVAL_MS:-1100}
+      PLACE_SEARCH_CACHE_SECONDS: ${PLACE_SEARCH_CACHE_SECONDS:-3600}
       # Pre-built static-data packages and Europe-scale limits (docs/europe-scale.md).
       STATIC_PACKAGES_WORKER_ENABLED: ${STATIC_PACKAGES_WORKER_ENABLED:-true}
       STATIC_PACKAGES_PUBLIC: ${STATIC_PACKAGES_PUBLIC:-false}

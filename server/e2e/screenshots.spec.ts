@@ -74,6 +74,31 @@ test("speed limit on click and the speed-limit layer", async ({ page }) => {
   await page.screenshot(photo("map-speed-limits"));
 });
 
+test("place search: the hits under the search bar", async ({ page }) => {
+  await watchTraffic(page, node, { fakeTiles: false });
+  // The node's own geocoder call is replaced by a fixed answer: the picture is about the page, not about a live service.
+  await page.route("**/v1/places/search**", (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        places: [
+          { id: "r1", name: "Postau", label: "Postau, Landkreis Landshut, Bayern, Deutschland", lat: 48.5961, lng: 12.1923, kind: "administrative", bbox: null },
+          { id: "r2", name: "Postau", label: "Postau, Gemeinde Wittibreut, Landkreis Rottal-Inn, Bayern, Deutschland", lat: 48.37, lng: 12.99, kind: "hamlet", bbox: null },
+          { id: "n3", name: "Bahnhof Postau-Gerzen", label: "Bahnhof Postau-Gerzen, Postau, Bayern, Deutschland", lat: 48.59, lng: 12.2, kind: "station", bbox: null },
+        ],
+      }),
+    }),
+  );
+  await openMap(page, node);
+  await tilesLoaded(page);
+  const input = page.getByRole("searchbox", { name: "Ort suchen" });
+  await input.fill("Postau");
+  await input.press("Enter");
+  await expect(page.locator("[data-place-results] button")).toHaveCount(3);
+  await page.screenshot(photo("map-search"));
+});
+
 test("report dialog", async ({ page }) => {
   await watchTraffic(page, node, { fakeTiles: false });
   await openMap(page, node);

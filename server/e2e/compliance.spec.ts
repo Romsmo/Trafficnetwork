@@ -73,6 +73,11 @@ test.describe("legal pages", () => {
     await expect(english).toContainText("3 days");
     // this node's e2e setup has the road lookup off: it says it asks nobody for road data
     await expect(english).toContainText("asks no service for road data");
+    // the place search (docs/place-search.md): the node asks, not the browser; the term can be an address; it is not stored
+    await expect(english).toContainText("Place search:");
+    await expect(english).toContainText("127.0.0.1:9");
+    await expect(english).toContainText("not your IP address");
+    await expect(english).toContainText("not in the database and not in the access log");
     await expect(english.locator("[data-fill]").first()).not.toBeEmpty();
   });
 
@@ -87,6 +92,8 @@ test.describe("legal pages", () => {
     await expect(german).toContainText("127.0.0.1:9");
     await expect(german).toContainText("fragt der Knoten selbst");
     await expect(german).toContainText("nicht deine IP-Adresse");
+    // and this one offers no place search
+    await expect(german).toContainText("bietet keine Ortssuche an");
   });
 
   test("the terms say what the draft status is and do not promise anything the service does not do", async ({ page }) => {

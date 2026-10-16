@@ -41,6 +41,8 @@ function nodeEnv(databaseUrl: string, extra: Record<string, string>): NodeJS.Pro
     MAP_TILE_URL: "",
     // Tests never reach out to a public road service; the tests that need a road answer from a mock.
     ROAD_LOOKUP_URL: "none",
+    // Place search is answered by the tests themselves (a closed local port: the node never reaches anybody).
+    PLACE_SEARCH_URL: "http://127.0.0.1:9/search",
     ...RELAXED_LIMITS,
     ...extra,
   };

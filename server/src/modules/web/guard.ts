@@ -45,6 +45,7 @@ const ROADS_RESOLVE_PATH = "/v1/roads/resolve";
 // "This entry is wrong" (docs/road-network.md): what is near a point that could be marked, and the mark itself.
 const DEFECTS_NEAR_PATH = "/v1/data-defects/near";
 const DEFECTS_PATH = "/v1/data-defects";
+const PLACES_SEARCH_PATH = "/v1/places/search";
 
 /** A device signature makes a submission federation-eligible; browser sessions are anonymous and free to mint, so theirs never carry one. */
 function carriesDeviceSignature(body: unknown): boolean {
@@ -76,6 +77,9 @@ export function classifyWebRequest(info: WebRequestInfo, policy: WebPolicy): Gua
       case "/v1/speed-limit-corrections":
       case DEFECTS_NEAR_PATH:
         return { kind: "allow", category: "read" };
+      // Place search: asks a third-party service, so it counts against the heavy limit (and the node queues it to one per second).
+      case PLACES_SEARCH_PATH:
+        return { kind: "allow", category: "heavy-read" };
       case "/v1/hazard-reports/nearby":
         if (radiusExceeds(query, policy.maxHazardRadiusM)) {
           return deny(400, "WEB_RADIUS_TOO_LARGE", `Web sessions may query at most ${policy.maxHazardRadiusM} m around a point`);
