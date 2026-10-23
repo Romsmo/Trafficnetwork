@@ -1128,15 +1128,22 @@ jobs:
           echo "$n frb_* functions exported by the framework in the release app"
           test "$n" -ge 10
 
-      - name: Run the example's integration test in an iOS simulator (the library loads by name, a client syncs, Dart's secret store is called)
-        working-directory: ${{ runner.temp }}/spm_app
+      # Two steps with their own time limits: a simulator that does not come up (it has happened on a busy runner) must
+      # fail in minutes and say which part hung, not hold the job for an hour.
+      - name: Boot an iOS simulator
+        timeout-minutes: 12
         run: |
           UDID=$(xcrun simctl list devices available -j | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{const j=JSON.parse(s);for(const [rt,ds] of Object.entries(j.devices)){if(!/iOS/.test(rt))continue;const d=ds.find(x=>/iPhone/.test(x.name));if(d){console.log(d.udid);return}}})")
           test -n "$UDID"
           echo "simulator $UDID"
+          echo "SIMULATOR_UDID=$UDID" >> "$GITHUB_ENV"
           xcrun simctl boot "$UDID" || true
           xcrun simctl bootstatus "$UDID" -b
-          flutter test integration_test -d "$UDID" --dart-define=TN_NODE=$TN_NODE
+
+      - name: Run the example's integration test in the iOS simulator (the library loads by name, a client syncs, Dart's secret store is called)
+        timeout-minutes: 20
+        working-directory: ${{ runner.temp }}/spm_app
+        run: flutter test integration_test -d "$SIMULATOR_UDID" --dart-define=TN_NODE=$TN_NODE
 
       # ---- 2. CocoaPods
       - name: Create the same app with CocoaPods, and build it
