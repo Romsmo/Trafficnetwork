@@ -9,7 +9,7 @@
 #
 Pod::Spec.new do |s|
   s.name             = 'trafficnetwork_flutter'
-  s.version          = '1.2.0'
+  s.version          = '1.2.1'
   s.summary          = 'The Trafficnetwork client for Flutter apps.'
   s.description      = 'The native library behind the trafficnetwork Dart package, bundled for iOS.'
   s.homepage         = 'https://github.com/Romsmo/Trafficnetwork'

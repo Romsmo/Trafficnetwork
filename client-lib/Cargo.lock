@@ -2279,7 +2279,7 @@ dependencies = [
 
 [[package]]
 name = "trafficnetwork-c-abi"
-version = "1.2.0"
+version = "1.2.1"
 dependencies = [
  "hex",
  "serde_json",
@@ -2290,7 +2290,7 @@ dependencies = [
 
 [[package]]
 name = "trafficnetwork-core"
-version = "1.2.0"
+version = "1.2.1"
 dependencies = [
  "async-trait",
  "base64 0.23.1",
@@ -2324,7 +2324,7 @@ dependencies = [
 
 [[package]]
 name = "trafficnetwork-uniffi"
-version = "1.2.0"
+version = "1.2.1"
 dependencies = [
  "serde_json",
  "tokio",
@@ -2334,14 +2334,14 @@ dependencies = [
 
 [[package]]
 name = "trafficnetwork-uniffi-bindgen"
-version = "1.2.0"
+version = "1.2.1"
 dependencies = [
  "uniffi",
 ]
 
 [[package]]
 name = "trafficnetwork-wasm"
-version = "1.2.0"
+version = "1.2.1"
 dependencies = [
  "console_error_panic_hook",
  "futures-util",
