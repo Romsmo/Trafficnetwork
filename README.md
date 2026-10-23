@@ -22,7 +22,7 @@ Damit läuft ein einzelner, nicht föderierter Knoten mit eingebauter Weboberfl�
 
 Zugangsdaten für ein Testgerät legst du im Docker-Stack nicht mit `npm run create-client` an (das braucht einen Datenbankzugang von außen), sondern mit dem Befehl aus [`server/docs/installation.md`](server/docs/installation.md), Abschnitt „Create the first client". Danach z. B. `tools/test-client/` (eigenes `README.md`), eine der Client-Bibliotheken ([`client-lib/README.md`](client-lib/README.md), Anleitung je Plattform) oder direkt die API (`server/docs/api.md`). Vollständige Anleitung inkl. Betrieb ohne Docker, Föderation, Reverse-Proxy-Beispielen: [`server/docs/installation.md`](server/docs/installation.md), [`server/docs/operating.md`](server/docs/operating.md). Region mit echten Daten befüllen: [`ingestion/README.md`](ingestion/README.md) (optional).
 
-Die Schritte oben sind aus einem frischen Klon durchgespielt (Befehle, Ausgaben und Belege: [`docs/final-report.md`](docs/final-report.md)). Fertige Server- und Ingestion-Images mit Prüfsummen hängen an den GitHub-Releases (`server-v…`, `ingestion-v…`, `client-lib-v…`); offene Punkte stehen in [`docs/todo.md`](docs/todo.md).
+Die Schritte oben sind aus einem frischen Klon durchgespielt (Befehle, Ausgaben und Belege: [`docs/final-report.md`](docs/final-report.md)). **Einen laufenden Server aktualisieren** (Sicherung, Befehle, Prüfen, Zurückrollen): [`docs/server-aktualisieren.md`](docs/server-aktualisieren.md). Fertige Server- und Ingestion-Images mit Prüfsummen hängen an den GitHub-Releases (`server-v…`, `ingestion-v…`, `client-lib-v…`); offene Punkte stehen in [`docs/todo.md`](docs/todo.md).
 
 ## Prinzip
 
