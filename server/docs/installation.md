@@ -25,7 +25,8 @@ Verify it's up: `curl http://localhost:3000/v1/health` → `{"status":"ok","data
 
 Compose reuses an image it has already built under this name: after pulling new
 code, run `docker compose up -d --build` (a fresh clone has no image, so the
-first `up` builds one).
+first `up` builds one). The whole update procedure - backup, the commands, checking, rolling
+back - is in [`docs/server-aktualisieren.md`](../../docs/server-aktualisieren.md) (German).
 
 ### Create the first client
 

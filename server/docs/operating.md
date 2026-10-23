@@ -540,7 +540,8 @@ data protects this too; there's nothing federation-specific to back up
 separately.
 
 Upgrading (`docker compose up -d --build` after pulling new code, or the
-equivalent for a non-Docker install) is safe to do without coordinating with
+equivalent for a non-Docker install; step by step with backup and rollback:
+[`docs/server-aktualisieren.md`](../../docs/server-aktualisieren.md), in German) is safe to do without coordinating with
 peers — every federation endpoint is additive-only so far (no breaking wire
 changes are planned without a protocol version bump, `FEDERATION_PROTOCOL_VERSION`
 in `modules/federation/protocol.ts`), and a brief outage during restart is
