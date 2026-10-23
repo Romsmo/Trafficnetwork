@@ -63,7 +63,7 @@ abstract interface class SecureStore {
 /// [libraryPath] names the library file (`libtrafficnetwork_dart.so`,
 /// `.dylib`, `.dll`; a bare name is looked up the way the platform looks up
 /// libraries). With [processLibrary] the library is expected to be linked into
-/// the running program already (a static library on iOS) and [libraryPath] is
+/// the running program already (a static library linked into an app) and [libraryPath] is
 /// not used. With neither, the loader looks where a Flutter app's build puts
 /// it. The `trafficnetwork_flutter` package calls this with what its
 /// platforms need.

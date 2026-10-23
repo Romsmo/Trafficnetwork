@@ -1037,10 +1037,20 @@ jobs:
   # The same on iOS, on a macOS runner: the static library as an XCFramework in
   # the plugin, a fresh Flutter app, built for a device (release, unsigned) and
   # for the simulator. It builds and links; it is not run here.
+  # The iOS half of the Flutter plugin, three ways, on one macOS runner:
+  #  1. a brand-new app that builds with Swift Package Manager ONLY (no CocoaPods): the plugin's
+  #     ios/trafficnetwork_flutter/Package.swift links and embeds the dynamic XCFramework, checked in the built app
+  #     (no Pods directory, the framework in the app's Frameworks folder, linked by the executable, the functions Dart
+  #     looks up exported from it) - and RUN: the example's integration test on an iOS simulator loads the library by
+  #     name and syncs against the scripted server, the one thing a build cannot show;
+  #  2. the same with CocoaPods (the podspec): built, embedded, exported;
+  #  3. the plugin as an artifact (with the XCFramework) for the release.
+  # A dynamic framework, not a static library: Dart finds the functions by name at run time and a static library is left
+  # to the linker's dead-code stripping, which drops it (measured, docs/integration-flutter.md).
   flutter-ios:
     name: build (Flutter plugin + example app, iOS)
     runs-on: macos-latest
-    timeout-minutes: 60
+    timeout-minutes: 75
     steps:
       - uses: actions/checkout@v4
 
@@ -1053,6 +1063,10 @@ jobs:
           workspaces: client-lib/bindings/dart/rust
           key: flutter-ios
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
       - uses: subosito/flutter-action@v2
         with:
           channel: stable
@@ -1061,18 +1075,101 @@ jobs:
       - name: Build the native library into the plugin
         run: bash bindings/flutter/build-native.sh ios
 
-      - name: Create a Flutter app that uses the plugin, and build it
+      - name: The XCFramework has a device slice and a simulator slice, each a dynamic framework that exports what Dart looks up
+        working-directory: client-lib/bindings/flutter/ios/trafficnetwork_flutter/Frameworks
         run: |
+          test -d TrafficNetworkDart.xcframework/ios-arm64/TrafficNetworkDart.framework
+          test -d TrafficNetworkDart.xcframework/ios-arm64_x86_64-simulator/TrafficNetworkDart.framework
+          for slice in TrafficNetworkDart.xcframework/*/TrafficNetworkDart.framework/TrafficNetworkDart; do
+            otool -D "$slice" | grep -q "@rpath/TrafficNetworkDart.framework/TrafficNetworkDart"
+            n=$(nm -gU "$slice" | grep -c ' T _frb' || true)
+            echo "$slice: $n frb_* functions exported"
+            test "$n" -ge 10
+          done
+          lipo -info TrafficNetworkDart.xcframework/ios-arm64_x86_64-simulator/TrafficNetworkDart.framework/TrafficNetworkDart | grep -q "x86_64 arm64"
+
+      - name: Start the scripted server
+        run: |
+          node conformance/mock-server.mjs --port 18997 > "$RUNNER_TEMP/mock.log" 2>&1 &
+          for i in $(seq 1 50); do
+            curl -sf -X POST http://127.0.0.1:18997/__instances -d '{}' > /dev/null && break
+            sleep 0.2
+          done
+          URL=$(curl -sf -X POST http://127.0.0.1:18997/__instances -d '{}' | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>console.log(JSON.parse(s).url))")
+          echo "TN_NODE=$URL" >> "$GITHUB_ENV"
+
+      # ---- 1. Swift Package Manager only
+      - name: Create an app that builds with Swift Package Manager, and build it
+        run: |
+          flutter config --enable-swift-package-manager
           cd "$RUNNER_TEMP"
-          flutter create --platforms=ios --project-name trafficnetwork_example_app app
-          cd app
+          flutter create --platforms=ios --project-name trafficnetwork_example_app spm_app
+          cd spm_app
           flutter pub add path_provider
           flutter pub add trafficnetwork_flutter --path "$GITHUB_WORKSPACE/client-lib/bindings/flutter"
+          flutter pub add dev:integration_test --sdk flutter
+          mkdir integration_test
+          cp "$GITHUB_WORKSPACE/client-lib/bindings/flutter/example/integration_test/app_test.dart" integration_test/
           cp "$GITHUB_WORKSPACE/client-lib/bindings/flutter/example/lib/main.dart" lib/main.dart
           rm -f test/widget_test.dart   # the template's test is for the template's main.dart
           flutter analyze
           flutter build ios --release --no-codesign
           flutter build ios --simulator --debug
+
+      - name: The plugin came in by Swift Package Manager, and its framework is in the app
+        working-directory: ${{ runner.temp }}/spm_app
+        run: |
+          grep -q 'name: "trafficnetwork-flutter", package: "trafficnetwork_flutter"' ios/Flutter/ephemeral/Packages/FlutterGeneratedPluginSwiftPackage/Package.swift
+          test ! -d ios/Pods   # no CocoaPods anywhere
+          app=build/ios/iphoneos/Runner.app
+          test -d "$app/Frameworks/TrafficNetworkDart.framework"
+          otool -L "$app/Runner" | grep -q "TrafficNetworkDart.framework/TrafficNetworkDart"
+          n=$(nm -gU "$app/Frameworks/TrafficNetworkDart.framework/TrafficNetworkDart" | grep -c ' T _frb' || true)
+          echo "$n frb_* functions exported by the framework in the release app"
+          test "$n" -ge 10
+
+      # Two steps with their own time limits: a simulator that does not come up (it has happened on a busy runner) must
+      # fail in minutes and say which part hung, not hold the job for an hour.
+      - name: Boot an iOS simulator
+        timeout-minutes: 12
+        run: |
+          UDID=$(xcrun simctl list devices available -j | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{const j=JSON.parse(s);for(const [rt,ds] of Object.entries(j.devices)){if(!/iOS/.test(rt))continue;const d=ds.find(x=>/iPhone/.test(x.name));if(d){console.log(d.udid);return}}})")
+          test -n "$UDID"
+          echo "simulator $UDID"
+          echo "SIMULATOR_UDID=$UDID" >> "$GITHUB_ENV"
+          xcrun simctl boot "$UDID" || true
+          xcrun simctl bootstatus "$UDID" -b
+
+      - name: Run the example's integration test in the iOS simulator (the library loads by name, a client syncs, Dart's secret store is called)
+        timeout-minutes: 20
+        working-directory: ${{ runner.temp }}/spm_app
+        run: flutter test integration_test -d "$SIMULATOR_UDID" --dart-define=TN_NODE=$TN_NODE
+
+      # ---- 2. CocoaPods
+      - name: Create the same app with CocoaPods, and build it
+        run: |
+          flutter config --no-enable-swift-package-manager
+          cd "$RUNNER_TEMP"
+          flutter create --platforms=ios --project-name trafficnetwork_example_app pods_app
+          cd pods_app
+          flutter pub add path_provider
+          flutter pub add trafficnetwork_flutter --path "$GITHUB_WORKSPACE/client-lib/bindings/flutter"
+          cp "$GITHUB_WORKSPACE/client-lib/bindings/flutter/example/lib/main.dart" lib/main.dart
+          rm -f test/widget_test.dart
+          flutter analyze
+          flutter build ios --release --no-codesign
+          flutter build ios --simulator --debug
+          app=build/ios/iphoneos/Runner.app
+          test -d ios/Pods
+          test -d "$app/Frameworks/TrafficNetworkDart.framework"
+          otool -L "$app/Runner" | grep -q "TrafficNetworkDart.framework/TrafficNetworkDart"
+          n=$(nm -gU "$app/Frameworks/TrafficNetworkDart.framework/TrafficNetworkDart" | grep -c ' T _frb' || true)
+          echo "$n frb_* functions exported by the framework in the release app"
+          test "$n" -ge 10
+
+      - name: Scripted server log
+        if: failure()
+        run: cat "$RUNNER_TEMP/mock.log"
 
       - uses: actions/upload-artifact@v4
         with:

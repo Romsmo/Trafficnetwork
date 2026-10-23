@@ -72,7 +72,10 @@ jni_libs="$(find artifacts/trafficnetwork-flutter-plugin-android -type d -name j
 frameworks="$(find artifacts/trafficnetwork-flutter-plugin-ios -type d -name Frameworks | head -1)"
 test -n "$jni_libs" && test -n "$frameworks"
 cp -r "$jni_libs" "$plugin/android/src/main/"
-cp -r "$frameworks" "$plugin/ios/"
+cp -r "$frameworks" "$plugin/ios/trafficnetwork_flutter/"
+# The Swift Package manifest and the XCFramework it points at must be in the tarball together.
+test -f "$plugin/ios/trafficnetwork_flutter/Package.swift"
+test -d "$plugin/ios/trafficnetwork_flutter/Frameworks/TrafficNetworkDart.xcframework"
 tar czf "release/trafficnetwork-flutter-$VERSION.tar.gz" -C stage "trafficnetwork-flutter-$VERSION"
 
 # ---- React Native: the two halves of the library, merged into one package

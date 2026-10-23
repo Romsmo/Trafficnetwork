@@ -119,8 +119,8 @@ instead of "no limit" where nothing could be looked at.
 ## In a Flutter app (Android and iOS)
 
 `bindings/flutter` is a Flutter plugin, `trafficnetwork_flutter`, that bundles
-the native library — Android (one `.so` per ABI) and iOS (a static
-XCFramework) — so that adding the package is all an app does. It re-exports
+the native library — Android (one `.so` per ABI) and iOS (a dynamic
+XCFramework, for **Swift Package Manager and CocoaPods**) — so that adding the package is all an app does. It re-exports
 everything in `package:trafficnetwork` and adds an `initialize()` that loads the
 bundled library.
 
@@ -165,10 +165,45 @@ print(await client.getSpeedLimitAt(52.52, 13.405));
 ```
 
 Then `flutter run` as for any app. The Android plugin packages the library into
-the APK (`lib/<abi>/libtrafficnetwork_dart.so`); on iOS the static library is
-linked into the app's executable (`-force_load`, with the app's symbols left
-unstripped — Dart finds the library's functions by name at run time, so nothing
-refers to them and a linker would otherwise drop them; the podspec sets both).
+the APK (`lib/<abi>/libtrafficnetwork_dart.so`); on iOS the app embeds
+`TrafficNetworkDart.framework` (a dynamic framework, in the app's `Frameworks` folder) and
+`initialize()` opens it by name.
+
+### iOS: Swift Package Manager or CocoaPods (1.2.1)
+
+The plugin ships both, next to each other under `bindings/flutter/ios/`, over the same XCFramework
+(`ios/trafficnetwork_flutter/Frameworks/TrafficNetworkDart.xcframework`, built by `build-native.sh ios`, a device slice and a
+simulator slice):
+
+- **Swift Package Manager** — `ios/trafficnetwork_flutter/Package.swift` (Flutter's plugin layout; the library product is
+  `trafficnetwork-flutter`, a binary target for the XCFramework and an empty Swift target to link it from). With
+  `flutter config --enable-swift-package-manager` (the default in current Flutter) an app builds with **no `pod install`
+  and no Podfile entry** for this plugin; tools that build Flutter iOS apps without CocoaPods work with it.
+- **CocoaPods** — `ios/trafficnetwork_flutter.podspec` as before (`vendored_frameworks`), for apps that still use pods.
+
+Either way Xcode links the framework and embeds it (and signs it with the app's identity) like any other dynamic framework.
+Nothing else is needed: no linker flags, no build settings in the app.
+
+#### Why a dynamic framework (and not the static library of 1.2.0)
+
+Dart finds the library's functions **by name at run time** (`dlsym`); nothing in the app refers to them, so a static library
+linked into the app is at the mercy of the linker. Measured on a macOS runner with the real library and Apple's linker
+(17 of the functions Dart looks up, `dlsym` in the linked program afterwards):
+
+| link | found |
+|---|---|
+| static library, no flags | 0 of 17 |
+| `-force_load` | 17 of 17 |
+| `-force_load` **with `-dead_strip`** (Xcode's *Dead Code Stripping*) | **0 of 17** |
+| symbol list (`-u`) with `-dead_strip` | 17 of 17 |
+| ... and then `strip -u -r` (Xcode's default *Strip Style* when an app is archived) | **0 of 17** |
+
+So `-force_load` and `STRIP_STYLE = non-global` (what the 1.2.0 podspec did) held only while the app's own settings did not
+strip, and a Swift Package cannot set an app's build settings at all. A dynamic framework needs none of it: its exported
+functions are in the framework, which is loaded by the app (`dlopen` by the name `TrafficNetworkDart.framework/TrafficNetworkDart`)
+and is not touched by the app's dead-code stripping or `strip`. If you build the library yourself: it is the Rust glue crate as a
+`cdylib` per iOS target, wrapped in a `.framework` (install name `@rpath/TrafficNetworkDart.framework/TrafficNetworkDart`,
+an `Info.plist`) and put together with `xcodebuild -create-xcframework` — see `build-native.sh`.
 
 On desktop the plugin bundles nothing: build the library for the platform and
 pass `initialize(libraryPath: '…')`.
@@ -179,8 +214,14 @@ pass `initialize(libraryPath: '…')`.
 the library is built into the plugin, a **brand-new Flutter app** is created the
 way this guide says (`flutter create`, add the package, paste the example),
 analyzed, and built — an APK that is checked to contain
-`libtrafficnetwork_dart.so`, an unsigned release build for an iOS device, and a
-debug build for the iOS simulator. The plugin and the APK are kept as artifacts.
+`libtrafficnetwork_dart.so`. On iOS this is done **twice**, with Swift Package Manager only (no Pods directory;
+the generated package lists `trafficnetwork-flutter`) and with CocoaPods: an unsigned release build for an iOS device, in
+which the framework is checked to be embedded, linked by the executable and to export the functions Dart looks up, and a
+debug build for the simulator. The plugin and the APK are kept as artifacts.
+
+**Run, on an iOS simulator** (the Swift Package app): the example's integration test loads the library by name, a client
+syncs against the scripted server, and a secret store implemented in Dart is called by the library — the same two tests that
+run on an Android emulator (`flutter-android-emulator`).
 
 `dart-package` (Dart VM on Linux):
 
@@ -196,10 +237,8 @@ debug build for the iOS simulator. The plugin and the APK are kept as artifacts.
   back into Dart);
 - the example above runs against the scripted server and its output is checked.
 
-**Not verified in CI, said plainly:** the Flutter apps are *built*, not *run* —
-nothing executes on a phone, an emulator or an iOS simulator. The Dart code and
-the Rust code that run in the conformance test are the shipped ones; what
-differs on a device is the CPU, the operating system's libc and network stack,
-Flutter's own engine, and — on iOS — whether the linker really keeps the
-library's functions (the build links; whether `dlsym` finds them at run time is
-only known by running it).
+**Not verified in CI, said plainly:** nothing executes on a **physical** phone. The apps run on an Android emulator and
+an iOS simulator (a debug build of the app: Flutter has no release mode on a simulator); the iOS *release* app for a device is
+built, and the framework in it is checked (embedded, linked, exporting the functions Dart looks up) but not run. What
+differs on a device is the CPU, the operating system's libc and network stack and Flutter's own engine — and code
+signing: the framework is signed by Xcode with the app's identity, which CI (unsigned builds) does not exercise.
