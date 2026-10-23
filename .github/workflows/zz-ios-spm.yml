@@ -1,0 +1,109 @@
+name: zz-ios-spm (temporary, while the jobs are developed)
+on:
+  push:
+    branches: [feature/flutter-spm]
+    paths:
+      - ".github/workflows/zz-ios-spm.yml"
+      - "client-lib/bindings/flutter/**"
+      - "client-lib/bindings/dart/lib/**"
+
+jobs:
+  ios:
+    runs-on: macos-latest
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-ios,aarch64-apple-ios-sim,x86_64-apple-ios
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: client-lib/bindings/dart/rust
+          key: flutter-ios
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Build the native library into the plugin
+        run: bash client-lib/bindings/flutter/build-native.sh ios
+
+      - name: What was built
+        working-directory: client-lib/bindings/flutter/ios/trafficnetwork_flutter/Frameworks
+        run: |
+          find TrafficNetworkDart.xcframework -maxdepth 3 | sort
+          cat TrafficNetworkDart.xcframework/Info.plist | head -40
+          for slice in TrafficNetworkDart.xcframework/*/TrafficNetworkDart.framework/TrafficNetworkDart; do
+            echo "== $slice"; lipo -info "$slice"; otool -D "$slice"; otool -L "$slice" | head -8
+            nm -gU "$slice" | grep -c ' T _frb' || true
+          done
+
+      - name: Scripted server
+        run: |
+          cd client-lib
+          node conformance/mock-server.mjs --port 18997 > "$RUNNER_TEMP/mock.log" 2>&1 &
+          for i in $(seq 1 50); do curl -sf -X POST http://127.0.0.1:18997/__instances -d '{}' > /dev/null && break; sleep 0.2; done
+          URL=$(curl -sf -X POST http://127.0.0.1:18997/__instances -d '{}' | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>console.log(JSON.parse(s).url))")
+          echo "TN_NODE=$URL" >> "$GITHUB_ENV"
+
+      # ------------------------------------------------------------ Swift Package Manager only
+      - name: A Flutter app that builds with Swift Package Manager (no CocoaPods)
+        run: |
+          flutter config --enable-swift-package-manager
+          cd "$RUNNER_TEMP"
+          flutter create --platforms=ios --project-name tn_spm_app spm_app
+          cd spm_app
+          flutter pub add path_provider
+          flutter pub add trafficnetwork_flutter --path "$GITHUB_WORKSPACE/client-lib/bindings/flutter"
+          flutter pub add dev:integration_test --sdk flutter
+          mkdir integration_test
+          cp "$GITHUB_WORKSPACE/client-lib/bindings/flutter/example/integration_test/app_test.dart" integration_test/
+          cp "$GITHUB_WORKSPACE/client-lib/bindings/flutter/example/lib/main.dart" lib/main.dart
+          rm -f test/widget_test.dart
+          flutter analyze
+          flutter build ios --release --no-codesign 2>&1 | tail -40
+          echo "== plugins by Swift Package Manager:"
+          cat ios/Flutter/ephemeral/Packages/FlutterGeneratedPluginSwiftPackage/Package.swift
+          echo "== Pods:"; ls ios/Pods 2>&1 | head -5 || true
+          echo "== the app:"
+          ls build/ios/iphoneos/Runner.app/Frameworks
+          otool -L build/ios/iphoneos/Runner.app/Runner | grep -i trafficnetwork || echo "NOT LINKED"
+          nm -gU build/ios/iphoneos/Runner.app/Frameworks/TrafficNetworkDart.framework/TrafficNetworkDart | grep -c ' T _frb'
+
+      - name: Run the integration test in the iOS simulator (the library loads and a client syncs)
+        working-directory: ${{ runner.temp }}/spm_app
+        run: |
+          UDID=$(xcrun simctl list devices available -j | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{const j=JSON.parse(s);for(const [rt,ds] of Object.entries(j.devices)){if(!/iOS/.test(rt))continue;const d=ds.find(x=>/iPhone/.test(x.name));if(d){console.log(d.udid);return}}})")
+          echo "simulator $UDID"
+          xcrun simctl boot "$UDID" || true
+          xcrun simctl bootstatus "$UDID" -b
+          flutter test integration_test -d "$UDID" --dart-define=TN_NODE=$TN_NODE
+
+      # ------------------------------------------------------------ CocoaPods
+      - name: The same app built with CocoaPods
+        run: |
+          flutter config --no-enable-swift-package-manager
+          cd "$RUNNER_TEMP"
+          flutter create --platforms=ios --project-name tn_pods_app pods_app
+          cd pods_app
+          flutter pub add path_provider
+          flutter pub add trafficnetwork_flutter --path "$GITHUB_WORKSPACE/client-lib/bindings/flutter"
+          cp "$GITHUB_WORKSPACE/client-lib/bindings/flutter/example/lib/main.dart" lib/main.dart
+          rm -f test/widget_test.dart
+          flutter analyze
+          flutter build ios --release --no-codesign 2>&1 | tail -20
+          ls ios/Pods | head
+          ls build/ios/iphoneos/Runner.app/Frameworks
+          otool -L build/ios/iphoneos/Runner.app/Runner | grep -i trafficnetwork || echo "NOT LINKED"
+          nm -gU build/ios/iphoneos/Runner.app/Frameworks/TrafficNetworkDart.framework/TrafficNetworkDart | grep -c ' T _frb'
+
+      - name: Scripted server log
+        if: failure()
+        run: cat "$RUNNER_TEMP/mock.log"

@@ -30,8 +30,8 @@ Future<void> initialize({String? libraryPath}) {
     return core.initialize(libraryPath: 'libtrafficnetwork_dart.so');
   }
   if (Platform.isIOS) {
-    // A static library, linked into the app's own executable.
-    return core.initialize(processLibrary: true);
+    // A dynamic framework, embedded in the app's Frameworks folder (by Xcode, from the Swift Package or the pod).
+    return core.initialize(libraryPath: 'TrafficNetworkDart.framework/TrafficNetworkDart');
   }
   throw UnsupportedError(
     'trafficnetwork_flutter bundles the native library for Android and iOS '
