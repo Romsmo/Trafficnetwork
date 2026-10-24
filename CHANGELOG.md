@@ -2,7 +2,7 @@
 
 Versionierung je Paket, kein gemeinsames Release-Datum oder gemeinsame Versionsnummer: `server/` (inklusive der eingebauten Weboberfläche), `ingestion/` und `client-lib/` folgen SemVer eigenständig.
 
-## server v1.3.0 — noch nicht veröffentlicht
+## server v1.3.0 — 2026-10-24
 
 Rein additiv: bestehende App-Schlüssel (`create-client`), Tokens, Endpunkte und die Client-Bibliothek ändern sich nicht. Eine additive Migration (`0014`: vier Spalten ohne Vorgabewert an `clients`, kein Umschreiben, keine Sperre).
 
