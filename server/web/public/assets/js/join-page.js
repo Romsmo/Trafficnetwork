@@ -63,7 +63,7 @@ function render() {
       ),
       h(
         "dl",
-        { class: "facts" },
+        { class: "facts join-facts" },
         h("dt", null, t("join.node")),
         h("dd", null, h("code", null, data.node)),
         h("dt", null, t("join.fingerprint")),
