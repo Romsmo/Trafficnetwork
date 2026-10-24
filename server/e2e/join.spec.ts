@@ -75,6 +75,14 @@ test.describe("page \"App verbinden\" (join code)", () => {
     await watchTraffic(page, node);
     await page.goto(`${node}/join`);
     await expect(page.locator("svg.join-qr")).toBeVisible();
+    // name the culprits if there are any: the failure message is all a CI log gives
+    const wide = await page.evaluate(() =>
+      [...document.querySelectorAll("body *")]
+        .filter((el) => el.getBoundingClientRect().right > document.documentElement.clientWidth + 0.5)
+        .map((el) => `${el.tagName.toLowerCase()}.${el.className}`)
+        .slice(0, 8),
+    );
+    expect(wide).toEqual([]);
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
     expect(overflow).toBeLessThanOrEqual(0);
   });
