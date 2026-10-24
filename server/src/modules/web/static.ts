@@ -149,6 +149,7 @@ export function loadAssets(sources: AssetSources): AssetTable {
   const PAGE_ROUTES: Record<string, string> = {
     "index.html": "/",
     "connect.html": "/connect",
+    "join.html": "/join",
     "about.html": "/about",
     "privacy.html": "/privacy",
     "terms.html": "/terms",

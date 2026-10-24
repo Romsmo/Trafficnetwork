@@ -53,7 +53,7 @@ function render() {
     h(
       "div",
       { class: "grid-3" },
-      h("section", { class: "card" }, h("h2", null, t("connect.app.title")), h("p", null, t("connect.app.body1")), h("p", null, t("connect.app.body2")), h("p", null, t("connect.app.body3")), h("p", null, externalLink(`${repo}/blob/main/client-lib/README.md`, t("connect.app.link")))),
+      h("section", { class: "card" }, h("h2", null, t("connect.app.title")), h("p", null, t("connect.app.body1")), h("p", null, t("connect.app.body2")), h("p", null, t("connect.app.body3")), h("p", null, externalLink(`${repo}/blob/main/client-lib/README.md`, t("connect.app.link"))), config.joinCodePage ? h("p", null, h("a", { href: "/join" }, t("connect.app.join"))) : null),
       h(
         "section",
         { class: "card" },

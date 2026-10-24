@@ -43,6 +43,9 @@ function nodeEnv(databaseUrl: string, extra: Record<string, string>): NodeJS.Pro
     ROAD_LOOKUP_URL: "none",
     // Place search is answered by the tests themselves (a closed local port: the node never reaches anybody).
     PLACE_SEARCH_URL: "http://127.0.0.1:9/search",
+    // Join code: every node of the run shares one throw-away directory (and so one code); the address is an example host.
+    JOIN_PUBLIC_ADDRESS: "https://e2e.example.org",
+    JOIN_DIR: process.env["E2E_JOIN_DIR"] ?? "",
     ...RELAXED_LIMITS,
     ...extra,
   };
@@ -68,6 +71,7 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
   const children: ChildProcess[] = [];
 
   const configDir = mkdtempSync(path.join(tmpdir(), "tn-e2e-config-"));
+  process.env["E2E_JOIN_DIR"] = path.join(configDir, "join");
 
   const teardown = async () => {
     for (const child of children) child.kill();

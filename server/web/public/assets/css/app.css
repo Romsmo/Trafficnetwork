@@ -168,6 +168,14 @@ pre.code {
   font: 0.85rem/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; white-space: pre;
 }
 pre.code button { position: absolute; top: 6px; right: 6px; min-height: 32px; padding: 2px 8px; font-size: 0.8rem; }
+.join-grid { display: grid; gap: 16px; grid-template-columns: minmax(0, 260px) minmax(0, 1fr); align-items: start; }
+@media (max-width: 640px) { .join-grid { grid-template-columns: minmax(0, 1fr); } }
+.join-qr-box { background: #ffffff; border: 1px solid var(--line); border-radius: var(--radius); padding: 4px; max-width: 260px; }
+.join-qr { display: block; width: 100%; height: auto; }
+pre.join-code { white-space: pre-wrap; word-break: break-all; padding-right: 12px; padding-bottom: 44px; }
+pre.join-code button { top: auto; bottom: 6px; }
+dl.facts.join-facts dt, dl.facts.join-facts dd { min-width: 0; overflow-wrap: anywhere; margin-inline-start: 0; }
+@media (max-width: 640px) { dl.facts.join-facts { grid-template-columns: minmax(0, 1fr); } }
 dl.facts { display: grid; grid-template-columns: max-content 1fr; gap: 4px 16px; margin: 8px 0; }
 dl.facts dt { color: var(--muted); }
 dl.facts dd { margin: 0; overflow-wrap: anywhere; }

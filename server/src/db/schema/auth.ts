@@ -1,4 +1,4 @@
-import { type AnyPgColumn, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
+import { type AnyPgColumn, integer, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
 import { clientScopeEnum } from "./enums.js";
 
 /**
@@ -37,4 +37,19 @@ export const clients = pgTable("clients", {
    * unchanged either way.
    */
   devicePublicKey: text("device_public_key"),
+  /**
+   * Join codes (docs/join-code.md): the app key behind a code an app scans or pastes. 'join-public' is the code the web page
+   * shows, 'join-invite' one made with `join:create`. Null for every other client. The scope of such a client is only
+   * `device-registration`; its secret is derived from the code's seed and stored hashed like any other.
+   */
+  kind: text("kind"),
+  /** Free-text name of an invitation code (operator's note); null otherwise. */
+  label: text("label"),
+  /**
+   * When the code stops accepting new registrations: set on an invitation code made with --expires, and on a public code that
+   * was replaced by `join:rotate` (the end of its grace period). Null = until revoked.
+   */
+  expiresAt: timestamp("expires_at", { withTimezone: true }),
+  /** Most registrations an invitation code accepts; null = no limit. */
+  maxUses: integer("max_uses"),
 });

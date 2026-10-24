@@ -2,6 +2,16 @@
 
 Versionierung je Paket, kein gemeinsames Release-Datum oder gemeinsame Versionsnummer: `server/` (inklusive der eingebauten Weboberfläche), `ingestion/` und `client-lib/` folgen SemVer eigenständig.
 
+## server v1.3.0 — noch nicht veröffentlicht
+
+Rein additiv: bestehende App-Schlüssel (`create-client`), Tokens, Endpunkte und die Client-Bibliothek ändern sich nicht. Eine additive Migration (`0014`: vier Spalten ohne Vorgabewert an `clients`, kein Umschreiben, keine Sperre).
+
+- **Join-Code — eine App per QR-Code mit dem Server verbinden:** der Server erzeugt beim ersten Start einen öffentlichen Code (wenn seine Adresse bekannt ist: `JOIN_PUBLIC_ADDRESS`, sonst `FEDERATION_PUBLIC_ADDRESS`), legt ihn im Verzeichnis `JOIN_DIR` ab (Docker: Volume `join-data`, Dateien `0600`) und zeigt ihn auf der neuen Seite **„App verbinden“** (`/join`, Deutsch und Englisch) als QR-Code und Text mit Kopier-Schaltfläche samt Fingerabdruck des Netzwerk-Schlüssels. Die App leitet daraus Adresse, App-Schlüssel (nur Scope `device-registration`) und optional den öffentlichen Netzwerk-Schlüssel ab — ohne Build-Variablen, ohne Eintippen. Format und Ableitung: [`server/docs/join-code.md`](server/docs/join-code.md) (HKDF-SHA256; Testvektoren in `join-code-vectors.json`).
+- **Befehle:** `join:show`, `join:create -- --label … [--max-uses N] [--expires 7d]` (Einladungscodes, nie auf der Seite), `join:rotate` (neuer öffentlicher Code, der alte läuft nach `JOIN_ROTATE_GRACE_DAYS` = 7 Tagen ab), `join:revoke -- <clientId>`, `join:list`. Im Container: `docker compose exec server node dist/join-cli.js <Befehl>`. **Widerruf wirkt auf neue Registrierungen; bereits registrierte Geräte bleiben gültig.**
+- **Fehlercodes** (`api.md`): `join_code_revoked` (401), `join_code_expired` (401), `join_code_exhausted` (403), `join_code_rate_limited` (429). Grenzen: der öffentliche Code hat standardmäßig **keine** Tagesgrenze (`JOIN_CODE_MAX_REGISTRATIONS_PER_DAY=0`), ein Einladungscode endet bei `--max-uses`; die Grenze je IP (10 pro Minute) gilt wie bisher.
+- Neue Einstellungen `JOIN_PUBLIC_ADDRESS`, `JOIN_DIR`, `JOIN_CODE_PUBLIC` (Standard `true`; `false` = keine Seite, kein öffentlicher Code), `JOIN_ROTATE_GRACE_DAYS`, `JOIN_CODE_MAX_REGISTRATIONS_PER_DAY` (`.env.example`, `docker-compose.yml`); in `/web-config.json`: `joinCodePage`. Neue Abhängigkeit `uqr` 0.1.3 (MIT, 79 KB, ohne eigene Abhängigkeiten) für den QR-Code.
+- Seed, Secret, vollständiger Code und Dateiinhalte stehen nie in Logs, Fehlermeldungen oder Metriken. Der Code auf der Seite ist **öffentlich** (gewollt); wer das nicht will, schaltet die Seite ab und nutzt Einladungscodes.
+
 ## server v1.2.0 — 2026-10-16
 
 Rein additiv: bestehende Endpunkte und Ergebnisformate ändern sich nicht; ältere Clients und Knoten funktionieren weiter. Keine Datenbankmigration.

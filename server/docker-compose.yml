@@ -127,8 +127,14 @@ services:
       WEB_MAX_SEGMENT_RADIUS_M: ${WEB_MAX_SEGMENT_RADIUS_M:-1500}
       WEB_MAX_HAZARD_RADIUS_M: ${WEB_MAX_HAZARD_RADIUS_M:-25000}
       WEB_WS_MAX_TILES_PER_CONNECTION: ${WEB_WS_MAX_TILES_PER_CONNECTION:-60}
+      # Join code (docs/join-code.md): the directory is the volume above, not a setting of the .env file.
+      # Empty address = FEDERATION_PUBLIC_ADDRESS; with neither, no public code is created (a note goes to the log).
+      JOIN_PUBLIC_ADDRESS: ${JOIN_PUBLIC_ADDRESS:-}
+      JOIN_DIR: /app/data/join
     volumes:
       - static-packages:/app/data/static-packages
+      # The join code files (docs/join-code.md); back this volume up like the database, it holds the seed of the public code.
+      - join-data:/app/data/join
     ports:
       - "${PORT:-3000}:${PORT:-3000}"
 
@@ -153,6 +159,7 @@ services:
 volumes:
   postgres-data:
   static-packages:
+  join-data:
   caddy-data:
   caddy-config:
 

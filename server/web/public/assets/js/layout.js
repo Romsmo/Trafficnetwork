@@ -73,6 +73,7 @@ export function mountLayout(config, pageId) {
         externalLink(config.repoUrl, t("footer.github")),
         externalLink(`${config.repoUrl}/blob/main/LICENSE`, t("footer.license")),
         h("span", null, t("footer.version", { version: config.version })),
+        config.joinCodePage ? h("a", { href: "/join" }, t("footer.join")) : null,
         h("a", { href: "/privacy" }, t("footer.privacy")),
         h("a", { href: "/terms" }, t("footer.terms")),
         h("a", { href: "/imprint" }, t("footer.imprint")),

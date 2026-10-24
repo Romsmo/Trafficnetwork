@@ -1,0 +1,93 @@
+{
+  "description": "Join-Code v1 test vectors (docs/join-code.md, Appendix A.9). Computed by an independent reference; HKDF checked against RFC 5869 test case 1. Both the server and the app run them in CI.",
+  "rfc5869TestCase1": {
+    "ikm": "0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b",
+    "salt": "000102030405060708090a0b0c",
+    "info": "f0f1f2f3f4f5f6f7f8f9",
+    "length": 42,
+    "okm": "3cb25f25faacd57a90434f64d0362f2a2d2d0a90cf1a5a4c5db02d56ecc4c5bf34007208d5b887185865"
+  },
+  "valid": [
+    {
+      "name": "V1",
+      "node": "tn.example.org",
+      "seedHex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+      "rootHex": "a0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebf",
+      "k": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+      "r": "oKGio6SlpqeoqaqrrK2ur7CxsrO0tba3uLm6u7y9vr8",
+      "c": "3477B6GZ",
+      "id": "join-0976e09e1eaec0d7",
+      "secret": "-FwEg_jRs5Si3klUxZCT-MjYXj77JRh_VXOinsz5ZO8",
+      "fingerprint": "ADUY-QZ36-5T4U-YC5Z-EMZX",
+      "uri": "trafficnetwork://join?v=1&n=tn.example.org&k=AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8&r=oKGio6SlpqeoqaqrrK2ur7CxsrO0tba3uLm6u7y9vr8&c=3477B6GZ"
+    },
+    {
+      "name": "V2",
+      "node": "node.example.org:8443",
+      "seedHex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+      "rootHex": null,
+      "k": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+      "r": null,
+      "c": "Y2RMUGLQ",
+      "id": "join-0976e09e1eaec0d7",
+      "secret": "-FwEg_jRs5Si3klUxZCT-MjYXj77JRh_VXOinsz5ZO8",
+      "fingerprint": null,
+      "uri": "trafficnetwork://join?v=1&n=node.example.org:8443&k=AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8&c=Y2RMUGLQ"
+    },
+    {
+      "name": "V3",
+      "node": "a-b.example.com",
+      "seedHex": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "rootHex": null,
+      "k": "__________________________________________8",
+      "r": null,
+      "c": "B4LHE666",
+      "id": "join-1341a857b284d207",
+      "secret": "zVyg-DlwdaWwqSCxBSd3bmruu6Vuy6fz9HucYaFoVOs",
+      "fingerprint": null,
+      "uri": "trafficnetwork://join?v=1&n=a-b.example.com&k=__________________________________________8&c=B4LHE666"
+    }
+  ],
+  "invalid": [
+    {
+      "name": "bad_check",
+      "uri": "trafficnetwork://join?v=1&n=tn.example.org&k=AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8&r=oKGio6SlpqeoqaqrrK2ur7CxsrO0tba3uLm6u7y9vr8&c=3477B6GA",
+      "reason": "bad_check"
+    },
+    {
+      "name": "version_2",
+      "uri": "trafficnetwork://join?v=2&n=tn.example.org&k=AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8&r=oKGio6SlpqeoqaqrrK2ur7CxsrO0tba3uLm6u7y9vr8&c=3477B6GZ",
+      "reason": "newer_version"
+    },
+    {
+      "name": "ip_host",
+      "uri": "trafficnetwork://join?v=1&n=192.0.2.1&k=AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8&r=oKGio6SlpqeoqaqrrK2ur7CxsrO0tba3uLm6u7y9vr8&c=3477B6GZ",
+      "reason": "bad_node"
+    },
+    {
+      "name": "uppercase_host",
+      "uri": "trafficnetwork://join?v=1&n=TN.example.org&k=AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8&r=oKGio6SlpqeoqaqrrK2ur7CxsrO0tba3uLm6u7y9vr8&c=3477B6GZ",
+      "reason": "bad_node"
+    },
+    {
+      "name": "k_too_short",
+      "uri": "trafficnetwork://join?v=1&n=tn.example.org&k=AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh&r=oKGio6SlpqeoqaqrrK2ur7CxsrO0tba3uLm6u7y9vr8&c=3477B6GZ",
+      "reason": "bad_seed"
+    },
+    {
+      "name": "k_non_canonical",
+      "uri": "trafficnetwork://join?v=1&n=tn.example.org&k=AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh9&r=oKGio6SlpqeoqaqrrK2ur7CxsrO0tba3uLm6u7y9vr8&c=3477B6GZ",
+      "reason": "bad_seed"
+    },
+    {
+      "name": "duplicate_k",
+      "uri": "trafficnetwork://join?v=1&n=tn.example.org&k=AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8&r=oKGio6SlpqeoqaqrrK2ur7CxsrO0tba3uLm6u7y9vr8&c=3477B6GZ&k=AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+      "reason": "duplicate_parameter"
+    },
+    {
+      "name": "missing_n",
+      "uri": "trafficnetwork://join?v=1&k=AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8&r=oKGio6SlpqeoqaqrrK2ur7CxsrO0tba3uLm6u7y9vr8&c=3477B6GZ",
+      "reason": "missing_parameter"
+    }
+  ]
+}

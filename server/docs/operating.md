@@ -263,6 +263,34 @@ The map page's search bar ([`place-search.md`](place-search.md)) asks a Nominati
 * A failing service shows the visitor "not reachable" and nothing else; `502 PLACE_SEARCH_UNAVAILABLE` in the API. Nothing is stored
   that would need cleaning up - the cache is in memory.
 
+## Join code (server 1.3.0)
+
+The join code lets an app connect to this node by scanning a QR code ([`join-code.md`](join-code.md) has the format and the rules).
+
+* **Set the address.** `JOIN_PUBLIC_ADDRESS=https://your-node.example` in `.env` (or `FEDERATION_PUBLIC_ADDRESS`, which it falls back to).
+  It must be `https://`, a host name with a dot, no IP address, no path. Without it no code is created and the log says why.
+* **Where the code is.** On disk in `JOIN_DIR`: in Docker the volume `join-data` at `/app/data/join` (`docker compose exec server ls -l
+  /app/data/join`), otherwise `./data/join`. `public.join` holds the code, `public.svg` the QR code, `public.json` the status and the
+  number of registrations (no secret). On the web at `https://<your-node>/join`. The files hold the seed of the code: **back the volume up
+  like the database, and keep it private**.
+* **Show it:** `docker compose exec server node dist/join-cli.js show` (source install: `npm run join:show`) prints the code, the file
+  paths and a QR code in the terminal.
+* **What "public" means.** The code on the page is visible to everyone, by design: anyone who has it can register an app here - nothing
+  more. It is not a password. If you do not want that, set `JOIN_CODE_PUBLIC=false` (no page, no public code) and give out invitation
+  codes: `join:create -- --label "workshop" --max-uses 20 --expires 7d` (in the container: `… join-cli.js create --label "workshop"
+  --max-uses 20 --expires 7d`). An invitation code is never on the page.
+* **Rotate.** `join:rotate` makes a new public code; the old one keeps working `JOIN_ROTATE_GRACE_DAYS` days (default 7) so apps
+  that already scanned it can finish, then answers `join_code_expired`. Use it when the code is being abused or the file was lost.
+* **Revoke.** `join:revoke -- <clientId>` (ids are in `join:list`) stops new registrations with that code at once.
+  **Devices that already registered with it keep working** - revoking a code is not revoking its devices. Abuse by registered devices is
+  handled as before (moderation, reputation).
+* **Limits.** 10 requests per minute per IP on token and registration (as before). The public code has no daily cap by default; set
+  `JOIN_CODE_MAX_REGISTRATIONS_PER_DAY` to cap it. `join:list` shows how many devices each code has registered.
+* **If the check at start complains** ("its file is missing", "does not parse", "does not belong to this app key"): the app key exists but the
+  code cannot be shown; run `join:rotate`. The server never replaces a code on its own.
+* **Changing the address or the network key** (`NETWORK_ROOT_PUBLIC_KEY`) needs no rotation: at the next start the files are written again from
+  the same seed. Apps that scanned the old text keep the address they have.
+
 ## Migrations that take a heavy lock
 
 **Migration 0007 (community corrections) needs a maintenance window on a node that already holds

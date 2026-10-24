@@ -100,6 +100,7 @@ jobs:
     env:
       POSTGRES_PASSWORD: ci-smoke-test-password
       JWT_SECRET: ci-smoke-test-jwt-secret-32-chars
+      JOIN_PUBLIC_ADDRESS: https://smoke.example.org
     steps:
       - uses: actions/checkout@v4
 
@@ -118,6 +119,31 @@ jobs:
           echo "Server did not become healthy in time"
           docker compose logs
           exit 1
+
+      # The join code (server/docs/join-code.md): made at the first start, on the volume with 0600, shown on the page, usable.
+      # Nothing here prints the code.
+      - name: Join code is created, shown, and registers a device
+        run: |
+          curl -sf http://localhost:3000/join-code.json | grep -q '"available":true'
+          curl -sf http://localhost:3000/join | grep -q join-page.js
+          docker compose exec -T server node dist/join-cli.js show | grep -q 'trafficnetwork://join?v=1&n=smoke.example.org'
+          docker compose exec -T server node dist/join-cli.js list | grep -q 'public'
+          test "$(docker compose exec -T server stat -c %a /app/data/join/public.join)" = 600
+          docker compose exec -T server node --input-type=module -e '
+          import { readFileSync } from "node:fs";
+          import { parseJoinUri, deriveCredentials } from "./dist/modules/join/code.js";
+          const c = deriveCredentials(parseJoinUri(readFileSync("/app/data/join/public.join", "utf8").trim()).seed);
+          const base = "http://127.0.0.1:3000";
+          const t = await fetch(base + "/v1/auth/token", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ clientId: c.clientId, clientSecret: c.clientSecret }) });
+          if (!t.ok) throw new Error("token: HTTP " + t.status);
+          const r = await fetch(base + "/v1/devices/register", { method: "POST", headers: { authorization: "Bearer " + (await t.json()).accessToken } });
+          if (!r.ok) throw new Error("register: HTTP " + r.status);
+          console.log("registered a device with the join code: HTTP", r.status);
+          '
+          # a restart makes no second code
+          docker compose restart server
+          for i in $(seq 1 30); do curl -sf http://localhost:3000/v1/health >/dev/null && break; sleep 1; done
+          test "$(docker compose exec -T server node dist/join-cli.js list | grep -c public)" = 1
 
       - name: Build Apache reverse-proxy smoke-test image
         run: docker build -f tests/fixtures/apache-smoke.Dockerfile -t apache-smoke tests/fixtures

@@ -1,12 +1,38 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
-import { bindDevicePublicKey, countDevicesRegisteredInLastDay, findClientByClientId, insertClient } from "../../db/queries/clients.js";
+import { bindDevicePublicKey, countDevicesRegisteredInLastDay, findClientByClientId, insertClient, type ClientRow } from "../../db/queries/clients.js";
+import { countJoinRegistrations, countJoinRegistrationsInLastDay, lockJoinCodeRow } from "../../db/queries/join-codes.js";
 import { generateClientId, generateClientSecret, hashSecret } from "../auth/credentials.js";
 import { requireScope } from "../auth/hook.js";
-import { badRequest, conflict, tooManyRequests } from "../../lib/errors.js";
+import { badRequest, conflict, joinCodeExhausted, joinCodeExpired, joinCodeRateLimited, joinCodeRevoked, tooManyRequests } from "../../lib/errors.js";
 import { isFreshTimestamp, verifySignedEnvelope, type SignedEnvelope } from "../crypto/envelope.js";
 
 const ASSERTION_FRESHNESS_WINDOW_SECONDS = 60;
+
+/**
+ * Registration through the app key behind a join code (docs/join-code.md). Same result as any other app key, with the join
+ * code's own rules instead of the per-app-key daily cap: revoked and expired codes say so, an invitation code stops at its
+ * max_uses, and JOIN_CODE_MAX_REGISTRATIONS_PER_DAY (0 = no cap) bounds a day. The code's row is locked for the check and the
+ * insert, so two simultaneous registrations cannot both take the last place.
+ */
+async function registerWithJoinCode(app: FastifyInstance, appClient: ClientRow): Promise<{ clientId: string; clientSecret: string }> {
+  if (appClient.revokedAt) throw joinCodeRevoked();
+  if (appClient.expiresAt && Date.parse(appClient.expiresAt) <= Date.now()) throw joinCodeExpired();
+
+  const clientId = generateClientId();
+  const clientSecret = generateClientSecret();
+  const clientSecretHash = await hashSecret(clientSecret);
+  const dailyCap = app.deps.env.JOIN_CODE_MAX_REGISTRATIONS_PER_DAY;
+
+  await app.deps.db.transaction(async (tx) => {
+    await lockJoinCodeRow(tx, appClient.id);
+    if (appClient.maxUses !== null && (await countJoinRegistrations(tx, appClient.id)) >= appClient.maxUses) throw joinCodeExhausted();
+    if (dailyCap > 0 && (await countJoinRegistrationsInLastDay(tx, appClient.id)) >= dailyCap) throw joinCodeRateLimited();
+    await insertClient(tx, { clientId, clientSecretHash, scopes: ["client"], name: `device:${clientId}`, registeredByClientId: appClient.id });
+  });
+
+  return { clientId, clientSecret };
+}
 
 interface BindKeyAssertion {
   publicKey: string;
@@ -36,6 +62,7 @@ export async function registerDeviceRoutes(app: FastifyInstance) {
     async (req) => {
       const appClientId = req.auth!.sub;
       const appClient = await findClientByClientId(app.deps.db, appClientId);
+      if (appClient?.kind) return registerWithJoinCode(app, appClient);
       if (!appClient || appClient.revokedAt) {
         // The token was valid at sign time but the app key has since been
         // revoked — should be rare given short JWT_TTL_SECONDS, but device

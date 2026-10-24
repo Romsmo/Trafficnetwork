@@ -33,9 +33,12 @@ COPY package.json ./
 # Pre-built static-data packages (add-on E-B, docs/europe-scale.md) live on a volume: they are
 # derived data, but rebuilding a Europe-sized set takes long, so they should survive a redeploy.
 # Created here (owned by the runtime user) so a fresh named volume inherits the ownership.
-RUN mkdir -p /app/data/static-packages && chown -R trafficnetwork:trafficnetwork /app/data
+# The join code (docs/join-code.md): its files hold the seed the code is shown from, so they live on a volume too and are
+# written 0600. A fresh named volume inherits the ownership of this directory.
+RUN mkdir -p /app/data/static-packages /app/data/join && chown -R trafficnetwork:trafficnetwork /app/data && chmod 700 /app/data/join
 ENV STATIC_PACKAGES_DIR=/app/data/static-packages
-VOLUME ["/app/data/static-packages"]
+ENV JOIN_DIR=/app/data/join
+VOLUME ["/app/data/static-packages", "/app/data/join"]
 
 USER trafficnetwork
 EXPOSE 3000

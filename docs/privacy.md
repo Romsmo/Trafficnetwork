@@ -72,6 +72,7 @@ Abschnitt 8).
   operated by the OpenStreetMap Foundation). It sees your IP address, browser and the map area shown and is subject to its own
   privacy policy. Operators can configure another tile server or switch the map background off (`MAP_TILE_URL=none`).
 * **Place search:** when you start a search in the map's search box, **the node** (not your browser) sends the search term and the rounded map area to a place-search service (default: nominatim.openstreetmap.org). The service sees the term, not your IP address. Searching starts only when triggered, not while typing. The node keeps term and answer briefly in memory, not in the database or the log. A search term can be an address. Operators can switch this off (`PLACE_SEARCH_URL=none`) or use their own service.
+* **Join code (draft):** the node counts how many devices registered with each join code (`useCount`) - a number per code, no personal data and no link to a person. The join code shown on the node's page is public by design; whoever uses it registers an anonymous device identity (as any app does). Revoking or replacing a code does not delete the devices that registered with it.
 * **Road data:** when you tap two spots on the map for a speed limit and the node does not have the roads of that area, **the
   node itself** (not your browser) asks a road-data service (default: a public Overpass instance) for the roads around those
   spots. It sees the area and the node's address, not your IP address. Operators can switch this off (`ROAD_LOOKUP_URL=none`) or

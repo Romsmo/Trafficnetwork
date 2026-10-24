@@ -17,8 +17,8 @@ const table = loadAssets({
 });
 
 describe("web UI asset table", () => {
-  it("has the pages (map, connect, about and the three legal pages) under their routes", () => {
-    expect([...table.pages.keys()].sort()).toEqual(["/", "/about", "/connect", "/imprint", "/privacy", "/terms"]);
+  it("has the pages (map, connect, join, about and the three legal pages) under their routes", () => {
+    expect([...table.pages.keys()].sort()).toEqual(["/", "/about", "/connect", "/imprint", "/join", "/privacy", "/terms"]);
     for (const asset of table.pages.values()) {
       expect(asset.contentType).toBe("text/html; charset=utf-8");
       expect(asset.cacheControl).toBe("no-cache");
