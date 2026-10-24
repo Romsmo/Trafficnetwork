@@ -19,11 +19,11 @@ via its own first-message handshake instead — see "Real-time push" below).
 | HTTP | Meaning |
 |---|---|
 | 400 | `BAD_REQUEST` / `VALIDATION_ERROR` — malformed input |
-| 401 | `UNAUTHORIZED` — missing/invalid/expired token, or bad client credentials |
-| 403 | `FORBIDDEN` — valid token, missing required scope |
+| 401 | `UNAUTHORIZED` — missing/invalid/expired token, or bad client credentials; `join_code_revoked` / `join_code_expired` — a join code that no longer accepts registrations (see "Join codes") |
+| 403 | `FORBIDDEN` — valid token, missing required scope; `join_code_exhausted` — an invitation code used up |
 | 404 | `NOT_FOUND` |
 | 409 | `SNAPSHOT_REQUIRED` (delta only) or `REPORT_NOT_ACTIVE` |
-| 429 | Moderation-gate rate limit, or `@fastify/rate-limit`'s standard 429 body on `/v1/auth/token` |
+| 429 | Moderation-gate rate limit, or `@fastify/rate-limit`'s standard 429 body on `/v1/auth/token`; `join_code_rate_limited` — the optional per-code daily cap |
 | 500 | `INTERNAL_ERROR` |
 
 ## Auth
@@ -67,6 +67,24 @@ cap (`DEVICE_REGISTRATION_RATE_LIMIT_MAX_PER_DAY`, default 50) — both return
 in the response) traces it back to the app key that requested it, so an
 app's devices can be looked up or bulk-revoked if the app key itself is
 revoked.
+
+#### Join codes (server 1.3.0)
+
+An app key can also come from a **join code** ([`join-code.md`](join-code.md)): the node creates an ordinary app key (scope
+`device-registration` only, id `join-<16 hex>`) whose id and secret the app derives from the code. The app then uses the usual two calls -
+`POST /v1/auth/token` with the derived id and secret, then `POST /v1/devices/register` - and nothing about them changes for a caller.
+What differs is how a code can end, and the error it answers with (the usual error format):
+
+| Status | `error.code` | When |
+|---|---|---|
+| 401 | `join_code_revoked` | the code was revoked (`join:revoke`, or replaced and past its grace period with a grace of 0). Answered on `/v1/auth/token` only to a caller that **knows the code's secret**; a wrong secret gets the ordinary `401 UNAUTHORIZED`. Also answered on `/v1/devices/register` for a token issued before the revocation |
+| 401 | `join_code_expired` | the end date of the code has passed: an invitation code made with `--expires`, or the old public code after `join:rotate` once its grace period is over |
+| 403 | `join_code_exhausted` | an invitation code made with `--max-uses N` has registered N devices (on `/v1/devices/register`) |
+| 429 | `join_code_rate_limited` | `JOIN_CODE_MAX_REGISTRATIONS_PER_DAY` (default 0 = no cap) is set and reached for this code today (on `/v1/devices/register`) |
+
+The per-IP limit (10 per minute) of both endpoints is unchanged and answers with the usual rate-limit 429 (not `join_code_rate_limited`). The
+per-app-key daily cap `DEVICE_REGISTRATION_RATE_LIMIT_MAX_PER_DAY` does not apply to the app key of a join code. **Revoking a code does not
+revoke the devices that registered with it**: their credentials are ordinary `client` credentials and keep working.
 
 ### `POST /v1/devices/bind-key` (F-S2)
 

@@ -3,7 +3,7 @@ import { z } from "zod";
 import { findClientByClientId } from "../../db/queries/clients.js";
 import { verifySecret } from "./credentials.js";
 import { signToken } from "./jwt.js";
-import { unauthorized } from "../../lib/errors.js";
+import { joinCodeExpired, joinCodeRevoked, unauthorized } from "../../lib/errors.js";
 import { isFreshTimestamp, verifySignedEnvelope, type SignedEnvelope } from "../crypto/envelope.js";
 
 const tokenBodySchema = z.object({
@@ -56,10 +56,15 @@ export async function registerAuthRoutes(app: FastifyInstance) {
       if (!parsed.success) throw unauthorized("Invalid credentials");
 
       const client = await findClientByClientId(app.deps.db, parsed.data.clientId);
-      if (!client || client.revokedAt) throw unauthorized("Invalid credentials");
+      // A revoked join code is told apart from a wrong one - but only to a caller that proves it knows the code's secret.
+      if (!client || (client.revokedAt && !client.kind)) throw unauthorized("Invalid credentials");
 
       const valid = await verifySecret(parsed.data.clientSecret, client.clientSecretHash);
       if (!valid) throw unauthorized("Invalid credentials");
+      if (client.kind) {
+        if (client.revokedAt) throw joinCodeRevoked();
+        if (client.expiresAt && Date.parse(client.expiresAt) <= Date.now()) throw joinCodeExpired();
+      }
 
       const token = await signToken({ sub: client.clientId, scopes: client.scopes }, app.deps.env);
       return { accessToken: token, tokenType: "Bearer", expiresIn: app.deps.env.JWT_TTL_SECONDS, scopes: client.scopes };

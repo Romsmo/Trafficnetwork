@@ -39,3 +39,13 @@ export function unprocessable(code: string, message: string, details?: unknown):
 export function tooManyRequests(message = "Too many requests"): ApiError {
   return new ApiError(429, "TOO_MANY_REQUESTS", message);
 }
+
+/**
+ * Join codes (docs/join-code.md). The app key behind a join code answers with these instead of the generic credential errors, so
+ * an app can tell its user what happened. They are only ever sent after the code's secret was proven (token) or the token was
+ * valid (register) - never to a stranger probing client ids.
+ */
+export const joinCodeRevoked = () => new ApiError(401, "join_code_revoked", "This join code has been revoked. Ask the operator for a current one.");
+export const joinCodeExpired = () => new ApiError(401, "join_code_expired", "This join code has expired. Ask the operator for a current one.");
+export const joinCodeExhausted = () => new ApiError(403, "join_code_exhausted", "This join code has reached the number of registrations it allows.");
+export const joinCodeRateLimited = () => new ApiError(429, "join_code_rate_limited", "Too many registrations with this join code today. Try again later.");

@@ -14,6 +14,12 @@ export interface ClientRow {
   registeredByClientId: string | null;
   /** Set once this client has bound a device key via POST /v1/devices/bind-key — see schema/auth.ts. */
   devicePublicKey: string | null;
+  /** 'join-public' / 'join-invite' for the app key behind a join code (docs/join-code.md); null for every other client. */
+  kind: string | null;
+  label: string | null;
+  /** ISO time after which a join code accepts no new registrations; null = until revoked. */
+  expiresAt: string | null;
+  maxUses: number | null;
 }
 
 interface Row extends Record<string, unknown> {
@@ -25,9 +31,13 @@ interface Row extends Record<string, unknown> {
   revoked_at: string | null;
   registered_by_client_id: string | null;
   device_public_key: string | null;
+  kind: string | null;
+  label: string | null;
+  expires_at: string | null;
+  max_uses: number | null;
 }
 
-const SELECT_COLUMNS = sql`id, client_id, client_secret_hash, scopes, name, revoked_at, registered_by_client_id, device_public_key`;
+const SELECT_COLUMNS = sql`id, client_id, client_secret_hash, scopes, name, revoked_at, registered_by_client_id, device_public_key, kind, label, expires_at, max_uses`;
 
 function toApi(row: Row): ClientRow {
   return {
@@ -39,6 +49,10 @@ function toApi(row: Row): ClientRow {
     revokedAt: row.revoked_at,
     registeredByClientId: row.registered_by_client_id,
     devicePublicKey: row.device_public_key,
+    kind: row.kind,
+    label: row.label,
+    expiresAt: row.expires_at,
+    maxUses: row.max_uses,
   };
 }
 

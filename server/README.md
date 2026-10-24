@@ -117,6 +117,14 @@ Die Tabelle `fixed_speed_cameras` (Name bleibt) hält jetzt **jede fest installi
 - Migration 0009 ist nur ein Katalogeintrag (5 ms bei 1 Mio. Zeilen, kein Wartungsfenster), mit Rückroll-Skript und Test gegen einen Altbestand: [`docs/operating.md`](docs/operating.md). Entwurf und Begründungen: [`docs/persistent-enforcement-devices.md`](docs/persistent-enforcement-devices.md).
 - Nicht föderiert (wie feste Blitzer): die Anlagen sind knotenlokale statische Daten; nur die gerätesignierte *Meldung* föderiert, als verfallende Meldung.
 
+## Join-Code: eine App per QR-Code verbinden (Server 1.3.0)
+
+Der Server erzeugt beim ersten Start einen **Join-Code** (Adresse, App-Schlüssel, optional Netzwerk-Schlüssel), legt ihn in `JOIN_DIR` ab (Docker: Volume `join-data`) und zeigt ihn auf der Seite **„App verbinden“** (`/join`) als QR-Code. Die App scannt ihn — ohne Build-Variablen und ohne Eintippen.
+
+- Einstellungen: `JOIN_PUBLIC_ADDRESS` (sonst `FEDERATION_PUBLIC_ADDRESS`), `JOIN_CODE_PUBLIC`, `JOIN_DIR`, `JOIN_ROTATE_GRACE_DAYS`, `JOIN_CODE_MAX_REGISTRATIONS_PER_DAY`.
+- Betreiber: `npm run join:show | join:create | join:rotate | join:revoke | join:list` (im Container: `docker compose exec server node dist/join-cli.js …`). Ein Widerruf wirkt auf neue Registrierungen; bereits registrierte Geräte bleiben gültig. Der Code auf der Seite ist öffentlich — gewollt.
+- Format, Ableitung, Testvektoren: [`docs/join-code.md`](docs/join-code.md); Betrieb: [`docs/operating.md`](docs/operating.md) (`Join code`); Fehlercodes: [`docs/api.md`](docs/api.md).
+
 ## Aktuell online (Zusatz O-A)
 
 `GET /v1/stats/online` (öffentlich, kein Auth) liefert, wie viele Clients gerade an diesem Knoten hängen, plus eine **geschätzte** Summe für das ganze Netz. Als "online" zählt ein Client (einmal, egal wie viele Verbindungen), wenn er eine authentifizierte WebSocket-Verbindung offen hat **oder** innerhalb von `ONLINE_WINDOW_SECONDS` (Standard 5 Minuten) eine erfolgreiche Sync- oder Schreibanfrage gemacht hat — so sind auch reine Polling-Clients sichtbar. Nur Tokens mit Scope `client` zählen, keine Dienst-Zugänge (Bulk-Import, Geräteregistrierung).

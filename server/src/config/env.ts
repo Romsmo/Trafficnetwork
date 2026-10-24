@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { isAcceptableFederationAddress } from "../modules/federation/address.js";
+import { nodeFromAddress } from "../modules/join/code.js";
 import { DEFAULT_MAP_TILE_URL, isAcceptableTileUrl } from "../modules/web/tile.js";
 
 const DEFAULT_ROAD_LOOKUP_URL = "https://overpass-api.de/api/interpreter";
@@ -385,6 +386,22 @@ const envSchema = z.object({
   // How long an answer is kept in memory (never on disk): the same search twice is one request.
   PLACE_SEARCH_CACHE_SECONDS: z.coerce.number().int().min(0).max(86_400).default(3600),
 
+  // Join code (docs/join-code.md): the code an app scans (QR) or pastes to learn this node's address and app key. The public
+  // code is created at the first start once the node's public address is known; its files live in JOIN_DIR (a volume in Docker).
+  // The address the code names: https://host[:port], no path. Empty = FEDERATION_PUBLIC_ADDRESS.
+  JOIN_PUBLIC_ADDRESS: z.string().default("").transform((value) => value.trim()),
+  JOIN_DIR: z.string().min(1).default("./data/join"),
+  // true: the page "App verbinden" shows the public code (it is public by design). false: no page; use invitation codes.
+  JOIN_CODE_PUBLIC: z
+    .enum(["true", "false"])
+    .default("true")
+    .transform((v) => v === "true"),
+  // How long the old public code keeps working after `join:rotate`.
+  JOIN_ROTATE_GRACE_DAYS: z.coerce.number().int().min(0).max(365).default(7),
+  // Optional cap on device registrations per join code and day (join_code_rate_limited); 0 = no cap. The per-IP limit of
+  // POST /v1/devices/register applies either way.
+  JOIN_CODE_MAX_REGISTRATIONS_PER_DAY: z.coerce.number().int().min(0).default(0),
+
   // Web sessions (POST /v1/web/session): anonymous, short-lived, unlinkable between renewals.
   WEB_SESSION_TTL_SECONDS: z.coerce.number().int().min(60).max(3600).default(900),
   WEB_SESSION_MINT_LIMIT_PER_MINUTE: z.coerce.number().int().positive().default(20),
@@ -427,6 +444,9 @@ const envSchema = z.object({
 }).refine((env) => !env.FEDERATION_PUBLIC_ADDRESS || isAcceptableFederationAddress(env.FEDERATION_PUBLIC_ADDRESS), {
   message: "FEDERATION_PUBLIC_ADDRESS must be an https:// URL (docs/threat-model.md: no self-hosted server identity over plain HTTP; a bare http://127.0.0.1 or http://localhost loopback literal is the one exception, for local testing)",
   path: ["FEDERATION_PUBLIC_ADDRESS"],
+}).refine((env) => env.JOIN_PUBLIC_ADDRESS === "" || nodeFromAddress(env.JOIN_PUBLIC_ADDRESS) !== null, {
+  message: "JOIN_PUBLIC_ADDRESS must be an https:// address with a host name that has a dot and no path, e.g. https://node.example.org (no IP address, no localhost; docs/join-code.md)",
+  path: ["JOIN_PUBLIC_ADDRESS"],
 });
 
 export type Env = z.infer<typeof envSchema>;

@@ -70,7 +70,10 @@ export async function registerWebModule(app: FastifyInstance): Promise<void> {
   };
 
   for (const [route, asset] of assets.pages) {
-    app.get(route, async (req, reply) => send(req, reply, asset));
+    // The page "App verbinden" shows the public join code: it does not exist on a node that keeps its code to itself.
+    if (route === "/join" && !env.JOIN_CODE_PUBLIC) continue;
+    // ...and is never cached, since what it shows changes with a rotation.
+    app.get(route, async (req, reply) => send(req, reply, asset, route === "/join" ? "no-store" : asset.cacheControl));
   }
 
   app.get("/web/*", async (req, reply) => {
@@ -102,6 +105,8 @@ export async function registerWebModule(app: FastifyInstance): Promise<void> {
       roadLookupHost: env.ROAD_LOOKUP_URL === "" ? null : hostOf(env.ROAD_LOOKUP_URL),
       // Place search (docs/place-search.md): null = the page shows no search box; else the service the node asks, named in the privacy notice.
       placeSearchHost: env.PLACE_SEARCH_URL === "" ? null : hostOf(env.PLACE_SEARCH_URL),
+      // Whether the page "App verbinden" exists (JOIN_CODE_PUBLIC): the footer and the connect page link to it only then.
+      joinCodePage: env.JOIN_CODE_PUBLIC,
       sessionTtlSeconds: env.WEB_SESSION_TTL_SECONDS,
       // How long a report is kept after it ended (matching, moderation), then deleted: shown in the privacy notice.
       retentionDays: env.EVENT_LOG_RETENTION_DAYS_DYNAMIC,
