@@ -6,7 +6,9 @@ use serde::Serialize;
 
 use crate::discovery::DiscoveryError;
 use crate::storage::StoreError;
-use crate::sync::{AuthError, CorrectionError, RoadError, SyncError, WriteBufferError};
+use crate::sync::{
+    AuthError, ContextSignError, CorrectionError, RoadError, SyncError, WriteBufferError,
+};
 
 /// The `code` values an [`ApiError`] can carry.
 pub mod code {
@@ -48,6 +50,20 @@ pub mod code {
     pub const INTERVAL_TOO_LONG: &str = "intervalTooLong";
     /// The two points are closer together than a stretch can be.
     pub const INTERVAL_TOO_SHORT: &str = "intervalTooShort";
+    /// The sign is not in the server catalogue (`DE:276` ...).
+    pub const UNKNOWN_SIGN: &str = "unknownSign";
+    /// The sign covers a stretch: give where it ends.
+    pub const SIGN_NEEDS_TWO_POINTS: &str = "signNeedsTwoPoints";
+    /// A sign at one place that applies one way needs the direction of travel.
+    pub const HEADING_REQUIRED: &str = "headingRequired";
+    /// The stretch is longer than this sign may cover.
+    pub const STRETCH_TOO_LONG: &str = "stretchTooLong";
+    /// The value is missing, out of range or does not fit the sign.
+    pub const INVALID_VALUE: &str = "invalidValue";
+    /// The time zone, the times or the period are not acceptable (or a temporary sign has no end).
+    pub const INVALID_VALIDITY: &str = "invalidValidity";
+    /// The stretch is not on a road the server knows.
+    pub const SHAPE_OFF_ROAD: &str = "shapeOffRoad";
     /// The client was closed.
     pub const CLOSED: &str = "closed";
     pub const INTERNAL: &str = "internal";
@@ -155,6 +171,37 @@ impl From<CorrectionError> for ApiError {
                 ApiError::new(code::INTERVAL_TOO_SHORT, error.to_string())
             }
             other => ApiError::invalid(other.to_string()),
+        }
+    }
+}
+
+impl From<ContextSignError> for ApiError {
+    fn from(error: ContextSignError) -> Self {
+        match error {
+            ContextSignError::NotOffered => ApiError::new(code::NOT_OFFERED, "the server does not offer context signs (an older server, or the operator switched them off)"),
+            ContextSignError::Transport(message) => ApiError::new(code::NETWORK, message),
+            ContextSignError::Store(message) => ApiError::new(code::STORAGE, message),
+            ContextSignError::StorageFull => ApiError::new(code::STORAGE_FULL, "the local store is out of space"),
+            ContextSignError::Invalid(message) => ApiError::invalid(message),
+            ContextSignError::Refused { status, code: server_code, message } => {
+                let mapped = match server_code.as_str() {
+                    "NO_ROAD_DATA" => code::NO_ROAD_DATA,
+                    "NO_ROAD_FOUND" => code::NO_ROAD_FOUND,
+                    "NO_ROAD_BETWEEN_POINTS" => code::NO_ROAD_BETWEEN_POINTS,
+                    "INTERVAL_TOO_LONG" => code::INTERVAL_TOO_LONG,
+                    "INTERVAL_TOO_SHORT" => code::INTERVAL_TOO_SHORT,
+                    "UNKNOWN_SIGN" => code::UNKNOWN_SIGN,
+                    "SIGN_NEEDS_TWO_POINTS" => code::SIGN_NEEDS_TWO_POINTS,
+                    "HEADING_REQUIRED" => code::HEADING_REQUIRED,
+                    "STRETCH_TOO_LONG" => code::STRETCH_TOO_LONG,
+                    "VALUE_REQUIRED" | "INVALID_VALUE" => code::INVALID_VALUE,
+                    "INVALID_TIMEZONE" | "INVALID_WINDOW" | "INVALID_PERIOD" | "PERIOD_REQUIRED" | "PERIOD_TOO_LONG" => code::INVALID_VALIDITY,
+                    "SHAPE_OFF_ROAD" => code::SHAPE_OFF_ROAD,
+                    _ if status == 401 || status == 403 => code::AUTH,
+                    _ => code::REJECTED,
+                };
+                ApiError::new(mapped, message)
+            }
         }
     }
 }

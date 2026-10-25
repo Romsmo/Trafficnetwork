@@ -76,6 +76,10 @@ types ship alongside (`index.d.ts`).
 - **Finish:** `client.free()`. The data stays on disk; a new client on the
   same `storagePath` picks up where this one left off.
 
+## Traffic signs on a stretch (1.3.0)
+
+Which traffic signs apply here and just ahead, offline: `await client.getContextSigns({ lat: 48.1374, lng: 11.5755, heading: 92 })` (heading in degrees; `at`, `aheadMeters`, `includeUnconfirmed`, `includeInactive` are optional). The entries come with every sync; `covered: false` means nothing was downloaded for the place. Entering a sign: `resolveContextSign` (online preview), `reportContextSign` and `voteContextSign` (queued, signed when sent). All of it, with the rules for space, direction and time and the shared test vectors, is in `api.md`, "Context signs".
+
 ## Offline area and report duration (1.2.0)
 
 From 1.2.0 the device chooses what it keeps of the static data (`offline-storage.md`): by default the surroundings of the

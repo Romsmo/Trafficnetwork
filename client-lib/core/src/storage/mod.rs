@@ -165,6 +165,15 @@ pub enum WriteKind {
     HazardConfirmation { report_id: String },
     /// `POST /v1/speed-cameras/:id/removal-reports` — "this camera is gone".
     CameraRemoval { camera_id: String },
+    /// A proposal for a context sign (server 1.4.0, `server/docs/context-signs.md`). The request body is the resolve request
+    /// (sign, points, direction, validity); the node finds the road when the write is sent, and the proposal is signed then.
+    ContextSignProposal,
+    /// `POST /v1/context-signs/:id/confirmations`. `descriptor` is the entry as the device held it - what a supporting signed vote
+    /// has to carry; `None` for an objection.
+    ContextSignVote {
+        entry_id: String,
+        descriptor: Option<serde_json::Value>,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

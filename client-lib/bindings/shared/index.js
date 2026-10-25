@@ -117,6 +117,22 @@ export class BaseClient {
     return this.call("resolveRoadInterval", { from, to });
   }
 
+  getContextSigns(query) {
+    return this.call("getContextSigns", query);
+  }
+
+  resolveContextSign(request) {
+    return this.call("resolveContextSign", request);
+  }
+
+  async reportContextSign(request) {
+    return (await this.call("reportContextSign", request)).localId;
+  }
+
+  async voteContextSign(id, agrees) {
+    return (await this.call("voteContextSign", { id, agrees })).localId;
+  }
+
   dataDefectsNear(lat, lng, radiusMeters) {
     const args = { lat, lng };
     if (radiusMeters !== undefined) args.radiusMeters = radiusMeters;

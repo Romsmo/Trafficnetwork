@@ -2072,3 +2072,142 @@ async fn an_older_server_without_a_regions_list_says_so() {
         .unwrap_err();
     assert_eq!(error.code, "notOffered");
 }
+
+fn context_sign_server() -> Arc<ScriptedServer> {
+    let server = working_server(false);
+    let tile = crate::api::tiles::tile_at(52.0, 13.0, 4).unwrap();
+    server.route(
+        "GET",
+        "/v1/context-signs/tiles",
+        200,
+        json!({ "version": 3, "unchanged": false, "tiles": [{ "tile": tile, "entries": [{
+            "id": "e1", "signType": "DE:276", "geometry": [[12.999, 52.0], [13.003, 52.0]], "direction": "along",
+            "validity": { "v": 1, "tz": "Europe/Berlin" }, "value": null, "unit": null, "lengthM": 274.0,
+            "status": "confirmed", "confirmed": true, "confirmations": 3, "denials": 0, "expiresAt": null
+        }] }] }),
+    );
+    server.route(
+        "POST",
+        "/v1/context-signs/e1/confirmations",
+        200,
+        json!({ "recorded": true }),
+    );
+    server
+}
+
+#[tokio::test]
+async fn context_signs_arrive_with_a_sync_and_are_read_offline_for_a_position_and_a_heading() {
+    let server = context_sign_server();
+    let client = client(server.clone());
+    client.update_position(52.0, 13.0, None).unwrap();
+
+    let report = client.call("sync", json!({})).await.unwrap();
+    assert_eq!(report["ok"], true);
+    assert_eq!(report["contextSignsEntries"], 1);
+
+    let at = "2026-10-14T10:00:00Z";
+    let east = client
+        .call(
+            "getContextSigns",
+            json!({ "lat": 52.0, "lng": 13.0, "heading": 90, "at": at }),
+        )
+        .await
+        .unwrap();
+    assert_eq!(east["covered"], true);
+    assert_eq!(east["entriesHeld"], 1);
+    let sign = &east["signs"][0];
+    assert_eq!(
+        (
+            sign["id"].as_str(),
+            sign["signType"].as_str(),
+            sign["activeNow"].as_bool()
+        ),
+        (Some("e1"), Some("DE:276"), Some(true))
+    );
+    assert!(sign["startsInM"].as_f64().unwrap() < 0.0 && sign["endsInM"].as_f64().unwrap() > 100.0);
+    assert!(sign["validUntil"].is_null());
+
+    // against the one-way sign, and without knowing the way: nothing
+    let west = client
+        .call(
+            "getContextSigns",
+            json!({ "lat": 52.0, "lng": 13.0, "heading": 270, "at": at }),
+        )
+        .await
+        .unwrap();
+    assert!(west["signs"].as_array().unwrap().is_empty());
+    let unknown = client
+        .call(
+            "getContextSigns",
+            json!({ "lat": 52.0, "lng": 13.0, "at": at }),
+        )
+        .await
+        .unwrap();
+    assert!(unknown["signs"].as_array().unwrap().is_empty());
+
+    // a place the device holds nothing for: empty, and it says so
+    let far = client
+        .call(
+            "getContextSigns",
+            json!({ "lat": -30.0, "lng": 20.0, "heading": 90, "at": at }),
+        )
+        .await
+        .unwrap();
+    assert_eq!(far["covered"], false);
+    assert!(far["signs"].as_array().unwrap().is_empty());
+
+    // a vote is queued and goes out with the next sync
+    let id = client
+        .call("voteContextSign", json!({ "id": "e1", "agrees": true }))
+        .await
+        .unwrap();
+    assert!(id["localId"].is_string());
+    client.call("sync", json!({})).await.unwrap();
+    assert_eq!(
+        server.count("POST", "/v1/context-signs/e1/confirmations"),
+        1
+    );
+
+    // arguments are checked
+    let bad = client
+        .call(
+            "getContextSigns",
+            json!({ "lat": 52.0, "lng": 13.0, "aheadMeters": -5 }),
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(bad.code, code::INVALID_ARGUMENT);
+    let bad = client
+        .call(
+            "getContextSigns",
+            json!({ "lat": 52.0, "lng": 13.0, "at": "yesterday" }),
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(bad.code, code::INVALID_ARGUMENT);
+    let bad = client
+        .call(
+            "voteContextSign",
+            json!({ "id": "unknown", "agrees": true }),
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(bad.code, code::INVALID_ARGUMENT);
+}
+
+#[tokio::test]
+async fn a_server_without_context_signs_does_not_make_a_sync_fail() {
+    // working_server has no route for the tiles: an older server answers 404, a scripted gap is a network error - neither fails the sync
+    let client = client(working_server(false));
+    client.update_position(52.0, 13.0, None).unwrap();
+    let report = client.call("sync", json!({})).await.unwrap();
+    assert_eq!(report["ok"], true);
+    let signs = client
+        .call(
+            "getContextSigns",
+            json!({ "lat": 52.0, "lng": 13.0, "heading": 90 }),
+        )
+        .await
+        .unwrap();
+    assert!(signs["signs"].as_array().unwrap().is_empty());
+}

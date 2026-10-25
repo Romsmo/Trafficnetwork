@@ -10,6 +10,7 @@ import {
   type CameraPolicy,
   type ClientEvent,
   type ClientOptions,
+  type ContextSign,
   type NearbyItem,
   type OfflineSettings,
   type SecureStore,
@@ -71,6 +72,17 @@ async function useAnyBinding(client: TrafficNetworkClient): Promise<void> {
   await client.submitReport("accident", 52.52, 13.405, undefined, asked);
   await client.reportSpeedLimitInterval({ from: { lat: 52.52, lng: 13.405 }, to: { lat: 52.52, lng: 13.409 }, value: 30, unit: "kmh" });
   const stretch = await client.resolveRoadInterval({ lat: 52.52, lng: 13.405 }, { lat: 52.52, lng: 13.409 });
+  const context = await client.getContextSigns({ lat: 52.52, lng: 13.405, heading: 90, aheadMeters: 1000, includeInactive: true });
+  const first: ContextSign | undefined = context.signs[0];
+  if (first) {
+    const left: number | null = first.endsInM;
+    const until: string | null = first.validUntil;
+    void [left, until, first.startsInM <= 0];
+  }
+  const preview = await client.resolveContextSign({ signType: "DE:276", from: { lat: 52.52, lng: 13.405 }, to: { lat: 52.52, lng: 13.409 }, direction: "along" });
+  const queuedSign: string = await client.reportContextSign({ signType: "DE:151", from: { lat: 52.52, lng: 13.405 }, direction: "along", heading: 90 });
+  await client.voteContextSign(preview.entryKey, true);
+  void [context.covered, queuedSign];
   console.log(stretch.road.name, stretch.lengthM, stretch.geometry.coordinates.length, stretch.covered[0]?.speedLimit);
   const defects = await client.dataDefectsNear(52.52, 13.405, 40);
   if (defects[0]) {

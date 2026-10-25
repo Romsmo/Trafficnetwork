@@ -101,6 +101,40 @@ Also new: `getReportLimits(type)` and an optional duration on `submitReport` (`a
 `reportSpeedLimitInterval` for a stretch of road named by two points (with `resolveRoadInterval` to preview it and `dataDefectsNear`/`reportDataDefect` for wrong entries), and `lookupSpeedLimit`, which says *outside the offline area*
 instead of "no limit" where nothing could be looked at.
 
+## Traffic signs on a stretch (1.3.0)
+
+`getContextSigns` tells which traffic signs apply at the position and just ahead, offline (`api.md`, "Context signs"); the entries come with
+every sync. A minimal use for a display that shows the signs of the road ahead:
+
+```dart
+// every second while driving
+final result = await client.getContextSigns(lat: fix.lat, lng: fix.lng, heading: fix.headingDegrees, aheadMeters: 1500);
+if (result['covered'] == false) {
+  // nothing downloaded for this place yet: do not show "clear road"
+}
+for (final sign in (result['signs'] as List).cast<Map<String, Object?>>()) {
+  final code = sign['signType'] as String;          // 'DE:276', 'DE:142-10' -> major * 100 + minor = 27600, 14210
+  final startsIn = (sign['startsInM'] as num).toDouble(); // <= 0: applies already
+  final until = sign['validUntil'] as String?;      // RFC 3339 (UTC) or null
+  // the side (left/right) and which sign replaces which are the app's own rules
+}
+
+// entering one: preview what the points mean, then queue it (works offline, signed when sent)
+final request = {
+  'signType': 'DE:283',
+  'from': {'lat': 48.1370, 'lng': 11.5750},
+  'to': {'lat': 48.1380, 'lng': 11.5760},
+  'direction': 'both',
+  'validity': {'windows': [{'days': [1, 2, 3, 4, 5], 'from': '07:00', 'to': '17:00'}]},
+};
+final preview = await client.resolveContextSign(request); // draw preview['descriptor']['geometry']; preview['existing'] != null -> confirm that
+await client.reportContextSign(request);                  // or: await client.voteContextSign(preview['existing']['id'], true);
+```
+
+`heading` is the compass direction of travel; without it only both-way signs that contain the position are told. The shared test vectors
+(`client-lib/fixtures/context-sign-vectors.json`) run against the Dart binding too, in your test suite if you like: each case gives entries,
+a query and the expected answer.
+
 ## How it behaves
 
 - **The Dart API is asynchronous throughout.** The native side runs every call
@@ -169,7 +203,7 @@ the APK (`lib/<abi>/libtrafficnetwork_dart.so`); on iOS the app embeds
 `TrafficNetworkDart.framework` (a dynamic framework, in the app's `Frameworks` folder) and
 `initialize()` opens it by name.
 
-### iOS: Swift Package Manager or CocoaPods (1.2.1)
+### iOS: Swift Package Manager or CocoaPods (1.3.0)
 
 The plugin ships both, next to each other under `bindings/flutter/ios/`, over the same XCFramework
 (`ios/trafficnetwork_flutter/Frameworks/TrafficNetworkDart.xcframework`, built by `build-native.sh ios`, a device slice and a

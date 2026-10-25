@@ -1,0 +1,1203 @@
+{
+  "description": "Context-sign test vectors (server/docs/context-signs.md D12). Entries as the server delivers them, queries (position, heading, time, flags) and the answer getContextSigns must give. Made by make-context-sign-vectors.mjs, an independent JavaScript reference. Distances are compared within toleranceM; instants and flags exactly.",
+  "toleranceM": 1.5,
+  "entries": [
+    {
+      "id": "e1-overtaking",
+      "signType": "DE:276",
+      "geometry": [
+        [
+          10,
+          50
+        ],
+        [
+          10.01,
+          50
+        ]
+      ],
+      "direction": "along",
+      "validity": {
+        "v": 1,
+        "tz": "Europe/Berlin"
+      },
+      "value": null,
+      "unit": null,
+      "lengthM": 714.7,
+      "status": "confirmed",
+      "confirmed": true,
+      "confirmations": 3,
+      "denials": 0,
+      "lastConfirmedAt": null,
+      "expiresAt": null
+    },
+    {
+      "id": "e2-weekday-stop",
+      "signType": "DE:283",
+      "geometry": [
+        [
+          10.004,
+          50
+        ],
+        [
+          10.006,
+          50
+        ]
+      ],
+      "direction": "both",
+      "validity": {
+        "v": 1,
+        "tz": "Europe/Berlin",
+        "windows": [
+          {
+            "days": [
+              1,
+              2,
+              3,
+              4,
+              5
+            ],
+            "from": "07:00",
+            "to": "17:00"
+          }
+        ]
+      },
+      "value": null,
+      "unit": null,
+      "lengthM": 142.9,
+      "status": "confirmed",
+      "confirmed": true,
+      "confirmations": 3,
+      "denials": 0,
+      "lastConfirmedAt": null,
+      "expiresAt": null
+    },
+    {
+      "id": "e3-friday-night",
+      "signType": "DE:277",
+      "geometry": [
+        [
+          10.012,
+          50
+        ],
+        [
+          10.016,
+          50
+        ]
+      ],
+      "direction": "along",
+      "validity": {
+        "v": 1,
+        "tz": "Europe/Berlin",
+        "windows": [
+          {
+            "days": [
+              5
+            ],
+            "from": "22:00",
+            "to": "06:00"
+          }
+        ]
+      },
+      "value": null,
+      "unit": null,
+      "lengthM": 285.9,
+      "status": "confirmed",
+      "confirmed": true,
+      "confirmations": 3,
+      "denials": 0,
+      "lastConfirmedAt": null,
+      "expiresAt": null
+    },
+    {
+      "id": "e4-roadworks",
+      "signType": "DE:123",
+      "geometry": [
+        [
+          10.002,
+          50
+        ],
+        [
+          10.003,
+          50
+        ]
+      ],
+      "direction": "both",
+      "validity": {
+        "v": 1,
+        "tz": "Europe/Berlin",
+        "period": {
+          "from": "2026-10-01",
+          "to": "2026-11-30"
+        }
+      },
+      "value": null,
+      "unit": null,
+      "lengthM": 71.5,
+      "status": "confirmed",
+      "confirmed": true,
+      "confirmations": 3,
+      "denials": 0,
+      "lastConfirmedAt": null,
+      "expiresAt": null
+    },
+    {
+      "id": "e5-unconfirmed",
+      "signType": "DE:142-10",
+      "geometry": [
+        [
+          10.008,
+          50
+        ],
+        [
+          10.009,
+          50
+        ]
+      ],
+      "direction": "both",
+      "validity": {
+        "v": 1,
+        "tz": "Europe/Berlin"
+      },
+      "value": null,
+      "unit": null,
+      "lengthM": 71.5,
+      "status": "proposed",
+      "confirmed": false,
+      "confirmations": 1,
+      "denials": 0,
+      "lastConfirmedAt": null,
+      "expiresAt": null
+    },
+    {
+      "id": "e6-expired",
+      "signType": "DE:101-15",
+      "geometry": [
+        [
+          10,
+          50
+        ],
+        [
+          10.001,
+          50
+        ]
+      ],
+      "direction": "both",
+      "validity": {
+        "v": 1,
+        "tz": "Europe/Berlin"
+      },
+      "value": null,
+      "unit": null,
+      "lengthM": 71.5,
+      "status": "confirmed",
+      "confirmed": true,
+      "confirmations": 3,
+      "denials": 0,
+      "lastConfirmedAt": null,
+      "expiresAt": "2026-10-01T00:00:00Z"
+    },
+    {
+      "id": "e7-disputed",
+      "signType": "DE:101-14",
+      "geometry": [
+        [
+          10,
+          50
+        ],
+        [
+          10.001,
+          50
+        ]
+      ],
+      "direction": "both",
+      "validity": {
+        "v": 1,
+        "tz": "Europe/Berlin"
+      },
+      "value": null,
+      "unit": null,
+      "lengthM": 71.5,
+      "status": "disputed",
+      "confirmed": false,
+      "confirmations": 1,
+      "denials": 2,
+      "lastConfirmedAt": null,
+      "expiresAt": null
+    },
+    {
+      "id": "e8-westbound",
+      "signType": "DE:276",
+      "geometry": [
+        [
+          10.0105,
+          50
+        ],
+        [
+          10.0095,
+          50
+        ]
+      ],
+      "direction": "along",
+      "validity": {
+        "v": 1,
+        "tz": "Europe/Berlin"
+      },
+      "value": null,
+      "unit": null,
+      "lengthM": 71.5,
+      "status": "confirmed",
+      "confirmed": true,
+      "confirmations": 3,
+      "denials": 0,
+      "lastConfirmedAt": null,
+      "expiresAt": null
+    },
+    {
+      "id": "e9-clock-back",
+      "signType": "DE:283",
+      "geometry": [
+        [
+          10,
+          50
+        ],
+        [
+          10.001,
+          50
+        ]
+      ],
+      "direction": "both",
+      "validity": {
+        "v": 1,
+        "tz": "Europe/Berlin",
+        "windows": [
+          {
+            "days": [
+              1,
+              2,
+              3,
+              4,
+              5,
+              6,
+              7
+            ],
+            "from": "01:30",
+            "to": "02:45"
+          }
+        ]
+      },
+      "value": null,
+      "unit": null,
+      "lengthM": 71.5,
+      "status": "confirmed",
+      "confirmed": true,
+      "confirmations": 3,
+      "denials": 0,
+      "lastConfirmedAt": null,
+      "expiresAt": null
+    },
+    {
+      "id": "e10-clock-forward",
+      "signType": "DE:283",
+      "geometry": [
+        [
+          10,
+          50
+        ],
+        [
+          10.001,
+          50
+        ]
+      ],
+      "direction": "both",
+      "validity": {
+        "v": 1,
+        "tz": "Europe/Berlin",
+        "windows": [
+          {
+            "days": [
+              1,
+              2,
+              3,
+              4,
+              5,
+              6,
+              7
+            ],
+            "from": "02:15",
+            "to": "03:30"
+          }
+        ]
+      },
+      "value": null,
+      "unit": null,
+      "lengthM": 71.5,
+      "status": "confirmed",
+      "confirmed": true,
+      "confirmations": 3,
+      "denials": 0,
+      "lastConfirmedAt": null,
+      "expiresAt": null
+    },
+    {
+      "id": "e11-until-revoked",
+      "signType": "DE:101-52",
+      "geometry": [
+        [
+          10.018,
+          50
+        ],
+        [
+          10.019,
+          50
+        ]
+      ],
+      "direction": "both",
+      "validity": {
+        "v": 1,
+        "tz": "Europe/Berlin",
+        "period": {
+          "from": "2026-10-01",
+          "to": null
+        }
+      },
+      "value": null,
+      "unit": null,
+      "lengthM": 71.5,
+      "status": "confirmed",
+      "confirmed": true,
+      "confirmations": 3,
+      "denials": 0,
+      "lastConfirmedAt": null,
+      "expiresAt": null
+    }
+  ],
+  "cases": [
+    {
+      "name": "an empty stock gives an empty answer",
+      "entries": [],
+      "query": {
+        "lat": 50,
+        "lng": 10,
+        "at": "2026-10-14T10:00:00Z",
+        "headingDeg": 90
+      },
+      "expect": []
+    },
+    {
+      "name": "driving along a one-way stretch: it applies, the metres driven and left are told",
+      "entries": [
+        "e1-overtaking"
+      ],
+      "query": {
+        "lat": 50,
+        "lng": 10.0027982,
+        "at": "2026-10-14T10:00:00Z",
+        "headingDeg": 90
+      },
+      "expect": [
+        {
+          "id": "e1-overtaking",
+          "startsInM": -200,
+          "endsInM": 514.7,
+          "activeNow": true,
+          "validUntil": null,
+          "nextActiveAt": null
+        }
+      ]
+    },
+    {
+      "name": "driving the other way: a one-way sign does not apply",
+      "entries": [
+        "e1-overtaking"
+      ],
+      "query": {
+        "lat": 50,
+        "lng": 10.0027982,
+        "at": "2026-10-14T10:00:00Z",
+        "headingDeg": 270
+      },
+      "expect": []
+    },
+    {
+      "name": "59 degrees off the stretch still applies",
+      "entries": [
+        "e1-overtaking"
+      ],
+      "query": {
+        "lat": 50,
+        "lng": 10.0027982,
+        "at": "2026-10-14T10:00:00Z",
+        "headingDeg": 149
+      },
+      "expect": [
+        {
+          "id": "e1-overtaking",
+          "startsInM": -200,
+          "endsInM": 514.7,
+          "activeNow": true,
+          "validUntil": null,
+          "nextActiveAt": null
+        }
+      ]
+    },
+    {
+      "name": "61 degrees off the stretch",
+      "entries": [
+        "e1-overtaking"
+      ],
+      "query": {
+        "lat": 50,
+        "lng": 10.0027982,
+        "at": "2026-10-14T10:00:00Z",
+        "headingDeg": 151
+      },
+      "expect": []
+    },
+    {
+      "name": "unknown heading: a one-way sign is not delivered",
+      "entries": [
+        "e1-overtaking"
+      ],
+      "query": {
+        "lat": 50,
+        "lng": 10.0027982,
+        "at": "2026-10-14T10:00:00Z"
+      },
+      "expect": []
+    },
+    {
+      "name": "unknown heading: a both-way sign that contains the position is, in stored order",
+      "entries": [
+        "e1-overtaking",
+        "e8-westbound",
+        "e2-weekday-stop"
+      ],
+      "query": {
+        "lat": 50,
+        "lng": 10.0048968,
+        "at": "2026-10-14T10:00:00Z"
+      },
+      "expect": [
+        {
+          "id": "e2-weekday-stop",
+          "startsInM": -64.1,
+          "endsInM": 78.9,
+          "activeNow": true,
+          "validUntil": "2026-10-14T15:00:00Z",
+          "nextActiveAt": null
+        }
+      ]
+    },
+    {
+      "name": "unknown heading: nothing ahead is told",
+      "entries": [
+        "e1-overtaking",
+        "e2-weekday-stop"
+      ],
+      "query": {
+        "lat": 50,
+        "lng": 9.9986009,
+        "at": "2026-10-14T10:00:00Z"
+      },
+      "expect": []
+    },
+    {
+      "name": "ahead: a stretch that starts 100 m in front",
+      "entries": [
+        "e1-overtaking"
+      ],
+      "query": {
+        "lat": 50,
+        "lng": 9.9986009,
+        "at": "2026-10-14T10:00:00Z",
+        "headingDeg": 90
+      },
+      "expect": [
+        {
+          "id": "e1-overtaking",
+          "startsInM": 100,
+          "endsInM": 814.7,
+          "activeNow": true,
+          "validUntil": null,
+          "nextActiveAt": null
+        }
+      ]
+    },
+    {
+      "name": "ahead: farther than the look-ahead is not told",
+      "entries": [
+        "e1-overtaking"
+      ],
+      "query": {
+        "lat": 50,
+        "lng": 9.9916054,
+        "at": "2026-10-14T10:00:00Z",
+        "headingDeg": 90,
+        "aheadM": 500
+      },
+      "expect": []
+    },
+    {
+      "name": "ahead: within the default look-ahead of 1500 m",
+      "entries": [
+        "e1-overtaking"
+      ],
+      "query": {
+        "lat": 50,
+        "lng": 9.9804127,
+        "at": "2026-10-14T10:00:00Z",
+        "headingDeg": 90
+      },
+      "expect": [
+        {
+          "id": "e1-overtaking",
+          "startsInM": 1400,
+          "endsInM": 2114.7,
+          "activeNow": true,
+          "validUntil": null,
+          "nextActiveAt": null
+        }
+      ]
+    },
+    {
+      "name": "behind: the stretch is already passed",
+      "entries": [
+        "e1-overtaking"
+      ],
+      "query": {
+        "lat": 50,
+        "lng": 10.0125919,
+        "at": "2026-10-14T10:00:00Z",
+        "headingDeg": 90
+      },
+      "expect": []
+    },
+    {
+      "name": "a stretch that ends exactly at the position is over",
+      "entries": [
+        "e1-overtaking"
+      ],
+      "query": {
+        "lat": 50,
+        "lng": 10.01,
+        "at": "2026-10-14T10:00:00Z",
+        "headingDeg": 90
+      },
+      "expect": []
+    },
+    {
+      "name": "one metre before the end it still applies",
+      "entries": [
+        "e1-overtaking"
+      ],
+      "query": {
+        "lat": 50,
+        "lng": 10.0099923,
+        "at": "2026-10-14T10:00:00Z",
+        "headingDeg": 90
+      },
+      "expect": [
+        {
+          "id": "e1-overtaking",
+          "startsInM": -714.2,
+          "endsInM": 0.6,
+          "activeNow": true,
+          "validUntil": null,
+          "nextActiveAt": null
+        }
+      ]
+    },
+    {
+      "name": "at the very start it applies already (starts in 0)",
+      "entries": [
+        "e1-overtaking"
+      ],
+      "query": {
+        "lat": 50,
+        "lng": 10,
+        "at": "2026-10-14T10:00:00Z",
+        "headingDeg": 90
+      },
+      "expect": [
+        {
+          "id": "e1-overtaking",
+          "startsInM": 0,
+          "endsInM": 714.7,
+          "activeNow": true,
+          "validUntil": null,
+          "nextActiveAt": null
+        }
+      ]
+    },
+    {
+      "name": "beside the road (55 m) it does not count as on it",
+      "entries": [
+        "e1-overtaking"
+      ],
+      "query": {
+        "lat": 50.0005,
+        "lng": 10.0027982,
+        "at": "2026-10-14T10:00:00Z",
+        "headingDeg": 90
+      },
+      "expect": []
+    },
+    {
+      "name": "both ways: read in the direction of travel (east)",
+      "entries": [
+        "e2-weekday-stop"
+      ],
+      "query": {
+        "lat": 50,
+        "lng": 10.0041973,
+        "at": "2026-10-14T10:00:00Z",
+        "headingDeg": 90
+      },
+      "expect": [
+        {
+          "id": "e2-weekday-stop",
+          "startsInM": -14.1,
+          "endsInM": 128.8,
+          "activeNow": true,
+          "validUntil": "2026-10-14T15:00:00Z",
+          "nextActiveAt": null
+        }
+      ]
+    },
+    {
+      "name": "both ways: read in the direction of travel (west)",
+      "entries": [
+        "e2-weekday-stop"
+      ],
+      "query": {
+        "lat": 50,
+        "lng": 10.0041973,
+        "at": "2026-10-14T10:00:00Z",
+        "headingDeg": 270
+      },
+      "expect": [
+        {
+          "id": "e2-weekday-stop",
+          "startsInM": -128.8,
+          "endsInM": 14.1,
+          "activeNow": true,
+          "validUntil": "2026-10-14T15:00:00Z",
+          "nextActiveAt": null
+        }
+      ]
+    },
+    {
+      "name": "weekday window: inside it (Wednesday 12:00) it applies until 17:00 local",
+      "entries": [
+        "e2-weekday-stop"
+      ],
+      "query": {
+        "lat": 50,
+        "lng": 10.0041973,
+        "at": "2026-10-14T10:00:00Z",
+        "headingDeg": 90
+      },
+      "expect": [
+        {
+          "id": "e2-weekday-stop",
+          "startsInM": -14.1,
+          "endsInM": 128.8,
+          "activeNow": true,
+          "validUntil": "2026-10-14T15:00:00Z",
+          "nextActiveAt": null
+        }
+      ]
+    },
+    {
+      "name": "weekday window: at 16:59:30 local it still applies",
+      "entries": [
+        "e2-weekday-stop"
+      ],
+      "query": {
+        "lat": 50,
+        "lng": 10.0041973,
+        "at": "2026-10-14T14:59:30Z",
+        "headingDeg": 90
+      },
+      "expect": [
+        {
+          "id": "e2-weekday-stop",
+          "startsInM": -14.1,
+          "endsInM": 128.8,
+          "activeNow": true,
+          "validUntil": "2026-10-14T15:00:00Z",
+          "nextActiveAt": null
+        }
+      ]
+    },
+    {
+      "name": "weekday window: at 17:00:00 local it is over",
+      "entries": [
+        "e2-weekday-stop"
+      ],
+      "query": {
+        "lat": 50,
+        "lng": 10.0041973,
+        "at": "2026-10-14T15:00:00Z",
+        "headingDeg": 90
+      },
+      "expect": []
+    },
+    {
+      "name": "weekday window: Saturday it is not delivered",
+      "entries": [
+        "e2-weekday-stop"
+      ],
+      "query": {
+        "lat": 50,
+        "lng": 10.0041973,
+        "at": "2026-10-17T10:00:00Z",
+        "headingDeg": 90
+      },
+      "expect": []
+    },
+    {
+      "name": "weekday window: Saturday, asked for inactive entries, it says when it next applies (Monday 07:00 local)",
+      "entries": [
+        "e2-weekday-stop"
+      ],
+      "query": {
+        "lat": 50,
+        "lng": 10.0041973,
+        "at": "2026-10-17T10:00:00Z",
+        "headingDeg": 90,
+        "includeInactive": true
+      },
+      "expect": [
+        {
+          "id": "e2-weekday-stop",
+          "startsInM": -14.1,
+          "endsInM": 128.8,
+          "activeNow": false,
+          "validUntil": null,
+          "nextActiveAt": "2026-10-19T05:00:00Z"
+        }
+      ]
+    },
+    {
+      "name": "window over midnight (Friday 22:00-06:00): Friday 23:00 applies until Saturday 06:00 local",
+      "entries": [
+        "e3-friday-night"
+      ],
+      "query": {
+        "lat": 50,
+        "lng": 10.0146905,
+        "at": "2026-10-16T21:00:00Z",
+        "headingDeg": 90
+      },
+      "expect": [
+        {
+          "id": "e3-friday-night",
+          "startsInM": -192.3,
+          "endsInM": 93.6,
+          "activeNow": true,
+          "validUntil": "2026-10-17T04:00:00Z",
+          "nextActiveAt": null
+        }
+      ]
+    },
+    {
+      "name": "window over midnight: Saturday 05:00 local still belongs to Friday",
+      "entries": [
+        "e3-friday-night"
+      ],
+      "query": {
+        "lat": 50,
+        "lng": 10.0146905,
+        "at": "2026-10-17T03:00:00Z",
+        "headingDeg": 90
+      },
+      "expect": [
+        {
+          "id": "e3-friday-night",
+          "startsInM": -192.3,
+          "endsInM": 93.6,
+          "activeNow": true,
+          "validUntil": "2026-10-17T04:00:00Z",
+          "nextActiveAt": null
+        }
+      ]
+    },
+    {
+      "name": "window over midnight: Saturday 23:00 local does not (Saturday is not listed)",
+      "entries": [
+        "e3-friday-night"
+      ],
+      "query": {
+        "lat": 50,
+        "lng": 10.0146905,
+        "at": "2026-10-17T21:00:00Z",
+        "headingDeg": 90
+      },
+      "expect": []
+    },
+    {
+      "name": "window over midnight: Friday 12:00 local is outside it",
+      "entries": [
+        "e3-friday-night"
+      ],
+      "query": {
+        "lat": 50,
+        "lng": 10.0146905,
+        "at": "2026-10-16T10:00:00Z",
+        "headingDeg": 90,
+        "includeInactive": true
+      },
+      "expect": [
+        {
+          "id": "e3-friday-night",
+          "startsInM": -192.3,
+          "endsInM": 93.6,
+          "activeNow": false,
+          "validUntil": null,
+          "nextActiveAt": "2026-10-16T20:00:00Z"
+        }
+      ]
+    },
+    {
+      "name": "period: roadworks inside the period apply until the end of the last day (local)",
+      "entries": [
+        "e4-roadworks"
+      ],
+      "query": {
+        "lat": 50,
+        "lng": 10.0025184,
+        "at": "2026-11-29T11:00:00Z",
+        "headingDeg": 90
+      },
+      "expect": [
+        {
+          "id": "e4-roadworks",
+          "startsInM": -37.1,
+          "endsInM": 34.4,
+          "activeNow": true,
+          "validUntil": "2026-11-30T23:00:00Z",
+          "nextActiveAt": null
+        }
+      ]
+    },
+    {
+      "name": "period: the day after it ends it is over",
+      "entries": [
+        "e4-roadworks"
+      ],
+      "query": {
+        "lat": 50,
+        "lng": 10.0025184,
+        "at": "2026-12-01T11:00:00Z",
+        "headingDeg": 90
+      },
+      "expect": []
+    },
+    {
+      "name": "period: before it starts it says when it begins (midnight local)",
+      "entries": [
+        "e4-roadworks"
+      ],
+      "query": {
+        "lat": 50,
+        "lng": 10.0025184,
+        "at": "2026-09-30T11:00:00Z",
+        "headingDeg": 90,
+        "includeInactive": true
+      },
+      "expect": [
+        {
+          "id": "e4-roadworks",
+          "startsInM": -37.1,
+          "endsInM": 34.4,
+          "activeNow": false,
+          "validUntil": null,
+          "nextActiveAt": "2026-09-30T22:00:00Z"
+        }
+      ]
+    },
+    {
+      "name": "until revoked: applies with no end",
+      "entries": [
+        "e11-until-revoked"
+      ],
+      "query": {
+        "lat": 50,
+        "lng": 10.0181883,
+        "at": "2026-10-14T10:00:00Z",
+        "headingDeg": 90
+      },
+      "expect": [
+        {
+          "id": "e11-until-revoked",
+          "startsInM": -13.5,
+          "endsInM": 58,
+          "activeNow": true,
+          "validUntil": null,
+          "nextActiveAt": null
+        }
+      ]
+    },
+    {
+      "name": "unconfirmed entries are left out",
+      "entries": [
+        "e5-unconfirmed"
+      ],
+      "query": {
+        "lat": 50,
+        "lng": 10.0083946,
+        "at": "2026-10-14T10:00:00Z",
+        "headingDeg": 90
+      },
+      "expect": []
+    },
+    {
+      "name": "unconfirmed entries when asked for",
+      "entries": [
+        "e5-unconfirmed"
+      ],
+      "query": {
+        "lat": 50,
+        "lng": 10.0083946,
+        "at": "2026-10-14T10:00:00Z",
+        "headingDeg": 90,
+        "includeUnconfirmed": true
+      },
+      "expect": [
+        {
+          "id": "e5-unconfirmed",
+          "startsInM": -28.2,
+          "endsInM": 43.3,
+          "activeNow": true,
+          "validUntil": null,
+          "nextActiveAt": null
+        }
+      ]
+    },
+    {
+      "name": "expired and disputed entries are never delivered",
+      "entries": [
+        "e6-expired",
+        "e7-disputed"
+      ],
+      "query": {
+        "lat": 50,
+        "lng": 10.0005596,
+        "at": "2026-10-14T10:00:00Z",
+        "headingDeg": 90,
+        "includeUnconfirmed": true,
+        "includeInactive": true
+      },
+      "expect": []
+    },
+    {
+      "name": "opposite direction: the same road, a sign for the westbound lane",
+      "entries": [
+        "e1-overtaking",
+        "e8-westbound"
+      ],
+      "query": {
+        "lat": 50,
+        "lng": 10.0096538,
+        "at": "2026-10-14T10:00:00Z",
+        "headingDeg": 270
+      },
+      "expect": [
+        {
+          "id": "e8-westbound",
+          "startsInM": -60.5,
+          "endsInM": 11,
+          "activeNow": true,
+          "validUntil": null,
+          "nextActiveAt": null
+        }
+      ]
+    },
+    {
+      "name": "sorted by distance, nearest first",
+      "entries": [
+        "e1-overtaking",
+        "e2-weekday-stop",
+        "e4-roadworks",
+        "e5-unconfirmed"
+      ],
+      "query": {
+        "lat": 50,
+        "lng": 9.9988807,
+        "at": "2026-10-14T10:00:00Z",
+        "headingDeg": 90,
+        "includeUnconfirmed": true
+      },
+      "expect": [
+        {
+          "id": "e1-overtaking",
+          "startsInM": 80,
+          "endsInM": 794.7,
+          "activeNow": true,
+          "validUntil": null,
+          "nextActiveAt": null
+        },
+        {
+          "id": "e4-roadworks",
+          "startsInM": 223,
+          "endsInM": 294.4,
+          "activeNow": true,
+          "validUntil": "2026-11-30T23:00:00Z",
+          "nextActiveAt": null
+        },
+        {
+          "id": "e2-weekday-stop",
+          "startsInM": 365.9,
+          "endsInM": 508.8,
+          "activeNow": true,
+          "validUntil": "2026-10-14T15:00:00Z",
+          "nextActiveAt": null
+        },
+        {
+          "id": "e5-unconfirmed",
+          "startsInM": 651.8,
+          "endsInM": 723.3,
+          "activeNow": true,
+          "validUntil": null,
+          "nextActiveAt": null
+        }
+      ]
+    },
+    {
+      "name": "clock change back (2026-10-25): 02:40 CEST is inside 01:30-02:45 and the window ends at the first 02:45",
+      "entries": [
+        "e9-clock-back"
+      ],
+      "query": {
+        "lat": 50,
+        "lng": 10.0005596,
+        "at": "2026-10-25T00:40:00Z",
+        "headingDeg": 90
+      },
+      "expect": [
+        {
+          "id": "e9-clock-back",
+          "startsInM": -40,
+          "endsInM": 31.5,
+          "activeNow": true,
+          "validUntil": "2026-10-25T00:45:00Z",
+          "nextActiveAt": null
+        }
+      ]
+    },
+    {
+      "name": "clock change back: 02:50 CEST is outside, and at 02:00 CET (the hour repeats) it applies again",
+      "entries": [
+        "e9-clock-back"
+      ],
+      "query": {
+        "lat": 50,
+        "lng": 10.0005596,
+        "at": "2026-10-25T00:50:00Z",
+        "headingDeg": 90,
+        "includeInactive": true
+      },
+      "expect": [
+        {
+          "id": "e9-clock-back",
+          "startsInM": -40,
+          "endsInM": 31.5,
+          "activeNow": false,
+          "validUntil": null,
+          "nextActiveAt": "2026-10-25T01:00:00Z"
+        }
+      ]
+    },
+    {
+      "name": "clock change back: 02:30 CET (second pass) applies until 02:45 CET",
+      "entries": [
+        "e9-clock-back"
+      ],
+      "query": {
+        "lat": 50,
+        "lng": 10.0005596,
+        "at": "2026-10-25T01:30:00Z",
+        "headingDeg": 90
+      },
+      "expect": [
+        {
+          "id": "e9-clock-back",
+          "startsInM": -40,
+          "endsInM": 31.5,
+          "activeNow": true,
+          "validUntil": "2026-10-25T01:45:00Z",
+          "nextActiveAt": null
+        }
+      ]
+    },
+    {
+      "name": "clock change forward (2026-03-29): the window starting at the non-existent 02:15 begins when 03:00 CEST comes",
+      "entries": [
+        "e10-clock-forward"
+      ],
+      "query": {
+        "lat": 50,
+        "lng": 10.0005596,
+        "at": "2026-03-29T00:30:00Z",
+        "headingDeg": 90,
+        "includeInactive": true
+      },
+      "expect": [
+        {
+          "id": "e10-clock-forward",
+          "startsInM": -40,
+          "endsInM": 31.5,
+          "activeNow": false,
+          "validUntil": null,
+          "nextActiveAt": "2026-03-29T01:00:00Z"
+        }
+      ]
+    },
+    {
+      "name": "clock change forward: at 03:10 CEST it applies until 03:30 CEST",
+      "entries": [
+        "e10-clock-forward"
+      ],
+      "query": {
+        "lat": 50,
+        "lng": 10.0005596,
+        "at": "2026-03-29T01:10:00Z",
+        "headingDeg": 90
+      },
+      "expect": [
+        {
+          "id": "e10-clock-forward",
+          "startsInM": -40,
+          "endsInM": 31.5,
+          "activeNow": true,
+          "validUntil": "2026-03-29T01:30:00Z",
+          "nextActiveAt": null
+        }
+      ]
+    },
+    {
+      "name": "a look-ahead of zero still tells what applies here",
+      "entries": [
+        "e1-overtaking"
+      ],
+      "query": {
+        "lat": 50,
+        "lng": 10.0027982,
+        "at": "2026-10-14T10:00:00Z",
+        "headingDeg": 90,
+        "aheadM": 0
+      },
+      "expect": [
+        {
+          "id": "e1-overtaking",
+          "startsInM": -200,
+          "endsInM": 514.7,
+          "activeNow": true,
+          "validUntil": null,
+          "nextActiveAt": null
+        }
+      ]
+    }
+  ]
+}

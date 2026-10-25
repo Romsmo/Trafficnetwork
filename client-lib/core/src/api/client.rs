@@ -38,6 +38,11 @@ use crate::sync::{
     SpeedLimitIntervalReport, SyncEngine, TtlDecision, WrongSpeedLimitReport,
 };
 use crate::sync::{
+    evaluate_context_signs, queue_context_sign_proposal, queue_context_sign_vote,
+    resolve_context_sign, stored_context_sign_tiles, stored_context_signs, sync_context_signs,
+    ContextSignPreview, ContextSignQuery, ContextSignRequest,
+};
+use crate::sync::{
     fetch_data_defects_near, report_data_defect, resolve_road_interval, DataDefect,
     DefectReportAnswer, IntervalPoint, RoadInterval,
 };
@@ -51,9 +56,9 @@ use super::secure_store::{
 };
 use super::tiles::{ring_for_speed, tiles_around, DEFAULT_REGION_RESOLUTION};
 use super::types::{
-    BootstrapPlanView, CameraPolicyView, NearbyCategory, NearbyItem, NetworkStatusView, NodeView,
-    OriginView, PositionUpdate, ProposalView, SpeedLimitAnswer, SpeedLimitLookup, SubmittedReport,
-    SyncReport, SyncStatus, TickResult,
+    BootstrapPlanView, CameraPolicyView, ContextSignsView, NearbyCategory, NearbyItem,
+    NetworkStatusView, NodeView, OriginView, PositionUpdate, ProposalView, SpeedLimitAnswer,
+    SpeedLimitLookup, SubmittedReport, SyncReport, SyncStatus, TickResult,
 };
 
 /// A token is renewed this long before it runs out.
@@ -1027,6 +1032,73 @@ impl TrafficNetworkClient {
         Ok(resolve_road_interval(&self.discovery, &token, from, to).await?)
     }
 
+    /// Which traffic signs apply here and just ahead (server 1.4.0, `server/docs/context-signs.md`): the entries the device holds
+    /// (they come with every sync, for the offline area and the places around the position), read at `at_unix_ms` (default now).
+    /// Evaluated locally and offline, like `get_speed_limit_at`. `heading` is the compass direction of travel; without it only
+    /// both-way signs that contain the position are told. `ahead_meters` defaults to 1500.
+    pub fn get_context_signs(
+        &self,
+        query: &ContextSignQuery,
+    ) -> Result<ContextSignsView, ApiError> {
+        self.check_open()?;
+        check_position(query.lat, query.lng)?;
+        if !query.ahead_m.is_finite() || query.ahead_m < 0.0 {
+            return Err(ApiError::invalid("aheadMeters must be zero or more"));
+        }
+        let entries = stored_context_signs(&*self.store);
+        let signs = evaluate_context_signs(&entries, query);
+        let resolution = self.context_sign_resolution();
+        let covered = crate::api::tiles::tile_at(query.lat, query.lng, resolution)
+            .is_some_and(|tile| stored_context_sign_tiles(&*self.store).contains(&tile));
+        Ok(ContextSignsView {
+            signs,
+            covered,
+            entries_held: entries.len(),
+        })
+    }
+
+    /// Which stretch of road the picked points of a context sign mean, and which entries are the same or similar - the preview to
+    /// show before anything is proposed (if `existing` is set, confirm that entry instead). Needs the network.
+    pub async fn resolve_context_sign(
+        &self,
+        request: &ContextSignRequest,
+    ) -> Result<ContextSignPreview, ApiError> {
+        self.check_open()?;
+        let token = self.ensure_token().await?;
+        Ok(resolve_context_sign(&self.discovery, &token, request).await?)
+    }
+
+    /// Proposes a context sign ("this sign applies here"). Queued like every write - the node finds the road and the proposal is
+    /// signed when it is sent, at the next sync - so it works offline. Returns the local queue id. One proposal is one voice: the
+    /// sign counts as confirmed once enough other devices agree (`getContextSigns` marks it `confirmed`).
+    pub fn report_context_sign(&self, request: &ContextSignRequest) -> Result<String, ApiError> {
+        self.check_open()?;
+        Ok(queue_context_sign_proposal(
+            &*self.store,
+            &*self.clock,
+            request,
+        )?)
+    }
+
+    /// "This sign is right here" (`agrees`) or "it is not" for an entry the device holds (its `id` from `getContextSigns`).
+    /// Queued and signed like a proposal; the newest stance replaces a still-queued older one. Returns the local queue id.
+    pub fn vote_context_sign(&self, entry_id: &str, agrees: bool) -> Result<String, ApiError> {
+        self.check_open()?;
+        Ok(queue_context_sign_vote(
+            &*self.store,
+            &*self.clock,
+            entry_id,
+            agrees,
+        )?)
+    }
+
+    fn context_sign_resolution(&self) -> u8 {
+        self.cached_config()
+            .map(|c| c.static_data_partition_h3_resolution)
+            .or_else(|| self.store.static_partition_resolution().ok().flatten())
+            .unwrap_or(4)
+    }
+
     /// The entries near a position that can be marked as wrong (speed-limit lines and signs), with how many devices
     /// have marked each. Needs the network; `notOffered` where the server does not take such marks.
     pub async fn data_defects_near(
@@ -1282,6 +1354,27 @@ impl TrafficNetworkClient {
             Err(error) => return Err(ApiError::from(error)),
         }
         report.pending_writes = self.store.pending_writes()?.len();
+
+        // Context signs (server 1.4.0): after the writes, so that what this device just said is in what it downloads. A failure
+        // here is reported (`contextSignsError`), not fatal and not a failed sync - the copy that is there keeps working.
+        {
+            let wanted = crate::sync::context_signs::wanted_tiles(
+                &*self.store,
+                self.context_sign_resolution(),
+                self.state().last_position,
+            );
+            match sync_context_signs(&*self.store, &self.discovery, &token, &wanted).await {
+                Ok(outcome) if outcome.not_offered => {}
+                Ok(outcome) => report.context_signs_entries = Some(outcome.entries),
+                Err(error) => {
+                    let error = ApiError::from(error);
+                    if error.code == code::STORAGE_FULL {
+                        return Err(error);
+                    }
+                    report.context_signs_error = Some(error.code);
+                }
+            }
+        }
 
         self.online.refresh().await;
         self.state().sync_due = false;

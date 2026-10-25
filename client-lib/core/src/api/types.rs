@@ -258,6 +258,25 @@ pub struct SyncReport {
     /// The host app should give a position (`updatePosition`), a home (`setAutoRegionPolicy`) or choose
     /// regions (`setOfflineRegions`).
     pub needs_location: bool,
+    /// Context signs (server 1.4.0): how many entries the offline copy holds after this sync. Absent when the server does not offer them.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub context_signs_entries: Option<usize>,
+    /// Error code of the context-sign part, if it failed.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub context_signs_error: Option<String>,
+}
+
+/// What `getContextSigns` returns.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ContextSignsView {
+    /// The signs that apply here or begin within the look-ahead, nearest first.
+    pub signs: Vec<crate::sync::ContextSign>,
+    /// The device holds the context signs of the place it was asked about. `false`: the answer is empty because nothing was
+    /// downloaded for it yet (or the server has none), not because there is no sign.
+    pub covered: bool,
+    /// Entries held in all.
+    pub entries_held: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]

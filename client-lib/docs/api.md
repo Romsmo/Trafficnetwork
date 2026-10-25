@@ -249,6 +249,84 @@ what `dataDefectsNear` lists (with `reports` of `threshold` already marked), the
 it. One mark per device and entry; when enough distinct devices have marked it the server takes it out (`removed: true`) and
 keeps it out when the next import brings it again. `notOffered` where the server does not take such marks.
 
+## Context signs: traffic signs on a stretch (1.3.0)
+
+```
+getContextSigns({ lat, lng, heading?, aheadMeters?, at?, includeUnconfirmed?, includeInactive? }) -> { signs, covered, entriesHeld }
+resolveContextSign(request) -> ContextSignPreview                  // async, needs the network
+reportContextSign(request) -> localId                              // queued, signed when sent
+voteContextSign(id, agrees) -> localId                             // queued, signed when sent
+```
+
+Traffic signs that apply on a stretch of road — a no-overtaking zone, a no-stopping rule on weekdays, a warning for wild animals, a
+roadworks sign for three weeks — entered by people, confirmed by other devices, and told to your app: **which signs apply here and just
+ahead, and for how long**. The design is `server/docs/context-signs.md`. A node needs server 1.4.0; the stock starts empty, so an empty
+answer is the normal case. The library hands out **raw entries**: no left/right column, no replacement of one sign by another (276
+replaces 277, 280 ends 276 ...) — that is the app's, by the display's `sign-rules.json`.
+
+**Reading is local and offline**, like `getSpeedLimitAt`. The entries come with every `sync` for the places the device has packages for and
+the ones around its position (a few KB per tile; one request that answers "unchanged" in a few bytes while nothing changed).
+
+```
+getContextSigns({ lat: 48.1374, lng: 11.5755, heading: 92, aheadMeters: 1500 })
+-> { covered: true, entriesHeld: 12, signs: [
+     { id, signType: "DE:276", startsInM: -214.4, endsInM: 500.4, activeNow: true, validUntil: null,
+       nextActiveAt: null, confirmed: true, confirmations: 3, direction: "along", lengthM: 714.8, value: null, unit: null },
+     { id, signType: "DE:283", startsInM: 120.0, endsInM: 263.0, validUntil: "2026-10-14T15:00:00Z", ... } ] }
+```
+
+* `startsInM <= 0` — the sign applies already; the number is minus the metres driven along its stretch. `> 0` — it begins that far
+  ahead (within `aheadMeters`, default 1500, at most 10000). `endsInM` — metres to where it ends, in the direction of travel.
+  Signs are ordered by `startsInM`, then `id`.
+* **Space.** The position is on a stretch within 30 m of it; the stretch is half-open: it applies from its first vertex up to, not
+  including, its last. A stretch is "ahead" when its first vertex (in the direction of travel) lies within `aheadMeters` and within 60°
+  of the heading, and the stretch runs within 60° of the heading there.
+* **Direction.** `direction: "along"` applies only when driving along the stretch: the heading must be within 60° of its bearing.
+  `"both"` applies either way and is read the way the heading points. **Without a `heading`** (no fix, standing still) only both-way
+  signs that contain the position are told — one-way signs are not, and nothing is told "ahead".
+* **Time.** `at` (an RFC 3339 text or Unix milliseconds, default now) is read in the entry's own time zone (`Europe/Berlin` ...), so a
+  rule means the same after the clocks change: first its period (local dates, inclusive; `to: null` = until revoked), then its weekday
+  and time windows (`[from, to)`, one that crosses midnight belongs to the day it starts on). `activeNow` says whether it applies at
+  `at`; `validUntil` is the instant (UTC) that ends the current validity, `null` for no end. Signs that do not apply at `at` are left
+  out; with `includeInactive` they are listed with `activeNow: false` and `nextActiveAt` (within eight days). Public holidays are not
+  modelled in this version.
+* **Confirmed or not.** A sign is `confirmed` once enough distinct devices have agreed (3 for prohibitions, 2 for warnings by default,
+  the node's choice). Unconfirmed signs are left out unless `includeUnconfirmed: true`; then they carry `confirmed: false` and the
+  count. Disputed, removed and expired entries are never told.
+* `covered` — the device holds the context signs of the place it was asked about. `false` means *nothing was downloaded for it yet*
+  (or the server has none), not that there is no sign: do not read an empty `signs` as "clear road" then.
+
+The rules are fixed by shared test vectors, `client-lib/fixtures/context-sign-vectors.json` (42 cases: both directions, the last metre of
+a stretch, a window over midnight, both clock changes, a period, expired/disputed/unconfirmed entries, an unknown heading ...), made by
+an independent JavaScript reference (`make-context-sign-vectors.mjs`); every binding and the app run them. **Cost:** a call looks at
+the entries held (hundreds at most) with plain arithmetic — microseconds to a millisecond; once a second in driving mode is no
+concern. It makes no network request.
+
+**Entering a sign** is two steps. `resolveContextSign` asks the node what the picked points mean — it needs the network:
+
+```
+{ signType: "DE:276", from: {lat, lng}, to: {lat, lng}, direction: "along" | "both",
+  heading?, validity?: { windows?: [{ days: [1..7], from: "07:00", to: "17:00" }], period?: { from: "2026-10-01", to: "2026-11-30" | null }, tz? },
+  value?, unit?: "t" | "m" }
+-> { descriptor, entryKey, lengthM, road: {name, ref, class}, timezone, existing: Entry | null, similar: [{ entry, overlapOfNew, overlapOfEntry, sameDirection }] }
+```
+
+A sign that **covers a stretch** (most) is picked with two points, a sign that **stands at one place** (a crossing, an end sign: 101-11, 102,
+131, 151, 267, 280-282 ...) with one point, plus `heading` if it applies one way. The node finds the road and answers with the stretch's own
+shape (`descriptor.geometry`, draw it) and the entries that are the same or similar: if `existing` is set, the person is confirming
+that sign (`voteContextSign`) instead of entering a new one. The time zone is proposed from the place; `signs.*` errors say what is wrong:
+`unknownSign`, `signNeedsTwoPoints`, `headingRequired`, `stretchTooLong`, `invalidValue`, `invalidValidity`, `shapeOffRoad`, and the
+road codes of `resolveRoadInterval` (`noRoadFound`, `noRoadBetweenPoints`, `noRoadData`, ...); `notOffered` where the node has no context signs.
+
+`reportContextSign` and `voteContextSign` **queue** like every other write and go out, signed with the device key, on the next `sync`
+— so they work offline and survive a restart. A queued proposal is resolved by the node when it is sent (if the sign exists meanwhile it
+becomes a confirmation of it); one the node refuses for good (no road there, an unknown sign) is dropped and counted in
+`SyncReport.rejected`. `voteContextSign(id, true)` needs the entry the device holds (its `id` from `getContextSigns`); the newest stance on
+an entry replaces a still-queued older one. A proposal is one voice — it counts as confirmed only when others agree.
+
+`SyncReport` gains `contextSignsEntries` (entries held after the sync; absent when the node has none) and `contextSignsError`; a failure there
+does not make `ok` false.
+
 ## Position and sync
 
 ```

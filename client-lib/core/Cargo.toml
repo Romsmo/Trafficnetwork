@@ -23,6 +23,9 @@ base64 = "0.23"
 sha2 = "0.10"
 hex = "0.4"
 chrono = "0.4"
+# The time zones of the context-sign time windows (server 1.4.0): a rule written in autumn must mean the same after the clock
+# changes, so the windows are read in the zone of the place. Pure Rust, also builds for wasm32.
+chrono-tz = "0.10"
 # default-features off: skips default-tls (native-tls/openssl) in favor of
 # rustls (no system OpenSSL dependency), with webpki-roots for bundled
 # Mozilla root certs rather than depending on each target platform's own
