@@ -18,7 +18,10 @@ import { HAZARD_TYPES } from "../../config/constants.js";
 import { getSignedVotesSince } from "../../db/queries/speed-limit-corrections.js";
 import { ingestSpeedLimitVote } from "../speed-limit-corrections/ingest.js";
 import { speedLimitVoteEnvelopeSchema, type SpeedLimitVoteEnvelope } from "../speed-limit-corrections/vote.js";
-import { broadcastSpeedLimitVotes } from "./broadcast.js";
+import { broadcastSpeedLimitVotes, broadcastContextSignVotes } from "./broadcast.js";
+import { getSignedVotesSince as getSignedContextVotesSince } from "../../db/queries/context-signs.js";
+import { ingestContextSignVote } from "../context-signs/ingest.js";
+import { contextSignVoteEnvelopeSchema, type ContextSignVoteEnvelope } from "../context-signs/vote.js";
 
 const JOIN_REQUEST_FRESHNESS_SECONDS = 300;
 const HEARTBEAT_FRESHNESS_SECONDS = 300;
@@ -53,6 +56,8 @@ const pushBodySchema = z.object({
   // Device-signed speed-limit votes (add-on K-A) — a separate field so a push
   // carrying them stays valid for a peer that predates the feature.
   speedLimitVotes: z.array(speedLimitVoteEnvelopeSchema).max(PUSH_BATCH_MAX_EVENTS).default([]),
+  // Device-signed votes on context signs (docs/context-signs.md), likewise a field of their own.
+  contextSignVotes: z.array(contextSignVoteEnvelopeSchema).max(PUSH_BATCH_MAX_EVENTS).default([]),
 });
 
 function isExcluded(app: FastifyInstance, nodeId: string): boolean {
@@ -179,7 +184,7 @@ export async function registerFederationRoutes(app: FastifyInstance) {
 
       const parsed = pushBodySchema.safeParse(req.body);
       if (!parsed.success) throw badRequest("Invalid federation event push", parsed.error.issues);
-      const { senderNodeId, events, speedLimitVotes } = parsed.data;
+      const { senderNodeId, events, speedLimitVotes, contextSignVotes } = parsed.data;
 
       const sender = await findPeerByNodeId(app.deps.db, senderNodeId);
       if (!sender) throw forbidden("Unknown senderNodeId — join before pushing events");
@@ -240,6 +245,24 @@ export async function registerFederationRoutes(app: FastifyInstance) {
         }
         broadcastSpeedLimitVotes(app, votesToGossip, senderNodeId);
 
+        // Votes on context signs (docs/context-signs.md). With the feature off here they are acknowledged as `ignored`.
+        const contextVotesToGossip: ContextSignVoteEnvelope[] = [];
+        for (const envelope of contextSignVotes as ContextSignVoteEnvelope[]) {
+          if (!app.deps.env.CONTEXT_SIGNS_ENABLED) {
+            results.push({ federationEventId: computeFederationEventId(envelope), status: "ignored", reason: "Context signs are switched off on this server" });
+            continue;
+          }
+          const outcome = await ingestContextSignVote(app.deps.db, app.deps.env, envelope, senderNodeId);
+          if (outcome.status === "rejected") {
+            results.push({ federationEventId: outcome.voteId, status: outcome.status, reason: outcome.reason, code: outcome.code });
+            if (outcome.code === "invalid_signature") await recordInvalidSignature(app.deps.db, senderNodeId);
+            continue;
+          }
+          results.push({ federationEventId: outcome.voteId, status: outcome.status });
+          if (outcome.status === "recorded") contextVotesToGossip.push(envelope);
+        }
+        broadcastContextSignVotes(app, contextVotesToGossip, senderNodeId);
+
         return { results };
       } finally {
         endPush();
@@ -271,6 +294,19 @@ export async function registerFederationRoutes(app: FastifyInstance) {
         throw badRequest("after/limit must be non-negative integers");
       }
       return getSignedVotesSince(app.deps.db, afterResult.data, limitResult.data);
+    });
+  }
+
+  // Pull stream of device-signed votes on context signs (docs/context-signs.md) - durable state, like the corrections' votes.
+  if (app.deps.env.CONTEXT_SIGNS_ENABLED) {
+    app.get("/v1/federation/context-sign-votes", async (req) => {
+      const query = req.query as Record<string, unknown>;
+      const afterResult = z.coerce.number().int().min(0).default(0).safeParse(query.after);
+      const limitResult = z.coerce.number().int().min(1).max(PULL_MAX_LIMIT).default(PULL_DEFAULT_LIMIT).safeParse(query.limit);
+      if (!afterResult.success || !limitResult.success) {
+        throw badRequest("after/limit must be non-negative integers");
+      }
+      return getSignedContextVotesSince(app.deps.db, afterResult.data, limitResult.data);
     });
   }
 }

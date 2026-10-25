@@ -13,10 +13,12 @@ import {
   recordHealthCheckSuccess,
   setPeerLastPulledSequence,
   setPeerLastPulledVotesSequence,
+  setPeerLastPulledContextVotesSequence,
   upsertPeer,
   type NetworkPeerRow,
 } from "../../db/queries/network-peers.js";
-import { requestJoin, sendHeartbeat, pullEvents, pullSpeedLimitVotes } from "./http-client.js";
+import { requestJoin, sendHeartbeat, pullEvents, pullSpeedLimitVotes, pullContextSignVotes } from "./http-client.js";
+import { ingestContextSignVote } from "../context-signs/ingest.js";
 import { ingestDeviceCreateEvent } from "./ingest.js";
 import type { ReportExpiryRules } from "../../config/report-expiry.js";
 import { ingestSpeedLimitVote } from "../speed-limit-corrections/ingest.js";
@@ -149,6 +151,7 @@ export async function pullFromPeers(deps: Deps): Promise<void> {
     }
 
     await pullSpeedLimitVotesFrom(deps, peer);
+    await pullContextSignVotesFrom(deps, peer);
   }
 }
 
@@ -186,6 +189,27 @@ async function pullSpeedLimitVotesFrom(deps: Deps, peer: NetworkPeerRow): Promis
     }
   } catch (err) {
     deps.log.warn({ err, peer: peer.nodeId }, "federation: speed-limit vote pull from peer failed");
+  }
+}
+
+/** Context-sign vote stream (docs/context-signs.md): the same shape as the speed-limit one above, with its own cursor per peer. */
+async function pullContextSignVotesFrom(deps: Deps, peer: NetworkPeerRow): Promise<void> {
+  if (!deps.env.CONTEXT_SIGNS_ENABLED) return;
+  try {
+    let cursor = peer.lastPulledContextVotesSequence ?? 0;
+    for (let pageNo = 0; pageNo < VOTE_PULL_MAX_PAGES_PER_CYCLE; pageNo++) {
+      const page = await pullContextSignVotes(peer.address, cursor, deps.env.FEDERATION_ANTI_ENTROPY_PAGE_SIZE, deps.env.FEDERATION_PEER_TIMEOUT_MS);
+      if (page === null) return;
+      for (const item of page.votes) await ingestContextSignVote(deps.db, deps.env, item.envelope, peer.nodeId);
+      if (page.nextAfter !== null) {
+        cursor = page.nextAfter;
+        await setPeerLastPulledContextVotesSequence(deps.db, peer.nodeId, cursor);
+      }
+      if (page.votes.length > 0) deps.log.info({ peer: peer.nodeId, count: page.votes.length }, "federation: pulled context-sign votes");
+      if (page.votes.length < deps.env.FEDERATION_ANTI_ENTROPY_PAGE_SIZE) return;
+    }
+  } catch (err) {
+    deps.log.warn({ err, peer: peer.nodeId }, "federation: context-sign vote pull from peer failed");
   }
 }
 

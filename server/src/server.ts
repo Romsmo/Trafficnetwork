@@ -9,6 +9,7 @@ import { currentReportExpiry } from "./modules/expiry/rules.js";
 import { startFederationWorkers, type FederationWorkersHandle } from "./modules/federation/workers.js";
 import { startStaticPackageWorker } from "./modules/static-data/package-worker.js";
 import { startRoadWorker } from "./modules/roads/worker.js";
+import { startContextSignWorker } from "./modules/context-signs/worker.js";
 
 async function main() {
   const env = loadEnv();
@@ -27,6 +28,9 @@ async function main() {
   // Ties signs, cameras and community stretches to roads and hides what is off the road (docs/road-network.md).
   const roadWorker = env.ROAD_ATTACH_WORKER_ENABLED ? startRoadWorker(db, env, app.log) : null;
 
+  // Context signs: entries past their end stop being delivered (docs/context-signs.md).
+  const contextSignWorker = startContextSignWorker(db, env, app.log);
+
   closeWithGrace(async ({ err }) => {
     if (err) app.log.error(err, "closing due to error");
     expiryWorker.stop();
@@ -34,6 +38,7 @@ async function main() {
     federationWorkers?.stop();
     packageWorker?.stop();
     roadWorker?.stop();
+    contextSignWorker?.stop();
     await app.close();
     await client.end();
   });

@@ -23,6 +23,7 @@ interface Row extends Record<string, unknown> {
   last_seen_at: string | null;
   last_pulled_sequence: number | null;
   last_pulled_votes_sequence: number | null;
+  last_pulled_context_votes_sequence: number | null;
   successful_health_checks: number;
   consecutive_health_check_failures: number;
   invalid_signature_count: number;
@@ -31,7 +32,7 @@ interface Row extends Record<string, unknown> {
 
 const SELECT_COLUMNS = sql`
   node_id, public_key, address, discovered_via, joined_at, last_seen_at, last_pulled_sequence, last_pulled_votes_sequence,
-  successful_health_checks, consecutive_health_check_failures, invalid_signature_count, last_known_version
+  last_pulled_context_votes_sequence, successful_health_checks, consecutive_health_check_failures, invalid_signature_count, last_known_version
 `;
 
 function toApi(row: Row): NetworkPeerApi {
@@ -53,10 +54,12 @@ export interface NetworkPeerRow extends NetworkPeerApi {
   lastPulledSequence: number | null;
   /** Cursor into the peer's speed-limit vote stream (add-on K-A). */
   lastPulledVotesSequence: number | null;
+  /** Cursor into the peer's context-sign vote stream (docs/context-signs.md). */
+  lastPulledContextVotesSequence: number | null;
 }
 
 function toRow(row: Row): NetworkPeerRow {
-  return { ...toApi(row), lastPulledSequence: row.last_pulled_sequence, lastPulledVotesSequence: row.last_pulled_votes_sequence };
+  return { ...toApi(row), lastPulledSequence: row.last_pulled_sequence, lastPulledVotesSequence: row.last_pulled_votes_sequence, lastPulledContextVotesSequence: row.last_pulled_context_votes_sequence };
 }
 
 /** Public-facing shape (GET /v1/federation/peers) — omits the internal per-peer pull cursor. */
@@ -103,6 +106,10 @@ export async function upsertPeer(
 
 export async function setPeerLastPulledSequence(db: Queryable, nodeId: string, sequence: number): Promise<void> {
   await db.execute(sql`update network_peers set last_pulled_sequence = ${sequence} where node_id = ${nodeId}`);
+}
+
+export async function setPeerLastPulledContextVotesSequence(db: Queryable, nodeId: string, sequence: number): Promise<void> {
+  await db.execute(sql`update network_peers set last_pulled_context_votes_sequence = ${sequence} where node_id = ${nodeId}`);
 }
 
 export async function setPeerLastPulledVotesSequence(db: Queryable, nodeId: string, sequence: number): Promise<void> {

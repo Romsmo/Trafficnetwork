@@ -46,6 +46,12 @@ const ROADS_RESOLVE_PATH = "/v1/roads/resolve";
 const DEFECTS_NEAR_PATH = "/v1/data-defects/near";
 const DEFECTS_PATH = "/v1/data-defects";
 const PLACES_SEARCH_PATH = "/v1/places/search";
+// Context signs (docs/context-signs.md): reading, resolving a stretch, proposing and confirming/denying. All unsigned for the web.
+const CONTEXT_SIGNS_PATH = "/v1/context-signs";
+const CONTEXT_SIGNS_TILES_PATH = "/v1/context-signs/tiles";
+const CONTEXT_SIGNS_RESOLVE_PATH = "/v1/context-signs/resolve";
+const CONTEXT_SIGN_PATH = /^\/v1\/context-signs\/[0-9a-f]{32}$/;
+const CONTEXT_SIGN_VOTE_PATH = /^\/v1\/context-signs\/[0-9a-f]{32}\/confirmations$/;
 
 /** A device signature makes a submission federation-eligible; browser sessions are anonymous and free to mint, so theirs never carry one. */
 function carriesDeviceSignature(body: unknown): boolean {
@@ -80,6 +86,9 @@ export function classifyWebRequest(info: WebRequestInfo, policy: WebPolicy): Gua
       // Place search: asks a third-party service, so it counts against the heavy limit (and the node queues it to one per second).
       case PLACES_SEARCH_PATH:
         return { kind: "allow", category: "heavy-read" };
+      case CONTEXT_SIGNS_PATH:
+      case CONTEXT_SIGNS_TILES_PATH:
+        return { kind: "allow", category: "read" };
       case "/v1/hazard-reports/nearby":
         if (radiusExceeds(query, policy.maxHazardRadiusM)) {
           return deny(400, "WEB_RADIUS_TOO_LARGE", `Web sessions may query at most ${policy.maxHazardRadiusM} m around a point`);
@@ -91,12 +100,12 @@ export function classifyWebRequest(info: WebRequestInfo, policy: WebPolicy): Gua
         }
         return { kind: "allow", category: "heavy-read" };
       default:
-        if (CORRECTIONS_OF_SEGMENT_PATH.test(path)) return { kind: "allow", category: "read" };
+        if (CORRECTIONS_OF_SEGMENT_PATH.test(path) || CONTEXT_SIGN_PATH.test(path)) return { kind: "allow", category: "read" };
         break;
     }
   }
 
-  if (method === "POST" && path === ROADS_RESOLVE_PATH) return { kind: "allow", category: "heavy-read" };
+  if (method === "POST" && (path === ROADS_RESOLVE_PATH || path === CONTEXT_SIGNS_RESOLVE_PATH)) return { kind: "allow", category: "heavy-read" };
 
   if (method === "POST" && path === "/v1/hazard-reports") {
     const record = body && typeof body === "object" ? (body as Record<string, unknown>) : {};
@@ -119,7 +128,7 @@ export function classifyWebRequest(info: WebRequestInfo, policy: WebPolicy): Gua
 
   // Proposing or confirming/denying a speed-limit correction, or naming a road the import has no limit for (docs D13):
   // unsigned, so the vote counts on this node only (add-on K-A).
-  if (method === "POST" && (CORRECTIONS_OF_SEGMENT_PATH.test(path) || CORRECTION_VOTE_PATH.test(path) || path === SPEED_LIMIT_INTERVALS_PATH || path === DEFECTS_PATH)) {
+  if (method === "POST" && (CORRECTIONS_OF_SEGMENT_PATH.test(path) || CORRECTION_VOTE_PATH.test(path) || path === SPEED_LIMIT_INTERVALS_PATH || path === DEFECTS_PATH || path === CONTEXT_SIGNS_PATH || CONTEXT_SIGN_VOTE_PATH.test(path))) {
     if (carriesDeviceSignature(body)) {
       return deny(403, "WEB_NO_DEVICE_SIGNATURE", "Web sessions cannot submit device-signed votes; their votes count on this node only");
     }

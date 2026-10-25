@@ -27,6 +27,7 @@
     "create-client": "tsx scripts/create-client.mts",
     "corrections": "tsx scripts/corrections.mts",
     "roads": "tsx scripts/roads.mts",
+    "context-signs": "tsx scripts/context-signs.mts",
     "join:show": "tsx src/join-cli.ts show",
     "join:create": "tsx src/join-cli.ts create",
     "join:rotate": "tsx src/join-cli.ts rotate",
