@@ -403,6 +403,27 @@ input[type="text"][aria-invalid="true"] { border-color: var(--danger); border-wi
 .defect-list { list-style: none; margin: 8px 0; padding: 0; display: grid; gap: 10px; }
 .defect-list li { border: 1px solid var(--line); border-radius: var(--radius); padding: 8px 10px; }
 
+/* ---------- context signs (docs/context-signs.md) ---------- */
+.signs-box { margin: 8px 0 12px; display: grid; gap: 6px; }
+.sign-pictogram { flex: none; display: block; }
+.ctx-marker { background: transparent; border: 0; }
+.ctx-marker svg { filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.45)); }
+.ctx-arrow { display: block; font-size: 15px; line-height: 16px; text-align: center; color: #111; text-shadow: 0 0 3px #fff, 0 0 3px #fff; }
+.ctx-arrow-icon { background: transparent; border: 0; }
+.ctx-head { display: flex; gap: 10px; align-items: center; }
+.ctx-popup { display: grid; gap: 8px; }
+.ctx-popup p { margin: 0; }
+.ctx-status { font-weight: 600; }
+.sign-list { max-height: 36vh; overflow-y: auto; display: grid; gap: 4px; margin-top: 8px; padding-right: 2px; }
+.sign-choice { display: flex; align-items: center; gap: 10px; min-height: 44px; padding: 4px 8px; border: 1px solid var(--line); border-radius: var(--radius); cursor: pointer; }
+.sign-choice.selected { border-color: var(--accent); box-shadow: inset 0 0 0 2px var(--accent); font-weight: 600; }
+.sign-choice input { flex: none; }
+.day-row { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0; }
+.day-box { display: inline-flex; align-items: center; gap: 4px; min-height: 44px; padding: 2px 8px; border: 1px solid var(--line); border-radius: var(--radius); }
+.toggle-line { display: flex; align-items: center; gap: 8px; min-height: 44px; }
+.when-box { margin: 4px 0 8px 24px; display: grid; gap: 6px; }
+.preview-box .choice-grid { grid-template-columns: 1fr; }
+
 /* ---------- report dialog ---------- */
 dialog {
   border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); color: var(--ink);
@@ -426,7 +447,7 @@ dialog legend { font-weight: 600; padding: 0 6px; }
 
 /* On a phone the dialogs are bottom sheets too: anchored to the bottom edge, full width, rounded at the top. */
 @media (max-width: 640px) {
-  dialog#report-dialog, dialog#camera-notice {
+  dialog#report-dialog, dialog#camera-notice, dialog#sign-dialog {
     position: fixed; inset: auto 0 0 0; margin: 0; width: 100%; max-width: none; border-radius: 18px 18px 0 0; border-bottom: 0;
     padding-bottom: env(safe-area-inset-bottom, 0px);
   }

@@ -73,6 +73,11 @@
         <p id="limits-hint" class="hint" aria-live="polite"></p>
         <p id="limits-note" class="hint" data-i18n="map.layer.speedlimits.note" hidden></p>
         <button id="query-center" type="button" class="small" data-i18n="map.queryCenter">Tempolimit an der Kartenmitte abfragen</button>
+        <div id="signs-box" class="signs-box" hidden>
+          <label class="layer-toggle"><input id="layer-signs" type="checkbox"><span data-i18n="map.layer.signs">Verkehrszeichen auf Strecken zeigen</span></label>
+          <p id="signs-hint" class="hint" aria-live="polite"></p>
+          <button id="sign-add" type="button" class="small" data-i18n="signs.add">Verkehrszeichen eintragen</button>
+        </div>
         <h2 data-i18n="map.list.title">Meldungen in diesem Ausschnitt</h2>
         <p id="list-status" class="hint" role="status" aria-live="polite"></p>
         <ul id="report-list" class="report-list"></ul>
@@ -86,6 +91,7 @@
 <footer id="site-footer"></footer>
 <dialog id="report-dialog"></dialog>
 <dialog id="camera-notice"></dialog>
+<dialog id="sign-dialog"></dialog>
 
 <script src="/web/vendor/leaflet/leaflet.js"></script>
 <script type="module" src="/web/js/map-page.js"></script>

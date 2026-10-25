@@ -43,8 +43,8 @@ function nodeEnv(databaseUrl: string, extra: Record<string, string>): NodeJS.Pro
     ROAD_LOOKUP_URL: "none",
     // Place search is answered by the tests themselves (a closed local port: the node never reaches anybody).
     PLACE_SEARCH_URL: "http://127.0.0.1:9/search",
-    // Join code: every node of the run shares one throw-away directory (and so one code); the address is an example host.
-    JOIN_PUBLIC_ADDRESS: "https://e2e.example.org",
+    // Join code: every node of the run shares one throw-away directory (and so one code). Only the "main" node names the address
+    // (e2e/instances.ts), so it is the one that writes the code; the others only check it.
     JOIN_DIR: process.env["E2E_JOIN_DIR"] ?? "",
     ...RELAXED_LIMITS,
     ...extra,

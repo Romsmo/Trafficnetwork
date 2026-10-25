@@ -42,6 +42,10 @@ Stand: 2026-10-11 (Server 1.1.0, Block 6 des Oktober-Sammelauftrags). Geprüft w
 
 Keine Cookies, kein `sessionStorage`, keine IndexedDB, kein Service-Worker-Cache (alles geprüft im Test).
 
+### Verkehrszeichen auf Strecken (Server 1.4.0)
+
+Die Seite lädt für diese Ebene **nichts von außen**: keine Skripte, Bilder oder Schriften eines anderen Hosts (e2e: `context-signs.spec.ts` prüft Fremdanfragen, CSP-Verstöße und Konsolenfehler). Im Browser wird dafür **nichts gespeichert**; die Ebene ist bei jedem Besuch aus. Gesendet werden beim Eintragen und Abstimmen der Eintrag bzw. die Stimme an den Knoten (mit der anonymen Sitzungskennung wie bei Meldungen); der Knoten fragt für die Straße ggf. den Straßendatendienst (`ROAD_LOOKUP_URL`, wie bei Tempolimit-Abschnitten). Der Datenschutztext nennt die Verarbeitung (`docs/privacy.md`, Entwurf).
+
 ### Externe Hosts
 
 | Host | Wofür | Was er sieht |
@@ -56,6 +60,7 @@ Sonst nichts: kein CDN, keine Schriften, keine Symbolbibliothek, keine Analyse.
 | Was | Herkunft | Lizenz |
 |---|---|---|
 | `favicon.svg`, alle Symbole der Oberfläche (Pfeil, Ebenen, Meldungs-Symbole, Achsenbilder) | eigene Grafiken, im Quelltext | Apache License 2.0 (Teil des Projekts) |
+| Bilder der Verkehrszeichen (Ebene „Verkehrszeichen“, Erfassen-Dialog, `assets/js/context-signs-data.js`) | **eigene Zeichnungen** im Quelltext (Dreieck für Gefahrzeichen, Kreis für Gebote/Verbote, mit der Zeichennummer); **nicht** die amtlichen Bilder und aus keiner fremden Datei | Apache License 2.0 (Teil des Projekts). Die amtlichen Zeichen der StVO sind als amtliche Werke gemeinfrei, die Bilddateien dazu (z. B. aus Wikimedia Commons oder der Quellenliste des Display-Projekts) werden hier nicht verwendet, solange ihre Lizenz je Datei nicht belegt ist; sie lassen sich später je Zeichen einsetzen, ohne dass sich Server oder Bibliothek ändern |
 | Schrift | Systemschrift des Geräts, keine Webschrift | — |
 | Leaflet 1.9.4 (Kartenbibliothek, mit seinen Bildern `layers.png`, `marker-*.png`, die die Seite nicht verwendet) | vom Knoten ausgeliefert | BSD-2-Clause |
 | h3-js 4.5.0 | vom Knoten ausgeliefert | Apache-2.0 |

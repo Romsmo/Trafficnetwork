@@ -25,8 +25,8 @@ export const OPERATOR_TEST_DETAILS: Record<string, string> = {
 };
 
 export const INSTANCES = {
-  /** Default node: web UI on, the camera emergency brake pulled (SPEED_CAMERA_NAMESPACE_ENABLED=false): no camera category at all. */
-  main: { port: PORT_BASE, env: OPERATOR_TEST_DETAILS } as Instance,
+  /** Default node: web UI on, the camera emergency brake pulled (SPEED_CAMERA_NAMESPACE_ENABLED=false): no camera category at all. It also owns the join code (an example host). */
+  main: { port: PORT_BASE, env: { ...OPERATOR_TEST_DETAILS, JOIN_PUBLIC_ADDRESS: "https://e2e.example.org" } } as Instance,
   /** Brake released, no country restricted (the default level is `full`); also runs with a different project link. */
   cameras: { port: PORT_BASE + 1, env: { SPEED_CAMERA_NAMESPACE_ENABLED: "true", PROJECT_REPO_URL: REPO_URL_OVERRIDE } as Record<string, string> } as Instance,
   /** One report per web session, to see the honest "limit reached" feedback. */
