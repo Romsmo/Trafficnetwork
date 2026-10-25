@@ -1141,9 +1141,19 @@ jobs:
           xcrun simctl bootstatus "$UDID" -b
 
       - name: Run the example's integration test in the iOS simulator (the library loads by name, a client syncs, Dart's secret store is called)
-        timeout-minutes: 20
+        timeout-minutes: 14
         working-directory: ${{ runner.temp }}/spm_app
         run: flutter test integration_test -d "$SIMULATOR_UDID" --dart-define=TN_NODE=$TN_NODE
+
+      # A test that hangs says nothing by itself; what the simulator and the app logged tells a crash at launch from a slow simulator.
+      - name: What the simulator and the app logged (only when the test did not pass)
+        if: failure()
+        working-directory: ${{ runner.temp }}/spm_app
+        run: |
+          xcrun simctl list devices booted || true
+          ls -la ~/Library/Logs/DiagnosticReports 2>/dev/null | tail -20 || true
+          for f in $(ls -t ~/Library/Logs/DiagnosticReports/Runner* 2>/dev/null | head -2); do echo "== $f"; head -80 "$f"; done
+          xcrun simctl spawn "$SIMULATOR_UDID" log show --last 25m --style compact --predicate 'process == "Runner" OR eventMessage CONTAINS "dyld" OR eventMessage CONTAINS "Library not loaded"' 2>/dev/null | tail -150 || true
 
       # ---- 2. CocoaPods
       - name: Create the same app with CocoaPods, and build it
