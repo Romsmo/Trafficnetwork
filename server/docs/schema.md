@@ -126,6 +126,19 @@ restored). Re-derived from the votes on every vote (`recomputeSegment`); the
 unit whose value differs from the imported one), never written into
 `speed_limit_segments`.
 
+### Context signs (migration `0015`, `context-signs.md`)
+
+* `context_sign_entries` - one row per entry a vote names. `entry_key` (PK) is the content hash of the descriptor; `descriptor` (jsonb) is stored
+  as signed; `geometry` (LineString, GiST) and `tiles` (text[], GIN; the H3 tiles at `tile_resolution`) serve the reads; `status`
+  (`proposed|confirmed|disputed|expired|removed`), the counters, `expires_at` and the timestamps are **derived** from the votes; `blocked_at`
+  is the operator's local removal; `created_by` is the client that first sent it to this node (the budget of new entries).
+* `context_sign_votes` - the append-only log, the source of truth. `id` is the cross-node vote id for a signed vote (`local:<uuid>` otherwise),
+  `seq` the cursor of the federation pull stream, `envelope` the signed vote verbatim (null = never replicated). No foreign key to the
+  entries: a vote may arrive before the proposal.
+* `context_sign_bans` - reporters whose votes are left out of every tally (local policy).
+* `context_sign_state` - one row, the `version` clients compare; it moves when the delivered set changes.
+* `network_peers.last_pulled_context_votes_sequence` - the cursor of the peer's vote stream.
+
 ### `speed_limit_correction_bans`
 `reporter_id` (PK), `reason`, `banned_at`. Operator-maintained; votes by a banned
 reporter are excluded from every tally (retroactively; unbanning restores them)

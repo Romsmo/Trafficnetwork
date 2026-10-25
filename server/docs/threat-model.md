@@ -155,6 +155,24 @@ unit. Everything is switchable with `COMMUNITY_CORRECTIONS_ENABLED`, and a flip
 is announced to clients through the static-data version and events
 (`docs/speed-limit-corrections.md` D11).
 
+## Context signs (server 1.4.0)
+
+A traffic sign shown to a driver that is not there (or missing where it is) misleads them; a prohibition more than a warning. The feature is
+built so that **one party cannot make a sign appear**, and so that a sign nobody confirmed is marked as such. What is defended, what is left:
+
+| Threat | Mitigation | Residual risk |
+|---|---|---|
+| One user invents a sign | A proposal is one vote; an entry is `confirmed` only with 3 (prohibitions) or 2 (warnings) **distinct devices**; the library delivers unconfirmed ones only when asked, marked | Several devices under one person's control (below) |
+| Sybil: many "devices" | A signed vote must use the key bound to the calling client; budgets per client and day (20 new entries, 100 votes); anonymous web visitors count together as **one** voice; cap of unconfirmed entries within 3.7 km; operator `ban` | Whoever can create many device credentials (each costs an app-key registration, rate-limited) can reach a threshold; so can a node owner who mints keys. Mitigation is the threshold as the operator's decision, `remove`/`ban`, excluding the node |
+| A sign off the road, or absurdly long | The shape must lie on a road this node knows; per-sign maximum length (60 m for signs at one place, 20 km at most); at most 300 vertices; values in range; a period with an end for temporary signs | A real road with a wrong sign on it is a plausible lie only the vote count answers |
+| A relay changes a vote | The vote is signed by the device over the whole payload, including the descriptor; the entry key is the hash of the descriptor | - |
+| Replay of an old vote | A vote is idempotent (same id); the standing stance of a device is its latest, so replaying an old one cannot undo a newer stance | - |
+| Flooding the pull stream or the tiles | Votes are bounded by the push batch size; tiles are bounded to 50 cells and answer "unchanged" cheaply | - |
+| Time rules used to hide a sign ("only at 3 a.m.") | The same confirmations apply; the window is part of what is confirmed (a different window is a different entry) | An agreed-on false window |
+| A disputed entry hides a real one | `disputed` needs at least 2 objections and as many as supporters; the operator can `restore` | A coordinated group of objectors on a thinly confirmed entry |
+
+Local operator decisions (`remove`, `ban`) do not replicate: another operator may disagree. Excluding a node stays in the signed network configuration.
+
 ## Online counter notes (add-on O-A)
 
 `GET /v1/stats/online` publishes how many clients are online. What that adds,
