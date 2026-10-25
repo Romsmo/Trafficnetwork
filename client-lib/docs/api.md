@@ -298,9 +298,9 @@ getContextSigns({ lat: 48.1374, lng: 11.5755, heading: 92, aheadMeters: 1500 })
 
 The rules are fixed by shared test vectors, `client-lib/fixtures/context-sign-vectors.json` (42 cases: both directions, the last metre of
 a stretch, a window over midnight, both clock changes, a period, expired/disputed/unconfirmed entries, an unknown heading ...), made by
-an independent JavaScript reference (`make-context-sign-vectors.mjs`); every binding and the app run them. **Cost:** a call looks at
-the entries held (hundreds at most) with plain arithmetic — microseconds to a millisecond; once a second in driving mode is no
-concern. It makes no network request.
+an independent JavaScript reference (`make-context-sign-vectors.mjs`); every binding and the app run them. **Cost:** the entries held are
+parsed once after each sync; a call is then plain arithmetic over them (a projection per entry nearby) and makes no network request —
+once a second in driving mode is no concern.
 
 **Entering a sign** is two steps. `resolveContextSign` asks the node what the picked points mean — it needs the network:
 

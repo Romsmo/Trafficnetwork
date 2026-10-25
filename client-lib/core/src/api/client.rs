@@ -274,6 +274,14 @@ pub(super) struct State {
     pub(super) metered: bool,
     /// `GET /v1/static-data/regions`, with the static-data version it was read at.
     pub(super) regions: Option<(u64, Vec<super::offline::ServerRegion>)>,
+    /// The context signs the device holds, parsed once (a read is made every second while driving) and dropped after every sync.
+    context_signs: Option<Arc<HeldContextSigns>>,
+}
+
+/// The offline copy of the context signs as the reads use it.
+struct HeldContextSigns {
+    entries: Vec<crate::sync::ContextSignEntry>,
+    tiles: std::collections::BTreeSet<String>,
 }
 
 pub(super) fn check_position_public(lat: f64, lng: f64) -> Result<(), ApiError> {
@@ -1045,15 +1053,15 @@ impl TrafficNetworkClient {
         if !query.ahead_m.is_finite() || query.ahead_m < 0.0 {
             return Err(ApiError::invalid("aheadMeters must be zero or more"));
         }
-        let entries = stored_context_signs(&*self.store);
-        let signs = evaluate_context_signs(&entries, query);
+        let held = self.held_context_signs();
+        let signs = evaluate_context_signs(&held.entries, query);
         let resolution = self.context_sign_resolution();
         let covered = crate::api::tiles::tile_at(query.lat, query.lng, resolution)
-            .is_some_and(|tile| stored_context_sign_tiles(&*self.store).contains(&tile));
+            .is_some_and(|tile| held.tiles.contains(&tile));
         Ok(ContextSignsView {
             signs,
             covered,
-            entries_held: entries.len(),
+            entries_held: held.entries.len(),
         })
     }
 
@@ -1090,6 +1098,18 @@ impl TrafficNetworkClient {
             entry_id,
             agrees,
         )?)
+    }
+
+    fn held_context_signs(&self) -> Arc<HeldContextSigns> {
+        if let Some(held) = self.state().context_signs.clone() {
+            return held;
+        }
+        let held = Arc::new(HeldContextSigns {
+            entries: stored_context_signs(&*self.store),
+            tiles: stored_context_sign_tiles(&*self.store),
+        });
+        self.state().context_signs = Some(held.clone());
+        held
     }
 
     fn context_sign_resolution(&self) -> u8 {
@@ -1363,7 +1383,9 @@ impl TrafficNetworkClient {
                 self.context_sign_resolution(),
                 self.state().last_position,
             );
-            match sync_context_signs(&*self.store, &self.discovery, &token, &wanted).await {
+            let synced = sync_context_signs(&*self.store, &self.discovery, &token, &wanted).await;
+            self.state().context_signs = None; // read again from the store at the next call
+            match synced {
                 Ok(outcome) if outcome.not_offered => {}
                 Ok(outcome) => report.context_signs_entries = Some(outcome.entries),
                 Err(error) => {
