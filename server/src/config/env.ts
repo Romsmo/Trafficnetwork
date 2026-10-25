@@ -270,6 +270,36 @@ const envSchema = z.object({
   COMMUNITY_CORRECTIONS_RATE_LIMIT_MAX: z.coerce.number().int().positive().default(5),
   COMMUNITY_CORRECTIONS_RATE_LIMIT_WINDOW_MINUTES: z.coerce.number().int().positive().default(60),
 
+  // Context signs (docs/context-signs.md): traffic signs that apply on a stretch of road, entered and confirmed by users.
+  // Master switch: false unregisters the endpoints and the page layer and makes federation ignore the votes; stored entries and
+  // votes are kept. With no entry yet (the start) the feature does nothing at all.
+  CONTEXT_SIGNS_ENABLED: z
+    .enum(["true", "false"])
+    .default("true")
+    .transform((v) => v === "true"),
+  // Distinct supporting devices an entry needs before it counts as confirmed, by class of sign. A prohibition shown wrongly
+  // misleads a driver more than a warning does, so it needs one more voice (docs D4).
+  CONTEXT_SIGNS_CONFIRMATIONS_PROHIBITION: z.coerce.number().int().positive().default(3),
+  CONTEXT_SIGNS_CONFIRMATIONS_HAZARD: z.coerce.number().int().positive().default(2),
+  // At least this many objections - and as many as supporters - make an entry "disputed": it is not delivered any more.
+  CONTEXT_SIGNS_DISPUTE_MIN_DENIALS: z.coerce.number().int().positive().default(2),
+  // An entry nobody confirmed is dropped this long after its last vote; an entry "until revoked" this long after its last support.
+  CONTEXT_SIGNS_UNCONFIRMED_DAYS: z.coerce.number().int().positive().default(14),
+  CONTEXT_SIGNS_OPEN_ENDED_DAYS: z.coerce.number().int().positive().default(365),
+  // Per calling client and day: new entries, and all votes together (a proposal is a vote).
+  CONTEXT_SIGNS_PROPOSALS_PER_DAY: z.coerce.number().int().positive().default(20),
+  CONTEXT_SIGNS_VOTES_PER_DAY: z.coerce.number().int().positive().default(100),
+  // Entries nobody has confirmed yet that may exist within one H3 cell of resolution 6 (edge about 3.7 km): a flood of invented
+  // signs in one place stops here. Confirmed entries are not counted.
+  CONTEXT_SIGNS_MAX_UNCONFIRMED_PER_CELL: z.coerce.number().int().positive().default(50),
+  // The IANA zones an entry may name, as prefixes. Europe first; add "Atlantic/," "America/" ... to open another part of the world.
+  CONTEXT_SIGNS_TIMEZONE_PREFIXES: z
+    .string()
+    .default("Europe/")
+    .transform((v) => v.split(",").map((s) => s.trim()).filter((s) => s !== "")),
+  // The zone proposed where the country of a place is not known (no boundary data loaded).
+  CONTEXT_SIGNS_DEFAULT_TIMEZONE: z.string().min(3).default("Europe/Berlin"),
+
   // "Currently online" counter (add-on O-A, modules/online/, GET /v1/stats/online).
   // Numbers only, kept in process memory — nothing here is ever stored or logged.
   // false: the endpoint still answers, with `{ "enabled": false }`, and nothing is tracked.
@@ -444,6 +474,9 @@ const envSchema = z.object({
 }).refine((env) => !env.FEDERATION_PUBLIC_ADDRESS || isAcceptableFederationAddress(env.FEDERATION_PUBLIC_ADDRESS), {
   message: "FEDERATION_PUBLIC_ADDRESS must be an https:// URL (docs/threat-model.md: no self-hosted server identity over plain HTTP; a bare http://127.0.0.1 or http://localhost loopback literal is the one exception, for local testing)",
   path: ["FEDERATION_PUBLIC_ADDRESS"],
+}).refine((env) => env.CONTEXT_SIGNS_TIMEZONE_PREFIXES.some((p) => env.CONTEXT_SIGNS_DEFAULT_TIMEZONE.startsWith(p)), {
+  message: "CONTEXT_SIGNS_DEFAULT_TIMEZONE must start with one of CONTEXT_SIGNS_TIMEZONE_PREFIXES",
+  path: ["CONTEXT_SIGNS_DEFAULT_TIMEZONE"],
 }).refine((env) => env.JOIN_PUBLIC_ADDRESS === "" || nodeFromAddress(env.JOIN_PUBLIC_ADDRESS) !== null, {
   message: "JOIN_PUBLIC_ADDRESS must be an https:// address with a host name that has a dot and no path, e.g. https://node.example.org (no IP address, no localhost; docs/join-code.md)",
   path: ["JOIN_PUBLIC_ADDRESS"],

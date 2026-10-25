@@ -125,6 +125,14 @@ Der Server erzeugt beim ersten Start einen **Join-Code** (Adresse, App-Schlüsse
 - Betreiber: `npm run join:show | join:create | join:rotate | join:revoke | join:list` (im Container: `docker compose exec server node dist/join-cli.js …`). Ein Widerruf wirkt auf neue Registrierungen; bereits registrierte Geräte bleiben gültig. Der Code auf der Seite ist öffentlich — gewollt.
 - Format, Ableitung, Testvektoren: [`docs/join-code.md`](docs/join-code.md); Betrieb: [`docs/operating.md`](docs/operating.md) (`Join code`); Fehlercodes: [`docs/api.md`](docs/api.md).
 
+## Kontextschilder: Verkehrszeichen mit Gültigkeitsbereich (Server 1.4.0)
+
+Nutzer tragen Verkehrszeichen ein, die auf einem **Streckenabschnitt** gelten — mit Richtung und Zeit (immer, Wochentage und Uhrzeiten in Ortszeit, Zeitraum) —, andere Geräte bestätigen oder widersprechen, und die Client-Bibliothek liefert der App, was **jetzt hier und voraus** gilt. Der Bestand beginnt leer (kein Import).
+
+- 58 Zeichen des Display-Katalogs (`DE:276`, `DE:142-10` ...); eine Strecke wird mit zwei Punkten auf der Straße benannt (ein Zeichen an einem Ort mit einem Punkt und der Fahrtrichtung). Bestätigt ab 3 Geräten (Verbote) bzw. 2 (Gefahrzeichen); Widerspruch macht einen Eintrag „strittig“. Anonyme Web-Besucher zählen zusammen als eine Stimme.
+- Föderiert über gerätesignierte Stimmen (`docs/federation-protocol.md` 5.4). Schalter `CONTEXT_SIGNS_ENABLED`; Betreiber: `npm run context-signs -- status | list | show | remove | restore | ban | unban`.
+- Entwurf mit Begründung jeder Entscheidung: [`docs/context-signs.md`](docs/context-signs.md); Schnittstelle: [`docs/api.md`](docs/api.md); Betrieb: [`docs/operating.md`](docs/operating.md).
+
 ## Aktuell online (Zusatz O-A)
 
 `GET /v1/stats/online` (öffentlich, kein Auth) liefert, wie viele Clients gerade an diesem Knoten hängen, plus eine **geschätzte** Summe für das ganze Netz. Als "online" zählt ein Client (einmal, egal wie viele Verbindungen), wenn er eine authentifizierte WebSocket-Verbindung offen hat **oder** innerhalb von `ONLINE_WINDOW_SECONDS` (Standard 5 Minuten) eine erfolgreiche Sync- oder Schreibanfrage gemacht hat — so sind auch reine Polling-Clients sichtbar. Nur Tokens mit Scope `client` zählen, keine Dienst-Zugänge (Bulk-Import, Geräteregistrierung).

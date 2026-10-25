@@ -35,6 +35,7 @@ import { registerOnlineModule } from "./modules/online/plugin.js";
 import { registerWebGuard } from "./modules/web/guard.js";
 import { registerWebModule } from "./modules/web/plugin.js";
 import { registerJoinModule } from "./modules/join/plugin.js";
+import { registerContextSignRoutes } from "./modules/context-signs/routes.js";
 import { parseTrustProxy } from "./lib/trust-proxy.js";
 import { privacyRequestSerializer } from "./lib/log-serializers.js";
 
@@ -175,6 +176,10 @@ export async function buildApp(deps: AppDependencies): Promise<FastifyInstance> 
   }
   if (deps.env.DEFECT_REPORTS_ENABLED) {
     await registerDefectRoutes(app);
+  }
+  // Context signs (docs/context-signs.md): traffic signs on a stretch of road, entered and confirmed by users.
+  if (deps.env.CONTEXT_SIGNS_ENABLED) {
+    await registerContextSignRoutes(app);
   }
   // Join codes: the public code is checked/created here, GET /join-code.json for the page "App verbinden" (docs/join-code.md).
   await registerJoinModule(app);

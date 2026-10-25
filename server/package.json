@@ -1,6 +1,6 @@
 {
   "name": "@trafficnetwork/server",
-  "version": "1.3.0",
+  "version": "1.4.0",
   "private": true,
   "type": "module",
   "description": "Relay/moderator server for the Trafficnetwork local-first traffic data network, including the built-in web UI.",
@@ -27,6 +27,7 @@
     "create-client": "tsx scripts/create-client.mts",
     "corrections": "tsx scripts/corrections.mts",
     "roads": "tsx scripts/roads.mts",
+    "context-signs": "tsx scripts/context-signs.mts",
     "join:show": "tsx src/join-cli.ts show",
     "join:create": "tsx src/join-cli.ts create",
     "join:rotate": "tsx src/join-cli.ts rotate",

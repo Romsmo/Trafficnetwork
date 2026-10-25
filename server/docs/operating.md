@@ -250,6 +250,30 @@ Design and reasons: [`road-network.md`](road-network.md). What an operator decid
   (nothing new is tied or hidden; what was hidden stays), `ROAD_LOOKUP_URL=none`.
 * **Migration `0013`** is additive (new tables, nullable/defaulted columns): no table is rewritten.
 
+## Context signs (server 1.4.0)
+
+Traffic signs that apply on a stretch of road, entered and confirmed by users ([`context-signs.md`](context-signs.md)). The stock starts
+empty; nothing is imported.
+
+* **On/off:** `CONTEXT_SIGNS_ENABLED` (default `true`; with no entry it does nothing). Off: no endpoints, no page layer, federation ignores the
+  votes; entries and votes are kept.
+* **Needs roads:** a sign is proposed on a road this node knows (import with `ingestion --roads`, or the road lookup, `road-network.md`). Without
+  road data a proposal is refused with `NO_ROAD_DATA`.
+* **Thresholds:** `CONTEXT_SIGNS_CONFIRMATIONS_PROHIBITION` (3) and `..._HAZARD` (2) distinct devices; `CONTEXT_SIGNS_DISPUTE_MIN_DENIALS` (2). Anonymous
+  web visitors count together as one voice, so a page alone can never confirm anything.
+* **Expiry:** unconfirmed entries 14 days after their last vote (`CONTEXT_SIGNS_UNCONFIRMED_DAYS`), "until revoked" entries 365 days after the
+  last support (`CONTEXT_SIGNS_OPEN_ENDED_DAYS`), dated entries after their end. A worker marks them every ten minutes.
+* **Budgets:** per calling client and day `CONTEXT_SIGNS_PROPOSALS_PER_DAY` (20) and `CONTEXT_SIGNS_VOTES_PER_DAY` (100); at most
+  `CONTEXT_SIGNS_MAX_UNCONFIRMED_PER_CELL` (50) unconfirmed entries within 3.7 km.
+* **Time zones:** `CONTEXT_SIGNS_TIMEZONE_PREFIXES` (default `Europe/`). To open another part of the world add its prefixes (`Europe/,Atlantic/,America/`).
+  `CONTEXT_SIGNS_DEFAULT_TIMEZONE` is proposed where the country of a place is not known (load country boundaries with `npm run cameras -- load-boundaries`).
+* **Operator commands** (local decisions, never replicated): `npm run context-signs -- status | list [--status ...] | show <id> | remove <id> [--reason ...] |
+  restore <id> | ban <reporterId> | unban <reporterId>`. `show` lists the votes with their reporter ids (`device:...`, `local:...`, `web:...`); `ban`
+  leaves a reporter's votes out of every tally.
+* **Distribution:** not in the static-data packages - a small interface of its own (`GET /v1/context-signs/tiles`), so enabling it does not rebuild
+  the packages. Changing `STATIC_DATA_PARTITION_H3_RESOLUTION` makes the worker tile the entries again at the next start.
+* **Privacy:** a vote is stored with a pseudonymous reporter id, the time and the entry - no position of the voter, no text.
+
 ## Place search (server 1.2.0)
 
 The map page's search bar ([`place-search.md`](place-search.md)) asks a Nominatim-compatible service **from the node**:

@@ -4,6 +4,8 @@ import { CAMERA_NAMESPACE_TYPES, PERSISTENT_CAMERA_TYPES, REPORTABLE_HAZARD_TYPE
 import { describeReportExpiry } from "../../config/report-expiry.js";
 import { currentReportExpiry } from "../expiry/rules.js";
 import { describePolicy } from "../cameras/policy/policy.js";
+import { getVersion as getContextSignVersion } from "../../db/queries/context-signs.js";
+import { describeContextSigns } from "../context-signs/routes.js";
 
 /**
  * Curated subset of server env tunables a client-lib instance must mirror
@@ -64,6 +66,9 @@ export async function registerConfigRoutes(app: FastifyInstance) {
       },
       // The road network (docs/road-network.md): a stretch of road is proposed by two points on it, which the node resolves to
       // the road's own shape. `lookup` says whether this node can fetch roads it does not have (else only imported ones).
+      // Context signs (docs/context-signs.md): whether the node has them, the version of the delivered set (compare it to know
+      // whether to fetch again), the thresholds and budgets. Absent on a node that predates the feature.
+      contextSigns: describeContextSigns(env, env.CONTEXT_SIGNS_ENABLED ? await getContextSignVersion(app.deps.db) : 0),
       // Whether GET /v1/places/search exists on this node (docs/place-search.md).
       placeSearch: { enabled: env.PLACE_SEARCH_URL !== "" },
       roadNetwork: {

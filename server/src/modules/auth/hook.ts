@@ -60,6 +60,8 @@ const PUBLIC_PATHS = new Set([
   // fourth time this list needed a new entry, so it is also covered by
   // tests/integration/auth-public-paths.test.ts.
   "/v1/federation/speed-limit-votes",
+  // Votes on context signs (docs/context-signs.md): the same reason - a peer has no client JWT.
+  "/v1/federation/context-sign-votes",
 ]);
 
 /**

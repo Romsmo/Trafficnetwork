@@ -2,6 +2,18 @@
 
 Versionierung je Paket, kein gemeinsames Release-Datum oder gemeinsame Versionsnummer: `server/` (inklusive der eingebauten Weboberfläche), `ingestion/` und `client-lib/` folgen SemVer eigenständig.
 
+## server v1.4.0 — noch nicht veröffentlicht
+
+Rein additiv: bestehende Endpunkte, Ergebnisformate und die Client-Bibliothek ändern sich nicht. Eine additive Migration (`0015`: vier neue, leere Tabellen und eine Spalte an `network_peers`).
+
+- **Kontextschilder:** Verkehrszeichen, die auf einem Streckenabschnitt gelten (Überholverbot, Halteverbot, Wildwechsel, Arbeitsstelle ... — die 58 Zeichen des Display-Katalogs), mit **Richtung** (in Fahrtrichtung der Strecke oder beide) und **Gültigkeit** (immer; Wochentage und Uhrzeiten in der Ortszeit des Ortes, auch über Mitternacht; Zeitraum von–bis oder „bis auf Widerruf“), optional mit Wert (Gewicht, Höhe, Länge). Nutzer tragen sie ein, andere Geräte bestätigen oder widersprechen. **Der Bestand beginnt leer**; es gibt keinen Import. Entwurf und Begründungen: [`server/docs/context-signs.md`](server/docs/context-signs.md).
+- **Strecke:** zwei Punkte auf der Straße (wie beim Tempolimit-Abschnitt), die der Knoten auf die Form der Straße rastet; ein Zeichen an einem Ort mit einem Punkt und der Fahrtrichtung. Nie eine Form abseits einer bekannten Straße. Identität eines Eintrags = Hash seiner Beschreibung: derselbe Vorschlag verschiedener Geräte ist derselbe Eintrag; ähnliche Einträge zeigt die Vorschau an.
+- **Bestätigen:** bestätigt ab **3** verschiedenen Geräten (Verbote) bzw. **2** (Gefahrzeichen); „strittig“ ab 2 Gegenstimmen, die mindestens so viele sind wie die Stimmen dafür (dann nicht mehr ausgeliefert). Anonyme Web-Besucher zählen **zusammen als eine Stimme**. Verfall: unbestätigt 14 Tage nach der letzten Stimme, „bis auf Widerruf“ 365 Tage nach der letzten Bestätigung, mit Zeitraum nach dessen Ende, dauerhafte Zeichen nie von selbst.
+- **Föderation:** gerätesignierte Stimmen `contextSignVote` (Push-Feld `contextSignVotes`, Pull `GET /v1/federation/context-sign-votes`); der Zustand ist eine reine Funktion der Stimmenmenge, also reihenfolgeunabhängig. `docs/federation-protocol.md` 5.4.
+- **Schnittstelle:** `POST /v1/context-signs/resolve`, `POST /v1/context-signs`, `POST /v1/context-signs/:id/confirmations`, `GET /v1/context-signs` (Gebiet), `GET /v1/context-signs/tiles` (Offline-Kacheln mit Versionszähler; nicht in den Statikpaketen, ihr Neubau bleibt aus), `GET /v1/context-signs/:id`; `GET /v1/config` → `contextSigns`.
+- **Betrieb:** `CONTEXT_SIGNS_ENABLED` und die Schwellen, Budgets (20 neue Einträge, 100 Stimmen je Client und Tag), Zeitzonen (`Europe/` zuerst, der Rest der Welt offen) in `.env.example`; `npm run context-signs -- status | list | show | remove | restore | ban | unban`. Keine Feiertage in dieser Version.
+- **Datenschutz:** je Stimme eine pseudonyme Kennung des Geräts (oder der Browser-Sitzung) und die Zeit — keine Position des Abstimmenden. `docs/privacy.md` (Entwurf).
+
 ## server v1.3.0 — 2026-10-24
 
 Rein additiv: bestehende App-Schlüssel (`create-client`), Tokens, Endpunkte und die Client-Bibliothek ändern sich nicht. Eine additive Migration (`0014`: vier Spalten ohne Vorgabewert an `clients`, kein Umschreiben, keine Sperre).

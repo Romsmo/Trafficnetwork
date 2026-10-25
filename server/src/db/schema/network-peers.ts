@@ -28,6 +28,8 @@ export const networkPeers = pgTable("network_peers", {
   // (GET /v1/federation/speed-limit-votes — add-on K-A): the highest
   // speed_limit_correction_votes.seq already pulled from this peer.
   lastPulledVotesSequence: integer("last_pulled_votes_sequence"),
+  // And for the context-sign vote stream (GET /v1/federation/context-sign-votes - docs/context-signs.md).
+  lastPulledContextVotesSequence: integer("last_pulled_context_votes_sequence"),
   // Reputation signals (F-S4, modules/federation/reputation.ts), all
   // measured by *this* server actively checking on the peer (heartbeat send,
   // anti-entropy pull) or observing its behavior (a push it sent) — never

@@ -815,6 +815,63 @@ the page) only make places around it rank first. Errors: `400` (term too short o
 PLACE_SEARCH_UNAVAILABLE`, `429` for web sessions (heavy-read limit). The response is `no-store`. The endpoint exists only when
 `PLACE_SEARCH_URL` is not `none` (`GET /v1/config` → `placeSearch.enabled`). See [`place-search.md`](place-search.md).
 
+## Context signs (server 1.4.0)
+
+Traffic signs that apply on a stretch of road, entered by users and confirmed by other devices (`context-signs.md` has the design). An
+entry is identified by its **id**, a 32-hex hash of its content. All calls need an ordinary token; web sessions may read, resolve,
+propose and vote (unsigned, counted together as one voice, `context-signs.md` D6). Not registered when `CONTEXT_SIGNS_ENABLED=false`.
+
+**Entry**
+```
+{ id, signType: "DE:276", geometry: [[lng, lat], ...] (in the direction of travel the sign applies in), direction: "along" | "both",
+  validity: { v: 1, tz, windows?: [{ days: [1..7], from: "HH:MM", to: "HH:MM" }], period?: { from, to | null } },
+  value: number | null, unit: "t" | "m" | null, lengthM,
+  status: "proposed" | "confirmed" | "disputed" | "expired", confirmed: boolean, confirmations, denials,
+  firstProposedAt, lastConfirmedAt, expiresAt }
+```
+
+#### `POST /v1/context-signs/resolve`
+```
+Request:  { signType, from: {lat, lng}, to?: {lat, lng}, direction?: "along" | "both" (default both), heading?: 0..360,
+            validity?: { tz?, windows?, period? }, value?, unit? }
+Response: { descriptor, entryKey, lengthM, road: { name, ref, class }, timezone,
+            existing: Entry | null,
+            similar: [{ entry, overlapOfNew, overlapOfEntry, sameDirection }] }
+```
+The node resolves the stretch on its roads (two points, in the order picked; or **one point** for a sign that stands at one place, with `heading`
+when it applies one way), fills in the time zone, validates everything and returns the **normal form** of the descriptor - what the device
+signs. Errors (422): `UNKNOWN_SIGN`, `SIGN_NEEDS_TWO_POINTS`, `HEADING_REQUIRED`, `NO_ROAD_DATA`, `NO_ROAD_FOUND`, `NO_ROAD_BETWEEN_POINTS`,
+`INTERVAL_TOO_LONG`/`_SHORT`, `STRETCH_TOO_LONG`, `INVALID_GEOMETRY`, `VALUE_REQUIRED`, `INVALID_VALUE`, `INVALID_TIMEZONE`, `INVALID_WINDOW`,
+`INVALID_PERIOD`, `PERIOD_REQUIRED`, `PERIOD_TOO_LONG`, `INVALID_DESCRIPTOR`.
+
+#### `POST /v1/context-signs` - propose
+```
+Request:  { descriptor, deviceAssertion? }       // descriptor as returned by resolve
+Response: { recorded, noop?: "already_holds_stance" | "duplicate", created, entry }       // 201 when a new entry was made, else 200
+```
+Proposing is a vote "this applies" on the entry the descriptor names. The node refuses a shape that is not on a road it knows
+(`SHAPE_OFF_ROAD`, `NO_ROAD_DATA`). `deviceAssertion` is a signed vote (`federation-protocol.md` 5.4) made with the key bound to the calling client
+(`403 DEVICE_KEY_NOT_BOUND` otherwise); a signed vote is replicated to other nodes, an unsigned one counts here only. `429`: the daily
+budget of new entries or of votes, or too many unconfirmed entries around the place.
+
+#### `POST /v1/context-signs/:id/confirmations`
+```
+Request:  { kind: "confirm" | "deny", deviceAssertion? }       Response: as above
+```
+
+#### `GET /v1/context-signs?bbox=<west,south,east,north>|lat=&lng=&radiusM=&confirmed=true&limit=`
+`{ version, entries: [Entry] }` - entries that are delivered (proposed or confirmed, not expired). `bbox` at most 2 x 3 degrees; `radiusM` at
+most 50000.
+
+#### `GET /v1/context-signs/tiles?tiles=<H3 cells>&since=<version>&confirmed=true`
+`{ version, unchanged, tiles: [{ tile, entries: [Entry] }] }` for up to 50 cells of resolution `staticDataPartitionH3Resolution`. With
+`since` equal to the current `version` the answer is `{ version, unchanged: true, tiles: [] }`. This is what the library keeps offline.
+
+#### `GET /v1/context-signs/:id`
+`{ entry }` with the live counts, or 404 for an unknown or removed entry.
+
+`GET /v1/config` carries `contextSigns: { enabled, version, catalog, timezonePrefixes, confirmationsRequired, rateLimit }`.
+
 ### `POST /v1/speed-limit-segments/:id/corrections`
 
 Propose a value (or confirm someone else's identical one — same value merges).

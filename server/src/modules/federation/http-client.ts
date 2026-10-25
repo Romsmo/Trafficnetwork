@@ -2,6 +2,7 @@ import type { SignedEnvelope } from "../crypto/envelope.js";
 import type { NetworkPeerApi } from "../../db/queries/network-peers.js";
 import type { DeviceCreateEventPayload } from "./device-event.js";
 import type { SpeedLimitVoteEnvelope } from "../speed-limit-corrections/vote.js";
+import type { ContextSignVoteEnvelope } from "../context-signs/vote.js";
 import type { JoinRequestPayload, HeartbeatPayload } from "./protocol.js";
 
 /**
@@ -55,8 +56,15 @@ export async function pushEvents(
    * doesn't know the key — is never handed a body it would reject.
    */
   speedLimitVotes: SpeedLimitVoteEnvelope[] = [],
+  /** Device-signed votes on context signs (docs/context-signs.md): again a field of their own, sent only when non-empty. */
+  contextSignVotes: ContextSignVoteEnvelope[] = [],
 ): Promise<PushEventsResponse> {
-  const body = speedLimitVotes.length > 0 ? { senderNodeId, events, speedLimitVotes } : { senderNodeId, events };
+  const body = {
+    senderNodeId,
+    events,
+    ...(speedLimitVotes.length > 0 ? { speedLimitVotes } : {}),
+    ...(contextSignVotes.length > 0 ? { contextSignVotes } : {}),
+  };
   return postJson<PushEventsResponse>(`${baseUrl}/v1/federation/events`, body, timeoutMs);
 }
 
@@ -79,6 +87,20 @@ export async function pullSpeedLimitVotes(
     throw new Error(`${url} responded ${res.status}`);
   }
   return (await res.json()) as PullSpeedLimitVotesResponse;
+}
+
+export interface PullContextSignVotesResponse {
+  votes: { sequence: number; voteId: string; envelope: ContextSignVoteEnvelope; receivedAt: string }[];
+  nextAfter: number | null;
+}
+
+/** Returns null when the peer doesn't offer the stream (older server, or context signs switched off there) - not an error. */
+export async function pullContextSignVotes(baseUrl: string, after: number, limit: number, timeoutMs: number): Promise<PullContextSignVotesResponse | null> {
+  const url = `${baseUrl}/v1/federation/context-sign-votes?after=${after}&limit=${limit}`;
+  const res = await fetch(url, { signal: AbortSignal.timeout(timeoutMs) });
+  if (res.status === 404) return null;
+  if (!res.ok) throw new Error(`${url} responded ${res.status}`);
+  return (await res.json()) as PullContextSignVotesResponse;
 }
 
 export interface PullEventsResponse {

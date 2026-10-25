@@ -330,6 +330,35 @@ reporter = "device:" + keyId(devicePublicKey)               // identical on ever
   registrations by the per-app-key daily cap), but a malicious *server* can still
   mint keys — see `docs/threat-model.md`, "Community speed-limit corrections".
 
+### 5.4 Votes on context signs (server 1.4.0)
+
+Context signs (`docs/context-signs.md`) are federated like the corrections' votes: device-signed, self-certifying, deterministically merged,
+durable state with a stream of their own.
+
+```
+ContextSignVote = {
+  kind: "contextSignVote", vote: "support" | "deny",
+  entryKey,                         // 32 hex: the hash of the canonical normal form of the descriptor
+  entry?,                           // the descriptor - REQUIRED for "support", its hash must equal entryKey
+  devicePublicKey, timestamp
+}
+descriptor = { v: 1, signType: "DE:276", geometry: [[lng, lat], ...] (1e-7 degrees, in the direction the sign applies in),
+               direction: "along" | "both", validity: { v: 1, tz, windows?, period? }, value: number | null, unit: "t" | "m" | null }
+voteId   = sha256(canonical({ payload, signature }))
+reporter = "device:" + keyId(devicePublicKey)
+```
+
+* **Own stream.** Push: the optional `contextSignVotes` array next to `events` (an older peer's schema drops the unknown key). Pull:
+  `GET /v1/federation/context-sign-votes?after=&limit=` with a per-peer cursor (`network_peers.last_pulled_context_votes_sequence`). Votes are never
+  purged. A `404` (older server, or the feature off) is skipped silently. A push to a node with the feature off is answered `ignored`.
+* **Ingest** (`modules/context-signs/ingest.ts`): the signature verifies against the key the payload names (`invalid_signature` is a reputation event
+  against the sender); a timestamp more than 5 minutes ahead is refused; the descriptor is validated against the catalogue and the plausibility
+  limits and its hash must equal `entryKey` (`implausible`); it is stored **as signed** - not re-resolved against this node's road network;
+  `ON CONFLICT DO NOTHING`; the entry is recomputed. No maximum age.
+* **Convergence:** an entry's state is a pure function of the set of non-banned votes: the standing stance of each reporter (latest in
+  `(timestamp, id)` order), with unsigned web visitors folded into one voice (they are never replicated, so this affects one node only).
+  A `deny` arriving before the `support` is kept and counts once the entry exists. Operator removals and bans are local.
+
 ## 6. Overload signaling
 
 `POST /v1/federation/events` returns `503` + `Retry-After` once
