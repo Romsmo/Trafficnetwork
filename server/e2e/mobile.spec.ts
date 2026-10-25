@@ -248,7 +248,7 @@ test.describe("the road-colour text", () => {
     await page.locator("#sheet-handle").click();
     // Zoom out so the hint is the "zoom in" one whatever the node's region is.
     for (let i = 0; i < 6; i += 1) await page.locator(".leaflet-control-zoom-out").click();
-    await expect(page.locator("label.layer-toggle")).toHaveText("Tempolimits als Straßenfarben zeigen");
+    await expect(page.locator("label.layer-toggle", { has: page.locator("#layer-limits") })).toHaveText("Tempolimits als Straßenfarben zeigen");
     await page.locator("#layer-limits").check();
     // The level is the one this screen needs to stay inside the node's area limit (14 at the least; a bigger screen needs more).
     await expect(page.locator("#limits-hint")).toHaveText(/^Näher heranzoomen \(ab Stufe 1[4-9]\), um Tempolimits als Farben zu sehen\.$/);
@@ -267,7 +267,7 @@ test.describe("the road-colour text", () => {
     await page.locator("#sheet-handle").click();
     for (let i = 0; i < 6; i += 1) await page.locator(".leaflet-control-zoom-out").click();
     await page.locator("#layer-limits").check();
-    await expect(page.locator("label.layer-toggle")).toHaveText("Show speed limits as road colours");
+    await expect(page.locator("label.layer-toggle", { has: page.locator("#layer-limits") })).toHaveText("Show speed limits as road colours");
     await expect(page.locator("#limits-hint")).toHaveText(/^Zoom in closer \(from level 1[4-9]\) to see speed limits as colours\.$/);
     await expect(page.locator("#limits-note")).toHaveText("Only roads with a recorded speed limit are coloured. Roads without a colour have no entry – the general legal rule applies there");
     expect(await page.locator("body").innerText()).not.toMatch(/maxspeed/i);
