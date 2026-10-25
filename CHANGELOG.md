@@ -2,7 +2,7 @@
 
 Versionierung je Paket, kein gemeinsames Release-Datum oder gemeinsame Versionsnummer: `server/` (inklusive der eingebauten Weboberfläche), `ingestion/` und `client-lib/` folgen SemVer eigenständig.
 
-## client-lib v1.3.0 — noch nicht veröffentlicht
+## client-lib v1.3.0 — 2026-10-25
 
 Rein additiv: `API_VERSION` bleibt 1, bestehende Aufrufe und Ergebnisse ändern sich nicht (`SyncReport` bekommt zwei Felder, die nur erscheinen, wenn der Knoten Kontextschilder hat). Passt zu **Server 1.4.0**; gegen einen älteren Knoten antwortet `resolveContextSign` mit `notOffered`, `getContextSigns` mit einer leeren Liste und `covered: false`.
 
@@ -12,7 +12,7 @@ Rein additiv: `API_VERSION` bleibt 1, bestehende Aufrufe und Ergebnisse ändern 
 - **Testvektoren:** `client-lib/fixtures/context-sign-vectors.json` (42 Fälle, beide Richtungen, letzter Meter, Mitternachtsfenster, beide Zeitumstellungen, abgelaufen/strittig/unbestätigt, leerer Bestand) aus einer unabhängigen JavaScript-Referenz (`make-context-sign-vectors.mjs`); der Rust-Kern prüft sie, die App führt dieselbe Datei aus. Konformanz-Szenarien (Python/Node/Web/Kotlin/Swift/Dart) mit unabhängiger Signaturprüfung im Mock-Server.
 - Doku: `client-lib/docs/api.md` („Context signs“), `integration-flutter.md`.
 
-## server v1.4.0 — noch nicht veröffentlicht
+## server v1.4.0 — 2026-10-25
 
 Rein additiv: bestehende Endpunkte, Ergebnisformate und die Client-Bibliothek ändern sich nicht. Eine additive Migration (`0015`: vier neue, leere Tabellen und eine Spalte an `network_peers`).
 
