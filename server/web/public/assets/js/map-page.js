@@ -3,6 +3,8 @@ import { loadWebConfig } from "./config.js";
 import { clear, h } from "./dom.js";
 import { readCameraPolicy } from "./camera-policy.js";
 import { CameraNotice } from "./camera-notice.js";
+import { ContextSignDialog } from "./context-sign-dialog.js";
+import { ContextSignLayer } from "./context-signs-layer.js";
 import { anyCameraEnabled, isCameraType, selectableTypes, sortNewestFirst, zoneLatLngs } from "./filter.js";
 import { formatAge, formatKm, formatRemaining } from "./format.js";
 import { tapToleranceMeters } from "./geo.js";
@@ -290,6 +292,8 @@ async function loadServerConfig() {
     hazards.setFilter(enabledTypes, cameraAvailable);
     zones.setFilter(enabledTypes, cameraAvailable);
     renderFilters();
+    // Context signs exist only where the node has them (docs/context-signs.md): the layer switch and the entry button appear then.
+    $("signs-box").hidden = !data?.contextSigns?.enabled;
     if (cameraAvailable && anyCameraEnabled(enabledTypes)) void loadHazards({ force: true });
     void subscribeAroundCenter();
   } catch {
@@ -499,6 +503,66 @@ $("layer-limits").addEventListener("change", (event) => {
   $("limits-note").hidden = !event.target.checked;
 });
 
+// ---- traffic signs on stretches (docs/context-signs.md) ---------------------------------------------------------
+let signsState = { kind: "off" };
+function signsStateText(state) {
+  switch (state.kind) {
+    case "zoom":
+      return t("signs.hint.zoom");
+    case "loading":
+      return t("signs.hint.loading");
+    case "error":
+      return t("signs.hint.error");
+    case "ready":
+      return state.count === 0 ? t("signs.hint.none") : currentTranslator().tn("signs.hint.ready", state.count);
+    default:
+      return "";
+  }
+}
+const signsLayer = new ContextSignLayer({
+  map,
+  api,
+  onState: (state) => {
+    signsState = state;
+    $("signs-hint").textContent = signsStateText(state);
+  },
+});
+$("layer-signs").addEventListener("change", (event) => {
+  signsLayer.enabled = event.target.checked;
+});
+let signPreview = null;
+const signDialog = new ContextSignDialog({
+  dialog: $("sign-dialog"),
+  api,
+  onPickRequested: (resolve, cancel, options) => beginPick(resolve, cancel, options),
+  // What the visitor is entering: the picked points and, after the preview, the stretch the node found (grey, over the road).
+  onPreview: (preview) => {
+    signPreview?.remove();
+    signPreview = null;
+    if (!preview) return;
+    const group = L.layerGroup();
+    if (preview.line && preview.line.length > 1) {
+      L.polyline(preview.line.map(([lng, lat]) => [lat, lng]), { className: "interval-preview", color: "#6b7280", weight: 9, opacity: 0.85, lineCap: "round", lineJoin: "round", interactive: false }).addTo(group);
+    }
+    (preview.points ?? []).forEach((p, index) => {
+      L.circleMarker([p.lat, p.lng], { className: "interval-point", radius: 8, color: "#374151", weight: 3, fillColor: "#ffffff", fillOpacity: 1, interactive: false })
+        .bindTooltip(String(index + 1), { permanent: true, direction: "top", offset: [0, -8], className: "interval-point-label" })
+        .addTo(group);
+    });
+    signPreview = group.addTo(map);
+  },
+  onDone: () => {
+    // show the visitor what they just did
+    if (!signsLayer.enabled) {
+      $("layer-signs").checked = true;
+      signsLayer.enabled = true;
+    } else {
+      signsLayer.refresh();
+    }
+  },
+});
+$("sign-add").addEventListener("click", () => signDialog.open({ center: map.getCenter() }));
+
 // The round "categories and layers" button: opens the sheet (or just goes to the filters in the panel).
 $("layers-open").addEventListener("click", () => {
   closeSheetDetail({ focus: false });
@@ -679,6 +743,7 @@ onLangChange(() => {
   limits.renderLegend();
   $("map").setAttribute("aria-label", t("map.aria"));
   $("limits-hint").textContent = limitsStateText(limitsState);
+  $("signs-hint").textContent = signsStateText(signsState);
   if (pendingPick) setChip("pick-chip", t(pendingPick.hintKey));
   applyTranslations(document);
   labelMapControls();
