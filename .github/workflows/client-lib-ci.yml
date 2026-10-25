@@ -1153,7 +1153,9 @@ jobs:
           xcrun simctl list devices booted || true
           ls -la ~/Library/Logs/DiagnosticReports 2>/dev/null | tail -20 || true
           for f in $(ls -t ~/Library/Logs/DiagnosticReports/Runner* 2>/dev/null | head -2); do echo "== $f"; head -80 "$f"; done
-          xcrun simctl spawn "$SIMULATOR_UDID" log show --last 25m --style compact --predicate 'process == "Runner" OR eventMessage CONTAINS "dyld" OR eventMessage CONTAINS "Library not loaded"' 2>/dev/null | tail -150 || true
+          # the app runs as a process of the host: where its threads stand shows a hang in the library
+          for p in $(pgrep -f 'Runner.app/Runner' | head -2); do echo "== sample of $p"; sample "$p" 3 2>&1 | head -220; done
+          xcrun simctl spawn "$SIMULATOR_UDID" log show --last 12m --style compact --predicate 'process == "Runner" AND NOT (eventMessage CONTAINS "Metal Compiling")' 2>/dev/null | tail -80 || true
 
       # ---- 2. CocoaPods
       - name: Create the same app with CocoaPods, and build it
