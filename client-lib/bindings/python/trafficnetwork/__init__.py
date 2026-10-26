@@ -358,6 +358,39 @@ class Client:
         stretch along the road's own shape, ``covered`` what is on record under it."""
         return self.call("resolveRoadInterval", {"from": from_point, "to": to_point})
 
+    def get_context_signs(self, lat: float, lng: float, heading: Optional[float] = None,
+                          ahead_meters: Optional[float] = None, at: Optional[Any] = None,
+                          include_unconfirmed: bool = False, include_inactive: bool = False):
+        """Which traffic signs apply here and just ahead (server 1.4.0): the entries the device holds, read at ``at``
+        (an RFC 3339 text or Unix milliseconds; default now). Local and offline. Returns ``{"signs": [...], "covered": bool,
+        "entriesHeld": int}``, nearest first; each sign has ``id``, ``signType`` (``DE:276``), ``startsInM`` (<= 0: applies
+        already), ``endsInM``, ``validUntil``, ``activeNow``, ``confirmed``, ``confirmations``, ``value``/``unit``."""
+        args: Dict[str, Any] = {"lat": lat, "lng": lng, "includeUnconfirmed": include_unconfirmed,
+                                "includeInactive": include_inactive}
+        if heading is not None:
+            args["heading"] = heading
+        if ahead_meters is not None:
+            args["aheadMeters"] = ahead_meters
+        if at is not None:
+            args["at"] = at
+        return self.call("getContextSigns", args)
+
+    def resolve_context_sign(self, request: Dict[str, Any]):
+        """The stretch of road the picked points of a context sign mean, and the same or similar entries (needs the
+        network). ``request``: ``{"signType", "from": {lat, lng}, "to": {lat, lng}?, "direction": "along"|"both",
+        "heading"?, "validity"?, "value"?, "unit"?}``."""
+        return self.call("resolveContextSign", request)
+
+    def report_context_sign(self, request: Dict[str, Any]) -> str:
+        """Proposes a context sign. Queued like every write (the node finds the road when it is sent), signed then.
+        Returns the local queue id."""
+        return self.call("reportContextSign", request)["localId"]
+
+    def vote_context_sign(self, entry_id: str, agrees: bool) -> str:
+        """"This sign is right here" (``agrees``) or "it is not", for an entry from ``get_context_signs``. Queued and
+        signed like a proposal. Returns the local queue id."""
+        return self.call("voteContextSign", {"id": entry_id, "agrees": agrees})["localId"]
+
     def data_defects_near(self, lat: float, lng: float, radius_meters: Optional[float] = None):
         """The entries near a point that can be marked as wrong (needs the network)."""
         args: Dict[str, Any] = {"lat": lat, "lng": lng}

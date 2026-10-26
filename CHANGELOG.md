@@ -2,7 +2,17 @@
 
 Versionierung je Paket, kein gemeinsames Release-Datum oder gemeinsame Versionsnummer: `server/` (inklusive der eingebauten Weboberfläche), `ingestion/` und `client-lib/` folgen SemVer eigenständig.
 
-## server v1.4.0 — noch nicht veröffentlicht
+## client-lib v1.3.0 — 2026-10-25
+
+Rein additiv: `API_VERSION` bleibt 1, bestehende Aufrufe und Ergebnisse ändern sich nicht (`SyncReport` bekommt zwei Felder, die nur erscheinen, wenn der Knoten Kontextschilder hat). Passt zu **Server 1.4.0**; gegen einen älteren Knoten antwortet `resolveContextSign` mit `notOffered`, `getContextSigns` mit einer leeren Liste und `covered: false`.
+
+- **Kontextschilder:** `getContextSigns({ lat, lng, heading?, aheadMeters?, at?, includeUnconfirmed?, includeInactive? })` sagt **lokal und offline**, welche Verkehrszeichen *jetzt hier* gelten oder in der Vorausschau (Standard 1500 m) beginnen — je mit `signType` (`DE:276`), `startsInM` (≤ 0: gilt schon), `endsInM`, `validUntil`, `activeNow`, `confirmed`/`confirmations`, optional `value`/`unit`, nach Entfernung geordnet. Roh: keine Seiten, keine Ersetzung (das ist Sache der App). Richtung (Einrichtungs-Zeichen nur im Winkel von 60° zur Strecke, ohne bekannte Fahrtrichtung nur Zeichen für beide Richtungen, die den Standort enthalten) und Zeit (Wochentage und Uhrzeiten **in der Ortszeit des Zeichens**, über Mitternacht, Sommerzeitwechsel, Zeitraum, „bis auf Widerruf“) werden in der Bibliothek ausgewertet. `covered` sagt, ob für den Ort überhaupt etwas geladen ist.
+- **Eintragen und bestätigen:** `resolveContextSign` (online: welche Strecke die Punkte meinen, ähnliche/vorhandene Einträge), `reportContextSign` und `voteContextSign` (**in den Offline-Schreibpuffer**, mit dem Gerätschlüssel beim Senden signiert; ein Vorschlag, den es inzwischen gibt, wird eine Bestätigung). Neue Fehlercodes: `unknownSign`, `signNeedsTwoPoints`, `headingRequired`, `stretchTooLong`, `invalidValue`, `invalidValidity`, `shapeOffRoad`.
+- **Offline-Daten:** die Einträge liegen kachelweise im Speicher (Einstellung `contextSigns.v1`), kommen mit jedem `sync` für die Pakete des Geräts und die Kacheln um den Standort, eine Anfrage bei unveränderter Version ist ein paar Byte groß. Zeitzonen über `chrono-tz` (reines Rust, auch WASM).
+- **Testvektoren:** `client-lib/fixtures/context-sign-vectors.json` (42 Fälle, beide Richtungen, letzter Meter, Mitternachtsfenster, beide Zeitumstellungen, abgelaufen/strittig/unbestätigt, leerer Bestand) aus einer unabhängigen JavaScript-Referenz (`make-context-sign-vectors.mjs`); der Rust-Kern prüft sie, die App führt dieselbe Datei aus. Konformanz-Szenarien (Python/Node/Web/Kotlin/Swift/Dart) mit unabhängiger Signaturprüfung im Mock-Server.
+- Doku: `client-lib/docs/api.md` („Context signs“), `integration-flutter.md`.
+
+## server v1.4.0 — 2026-10-25
 
 Rein additiv: bestehende Endpunkte, Ergebnisformate und die Client-Bibliothek ändern sich nicht. Eine additive Migration (`0015`: vier neue, leere Tabellen und eine Spalte an `network_peers`).
 

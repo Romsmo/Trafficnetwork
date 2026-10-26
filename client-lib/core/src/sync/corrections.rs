@@ -705,7 +705,9 @@ fn vote_payload(
         // unsigned, they are not replicated between servers).
         WriteKind::HazardReport
         | WriteKind::HazardConfirmation { .. }
-        | WriteKind::CameraRemoval { .. } => return None,
+        | WriteKind::CameraRemoval { .. }
+        | WriteKind::ContextSignProposal
+        | WriteKind::ContextSignVote { .. } => return None,
     };
     Some(SpeedLimitVotePayload {
         kind: "speedLimitVote",
@@ -827,6 +829,11 @@ async fn send_to_server(
         WriteKind::HazardReport => Err(DiscoveryError::InvalidResponse(
             "a hazard report is sent by the hazard-report flush".to_string(),
         )),
+        WriteKind::ContextSignProposal | WriteKind::ContextSignVote { .. } => {
+            Err(DiscoveryError::InvalidResponse(
+                "a context-sign write is sent by the context-sign flush".to_string(),
+            ))
+        }
     }
 }
 

@@ -74,6 +74,10 @@ Calls block the calling thread until they are done (a sync takes as long as the
 network does); they run on the library's own threads, so the size of yours does
 not matter. Run them in a thread or an executor if your program has an event loop.
 
+## Traffic signs on a stretch (1.3.0)
+
+Which traffic signs apply here and just ahead, offline: `client.get_context_signs(48.1374, 11.5755, heading=92)` (heading in degrees; `at`, `aheadMeters`, `includeUnconfirmed`, `includeInactive` are optional). The entries come with every sync; `covered: false` means nothing was downloaded for the place. Entering a sign: `resolveContextSign` (online preview), `reportContextSign` and `voteContextSign` (queued, signed when sent). All of it, with the rules for space, direction and time and the shared test vectors, is in `api.md`, "Context signs".
+
 ## Offline area and report duration (1.2.0)
 
 From 1.2.0 the device chooses what it keeps of the static data (`offline-storage.md`): by default the surroundings of the

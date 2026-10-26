@@ -291,6 +291,42 @@ class TrafficNetworkClient {
   }) =>
       _object('resolveRoadInterval', {'from': from, 'to': to});
 
+  /// Which traffic signs apply here and just ahead (server 1.4.0, `server/docs/context-signs.md`): the entries the device holds,
+  /// read at [at] (an RFC 3339 text or Unix milliseconds; default now). Local and offline. The result is
+  /// `{signs: [...], covered: bool, entriesHeld: int}`; each sign has `id`, `signType` (`DE:276`), `startsInM` (<= 0: applies
+  /// already), `endsInM`, `validUntil`, `activeNow`, `confirmed`, `confirmations`, `value`/`unit`. Nearest first; side and
+  /// replacement are the app's.
+  Future<Map<String, Object?>> getContextSigns({
+    required double lat,
+    required double lng,
+    double? heading,
+    double? aheadMeters,
+    Object? at,
+    bool includeUnconfirmed = false,
+    bool includeInactive = false,
+  }) =>
+      _object('getContextSigns', {
+        'lat': lat,
+        'lng': lng,
+        if (heading != null) 'heading': heading,
+        if (aheadMeters != null) 'aheadMeters': aheadMeters,
+        if (at != null) 'at': at,
+        'includeUnconfirmed': includeUnconfirmed,
+        'includeInactive': includeInactive,
+      });
+
+  /// The stretch of road the picked points of a context sign mean, and the same or similar entries (needs the network). [request]
+  /// is `{signType, from: {lat, lng}, to: {lat, lng}?, direction: 'along'|'both', heading?, validity?, value?, unit?}`.
+  Future<Map<String, Object?>> resolveContextSign(Map<String, Object?> request) => _object('resolveContextSign', request);
+
+  /// Proposes a context sign. Queued like every write (the node finds the road when it is sent) and signed then. Returns the
+  /// local queue id.
+  Future<String> reportContextSign(Map<String, Object?> request) async => (await _object('reportContextSign', request))['localId'] as String;
+
+  /// "This sign is right here" ([agrees]) or "it is not", for an entry from [getContextSigns]. Queued and signed like a proposal.
+  /// Returns the local queue id.
+  Future<String> voteContextSign(String id, bool agrees) async => (await _object('voteContextSign', {'id': id, 'agrees': agrees}))['localId'] as String;
+
   /// The entries near a point that can be marked as wrong (needs the network).
   Future<List<Object?>> dataDefectsNear(
     double lat,

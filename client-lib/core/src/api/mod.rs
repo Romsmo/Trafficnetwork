@@ -13,7 +13,7 @@ mod events;
 mod offline;
 mod options;
 mod secure_store;
-mod tiles;
+pub(crate) mod tiles;
 mod types;
 
 pub use client::{Platform, TrafficNetworkClient};

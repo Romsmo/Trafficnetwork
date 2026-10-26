@@ -190,6 +190,121 @@ export interface RoadInterval {
   proposals: Correction[];
 }
 
+// ---- context signs (server 1.4.0)
+
+export type ContextSignDirection = "along" | "both";
+
+/** A weekday/time window, read in the entry's time zone. `from > to` crosses midnight and belongs to the day it starts on. */
+export interface ContextSignWindow {
+  /** ISO weekdays, 1 = Monday ... 7 = Sunday. */
+  days: number[];
+  /** "HH:MM", local time. */
+  from: string;
+  to: string;
+}
+
+/** When a context sign applies. No `windows` and no `period`: always. */
+export interface ContextSignValidity {
+  v?: 1;
+  /** IANA time zone, e.g. "Europe/Berlin". */
+  tz: string;
+  windows?: ContextSignWindow[];
+  /** Local dates "YYYY-MM-DD", inclusive. `to: null`: until revoked. */
+  period?: { from: string; to: string | null };
+}
+
+/** What `getContextSigns` takes. */
+export interface ContextSignsQuery {
+  lat: number;
+  lng: number;
+  /** Compass direction of travel in degrees (0 = north). Without it only both-way signs that contain the position are told. */
+  heading?: number;
+  /** How far ahead (metres) to look for the start of a sign. Default 1500. */
+  aheadMeters?: number;
+  /** The instant to read the time windows at: an RFC 3339 text or Unix milliseconds. Default now. */
+  at?: string | number;
+  /** Also signs that fewer devices than the node requires have confirmed (`confirmed: false`). Default `false`. */
+  includeUnconfirmed?: boolean;
+  /** Also signs that do not apply at `at` (they carry `nextActiveAt`). Default `false`. */
+  includeInactive?: boolean;
+}
+
+/** A traffic sign that applies here or begins ahead. Ordered by `startsInM`; the app decides side and replacement (`sign-rules.json`). */
+export interface ContextSign {
+  id: string;
+  /** Country-prefixed catalogue reference: `DE:276`, `DE:142-10`. */
+  signType: string;
+  /** For signs that carry one (weight in t, height/width/length/distance in m). */
+  value: number | null;
+  unit: "t" | "m" | null;
+  /** Metres to where it starts along the direction of travel; `<= 0`: it applies already (minus the metres driven along it). */
+  startsInM: number;
+  /** Metres to where it ends. */
+  endsInM: number | null;
+  /** RFC 3339 (UTC): the instant its current validity ends. `null`: no end. */
+  validUntil: string | null;
+  /** For a sign that does not apply now (with `includeInactive`): when it next does, within eight days. */
+  nextActiveAt: string | null;
+  activeNow: boolean;
+  confirmed: boolean;
+  confirmations: number;
+  direction: ContextSignDirection;
+  lengthM: number;
+}
+
+export interface ContextSigns {
+  signs: ContextSign[];
+  /** The device holds the context signs of this place. `false`: the empty list means "nothing downloaded", not "no sign here". */
+  covered: boolean;
+  entriesHeld: number;
+}
+
+/** What a person picked for a context sign. The server finds the road. */
+export interface ContextSignRequest {
+  signType: string;
+  /** The start of the stretch, or the place of a sign that stands at one place. */
+  from: RoadPoint;
+  /** The end of the stretch. Omit for a sign at one place. */
+  to?: RoadPoint;
+  /** Default `both`. */
+  direction?: ContextSignDirection;
+  /** Direction of travel (degrees) for a sign at one place that applies one way. */
+  heading?: number;
+  validity?: { tz?: string; windows?: ContextSignWindow[]; period?: { from: string; to: string | null } };
+  value?: number;
+  unit?: "t" | "m";
+}
+
+/** An entry as the server describes it. */
+export interface ContextSignEntry {
+  id: string;
+  signType: string;
+  /** `[lng, lat]` vertices in the direction the sign applies in. */
+  geometry: [number, number][];
+  direction: ContextSignDirection;
+  validity: ContextSignValidity;
+  value: number | null;
+  unit: "t" | "m" | null;
+  lengthM: number;
+  status: "proposed" | "confirmed" | "disputed" | "expired";
+  confirmed: boolean;
+  confirmations: number;
+  denials: number;
+  expiresAt: string | null;
+}
+
+/** What the node makes of the picked points (`resolveContextSign`). If `existing` is set, confirm it instead of proposing. */
+export interface ContextSignPreview {
+  /** The stretch on the road in the form a device signs; `geometry` is what to draw. */
+  descriptor: { signType: string; geometry: [number, number][]; direction: ContextSignDirection; validity: ContextSignValidity; value: number | null; unit: "t" | "m" | null };
+  entryKey: string;
+  lengthM: number;
+  road: { name: string | null; ref: string | null; class: string | null };
+  timezone: string;
+  existing: ContextSignEntry | null;
+  similar: { entry: ContextSignEntry; overlapOfNew: number; overlapOfEntry: number; sameDirection: boolean }[];
+}
+
 /** An entry near a point that can be marked as wrong. */
 export interface DataDefect {
   targetType: "speedLimitSegment" | "staticSign";
@@ -357,6 +472,10 @@ export interface SyncReport {
   offlineDeferredTiles: number;
   /** Automatic offline area and neither a position nor a home is known: nothing was selected. */
   needsLocation: boolean;
+  /** Context signs held after this sync (absent when the server does not offer them). */
+  contextSignsEntries?: number;
+  /** Error code of the context-sign part, if it failed. This does not make `ok` false. */
+  contextSignsError?: string;
 }
 
 export interface TickResult {
@@ -522,6 +641,17 @@ export interface TrafficNetworkClient {
   reportSpeedLimitInterval(report: SpeedLimitIntervalReport): Promise<Proposal>;
   /** Which stretch of which road two picked points name — draw `geometry` before anybody proposes a value. Needs the network. */
   resolveRoadInterval(from: RoadPoint, to: RoadPoint): Promise<RoadInterval>;
+  /**
+   * Which traffic signs apply here and just ahead (server 1.4.0): the entries the device holds, read at `at`. Local and offline, like
+   * `getSpeedLimitAt`; the entries come with every sync for the offline area and the places around the position. Nearest first.
+   */
+  getContextSigns(query: ContextSignsQuery): Promise<ContextSigns>;
+  /** The stretch of road the picked points of a context sign mean, and the same/similar entries. Needs the network. */
+  resolveContextSign(request: ContextSignRequest): Promise<ContextSignPreview>;
+  /** Proposes a context sign. Queued like every write (the node finds the road when it is sent), signed then; returns the local queue id. */
+  reportContextSign(request: ContextSignRequest): Promise<string>;
+  /** "This sign is right here" / "it is not" for an entry from `getContextSigns`. Queued and signed like a proposal; returns the local queue id. */
+  voteContextSign(id: string, agrees: boolean): Promise<string>;
   /** The entries near a point that can be marked as wrong, with how many devices have marked each. Needs the network. */
   dataDefectsNear(lat: number, lng: number, radiusMeters?: number): Promise<DataDefect[]>;
   /** "This entry is wrong": one mark per device and entry; enough distinct devices take it out. Needs the network. */
@@ -601,6 +731,10 @@ export class BaseClient {
   reportWrongSpeedLimit(report: WrongSpeedLimitReport): Promise<Proposal>;
   reportSpeedLimitInterval(report: SpeedLimitIntervalReport): Promise<Proposal>;
   resolveRoadInterval(from: RoadPoint, to: RoadPoint): Promise<RoadInterval>;
+  getContextSigns(query: ContextSignsQuery): Promise<ContextSigns>;
+  resolveContextSign(request: ContextSignRequest): Promise<ContextSignPreview>;
+  reportContextSign(request: ContextSignRequest): Promise<string>;
+  voteContextSign(id: string, agrees: boolean): Promise<string>;
   dataDefectsNear(lat: number, lng: number, radiusMeters?: number): Promise<DataDefect[]>;
   reportDataDefect(report: DataDefectReport): Promise<DataDefectAnswer>;
   lookupSpeedLimit(lat: number, lng: number, heading?: number): Promise<SpeedLimitLookup>;

@@ -196,6 +196,19 @@ pub async fn flush_pending(
     for item in pending {
         let outcome = if matches!(item.kind, WriteKind::HazardReport) {
             flush_hazard_report(store, discovery, clock, bearer_token, device_key, item).await?
+        } else if matches!(
+            item.kind,
+            WriteKind::ContextSignProposal | WriteKind::ContextSignVote { .. }
+        ) {
+            super::context_signs::flush_context_sign_write(
+                store,
+                discovery,
+                clock,
+                bearer_token,
+                device_key,
+                item,
+            )
+            .await?
         } else {
             corrections::flush_correction_write(
                 store,

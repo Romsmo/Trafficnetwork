@@ -26,6 +26,8 @@
 //   reportExpiry: { <hazardType>: { defaultSeconds, minSeconds, maxSeconds } }
 //                             the server's `reportExpiry` in `GET /v1/config` (server 1.1.0)
 //   communityCorrections: true  offer speed-limit corrections and gap proposals (`communityCorrections.enabled`)
+//   contextSigns: true        offer context signs (server 1.4.0): one confirmed one-way sign (DE:276) on a road east-west at (52.0, 13.0),
+//                             `GET /v1/context-signs/tiles`, `POST /v1/context-signs/resolve`, proposals and votes (signatures are checked)
 //   secondTile: bool          a second static-data package, the H3 neighbour of the first (offline-area scenarios)
 //   noRegions: bool           the server predates `GET /v1/static-data/regions` (answers 404)
 //
@@ -95,6 +97,24 @@ const impostorKey = generateKey();
 // (52.52, 13.405) — the library works out which package held a camera from the
 // camera's position, so the package has to carry the id such a position gives.
 const PARTITION_TILE = "841f1d5ffffffff";
+
+// Context signs (server 1.4.0): one confirmed one-way "no overtaking" sign along an east-west road at (52.0, 13.0), 12.999 to 13.003.
+const CONTEXT_SIGN_KEY = "0123456789abcdef0123456789abcdef";
+const CONTEXT_SIGN = {
+  id: "ctx-1",
+  signType: "DE:276",
+  geometry: [[12.999, 52.0], [13.003, 52.0]],
+  direction: "along",
+  validity: { v: 1, tz: "Europe/Berlin" },
+  value: null,
+  unit: null,
+  lengthM: 274.4,
+  status: "confirmed",
+  confirmed: true,
+  confirmations: 3,
+  denials: 0,
+  expiresAt: null,
+};
 // Its H3 neighbour — the second package some scenarios offer (`secondTile`).
 const SECOND_TILE = "841f1c3ffffffff";
 
@@ -424,6 +444,24 @@ function assertionValid(body) {
   return matches && fresh && verifyEnvelope(assertion, p.devicePublicKey);
 }
 
+// A context-sign vote must say what the body says (support for a proposal or a confirmation, deny for an objection), carry the
+// descriptor where the server needs it, be fresh and verify against the key it names.
+function contextVoteValid(key, body) {
+  const assertion = body.deviceAssertion;
+  if (!assertion) return null;
+  const p = assertion.payload ?? {};
+  const confirmations = /^POST \/v1\/context-signs\/([0-9a-z-]+)\/confirmations$/.exec(key);
+  let matches = p.kind === "contextSignVote";
+  if (confirmations) {
+    matches = matches && p.entryKey === confirmations[1] && p.vote === (body.kind === "confirm" ? "support" : "deny");
+    matches = matches && (p.vote === "support" ? p.entry?.signType === CONTEXT_SIGN.signType : p.entry === undefined);
+  } else {
+    matches = matches && p.vote === "support" && p.entryKey === CONTEXT_SIGN_KEY && canonical(p.entry) === canonical(body.descriptor);
+  }
+  const fresh = Math.abs(Date.now() - Date.parse(p.timestamp)) <= 60_000;
+  return Boolean(matches && fresh && verifyEnvelope(assertion, p.devicePublicKey));
+}
+
 async function readBody(req) {
   const chunks = [];
   for await (const chunk of req) chunks.push(chunk);
@@ -455,6 +493,7 @@ function handleInstance(instance, req, res, path, query, body) {
   }
 
   if (key === "POST /v1/hazard-reports") entry.signatureValid = assertionValid(body ?? {});
+  if (/^POST \/v1\/context-signs(\/[0-9a-z-]+\/confirmations)?$/.test(key)) entry.signatureValid = contextVoteValid(key, body ?? {});
   instance.log.push(entry);
 
   const failure = instance.failures.find((f) => f.route === key && f.times > 0);
@@ -506,6 +545,32 @@ function handleInstance(instance, req, res, path, query, body) {
       }
       return json(res, 404, { error: { code: "NOT_FOUND", message: "no speed limit here" } });
     }
+    case "GET /v1/context-signs/tiles": {
+      if (!instance.config.contextSigns) return json(res, 404, { error: { code: "NOT_FOUND", message: key } });
+      const since = Number(query.get("since") ?? NaN);
+      if (since === 4) return json(res, 200, { version: 4, unchanged: true, tiles: [] });
+      const tiles = (query.get("tiles") ?? "").split(",").filter(Boolean);
+      return json(res, 200, { version: 4, unchanged: false, tiles: tiles.map((tile) => ({ tile, entries: tile === PARTITION_TILE ? [CONTEXT_SIGN] : [] })) });
+    }
+    case "POST /v1/context-signs/resolve": {
+      if (!instance.config.contextSigns) return json(res, 404, { error: { code: "NOT_FOUND", message: key } });
+      if (body?.signType !== "DE:276" && body?.signType !== "DE:151") {
+        return json(res, 422, { error: { code: "UNKNOWN_SIGN", message: "This sign is not in the catalogue of this node" } });
+      }
+      const existing = body.from.lat === 52.0 && body.from.lng === 13.0 ? CONTEXT_SIGN : null;
+      return json(res, 200, {
+        descriptor: { v: 1, signType: body.signType, geometry: [[body.from.lng, body.from.lat], [(body.to ?? body.from).lng + 0.0001, (body.to ?? body.from).lat]], direction: body.direction ?? "both", validity: { v: 1, tz: "Europe/Berlin" }, value: null, unit: null },
+        entryKey: existing ? CONTEXT_SIGN.id : CONTEXT_SIGN_KEY,
+        lengthM: 300,
+        road: { name: "Feldweg", ref: null, class: "track" },
+        timezone: "Europe/Berlin",
+        existing,
+        similar: [],
+      });
+    }
+    case "POST /v1/context-signs":
+      if (!instance.config.contextSigns) return json(res, 404, { error: { code: "NOT_FOUND", message: key } });
+      return json(res, 201, { recorded: true, created: true, entry: { ...CONTEXT_SIGN, id: CONTEXT_SIGN_KEY, status: "proposed", confirmed: false, confirmations: 1 } });
     case "POST /v1/speed-limit-intervals":
       return json(res, 201, { correction: { id: "ivl-1", status: "proposed", confirmations: 1 }, recorded: true, merged: false, segment: null });
     case "POST /v1/roads/resolve": {
@@ -573,6 +638,8 @@ function handleInstance(instance, req, res, path, query, body) {
       return json(res, 201, { report: addHazard(instance, body), merged: false });
     }
     default: {
+      const contextVote = /^POST \/v1\/context-signs\/([0-9a-z-]+)\/confirmations$/.exec(key);
+      if (contextVote && instance.config.contextSigns) return json(res, 200, { recorded: true, created: false, entry: CONTEXT_SIGN });
       const confirm = /^POST \/v1\/hazard-reports\/([^/]+)\/confirmations$/.exec(key);
       if (confirm) {
         const hazard = instance.hazards.find((h) => h.id === confirm[1]);

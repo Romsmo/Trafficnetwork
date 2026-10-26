@@ -355,6 +355,43 @@
       ]
     },
     {
+      "name": "context signs: they arrive with a sync, are read offline for a position, a heading and a time, and votes and proposals go out signed",
+      "servers": { "main": { "contextSigns": true } },
+      "options": { "nodes": ["${main}"], "discovery": false, "credentials": { "type": "client", "clientId": "conformance", "clientSecret": "secret" } },
+      "steps": [
+        { "call": "updatePosition", "args": { "lat": 52.0, "lng": 13.0 } },
+        { "call": "sync", "expect": { "ok": true, "contextSignsEntries": 1 } },
+        { "call": "getContextSigns", "args": { "lat": 52.0, "lng": 13.0, "heading": 90, "at": "2026-10-14T10:00:00Z" }, "expect": { "covered": true, "entriesHeld": 1, "signs": [ { "id": "ctx-1", "signType": "DE:276", "activeNow": true, "confirmed": true, "direction": "along", "validUntil": null } ] } },
+        { "call": "getContextSigns", "args": { "lat": 52.0, "lng": 13.0, "heading": 270, "at": "2026-10-14T10:00:00Z" }, "expect": { "covered": true, "signs": [] } },
+        { "call": "getContextSigns", "args": { "lat": 52.0, "lng": 13.0, "at": "2026-10-14T10:00:00Z" }, "expect": { "signs": [] } },
+        { "call": "getContextSigns", "args": { "lat": 52.0, "lng": 12.9965, "heading": 90, "at": 1791972000000 }, "expect": { "signs": [ { "id": "ctx-1" } ] } },
+        { "call": "getContextSigns", "args": { "lat": 52.0, "lng": 13.0, "heading": 90, "aheadMeters": -1 }, "expectError": "invalidArgument" },
+        { "call": "getContextSigns", "args": { "lat": 52.0, "lng": 13.0, "heading": 90, "at": "yesterday" }, "expectError": "invalidArgument" },
+        { "call": "resolveContextSign", "args": { "signType": "DE:276", "from": { "lat": 52.1, "lng": 13.0 }, "to": { "lat": 52.1, "lng": 13.004 }, "direction": "along" }, "expect": { "lengthM": 300, "road": { "name": "Feldweg" }, "existing": null } },
+        { "call": "resolveContextSign", "args": { "signType": "DE:999", "from": { "lat": 52.1, "lng": 13.0 }, "to": { "lat": 52.1, "lng": 13.004 } }, "expectError": "unknownSign" },
+        { "call": "resolveContextSign", "args": { "signType": "DE:276", "from": { "lat": 0, "lng": 0 }, "to": { "lat": 52.1, "lng": 13.004 } }, "expectError": "invalidArgument" },
+        { "call": "voteContextSign", "args": { "id": "ctx-1", "agrees": true }, "expectKeys": ["localId"] },
+        { "call": "voteContextSign", "args": { "id": "no-such-sign", "agrees": true }, "expectError": "invalidArgument" },
+        { "call": "reportContextSign", "args": { "signType": "DE:276", "from": { "lat": 52.1, "lng": 13.0 }, "to": { "lat": 52.1, "lng": 13.004 }, "direction": "along" }, "expectKeys": ["localId"] },
+        { "call": "getSyncStatus", "expect": { "pendingWrites": 2 } },
+        { "call": "sync", "expect": { "submitted": 2, "pendingWrites": 0 } },
+        { "mockLog": { "server": "main", "route": "POST /v1/context-signs/ctx-1/confirmations", "count": 1, "bodyIncludes": { "kind": "confirm" }, "signatureValid": true } },
+        { "mockLog": { "server": "main", "route": "POST /v1/context-signs/resolve", "count": 3 } },
+        { "mockLog": { "server": "main", "route": "POST /v1/context-signs", "count": 1, "signatureValid": true } }
+      ]
+    },
+    {
+      "name": "context signs: a server that has none is not an error - the sync works and the answer says that nothing is held",
+      "servers": { "main": {} },
+      "options": { "nodes": ["${main}"], "discovery": false, "credentials": { "type": "client", "clientId": "conformance", "clientSecret": "secret" } },
+      "steps": [
+        { "call": "updatePosition", "args": { "lat": 52.0, "lng": 13.0 } },
+        { "call": "sync", "expect": { "ok": true } },
+        { "call": "getContextSigns", "args": { "lat": 52.0, "lng": 13.0, "heading": 90 }, "expect": { "covered": false, "entriesHeld": 0, "signs": [] } },
+        { "call": "resolveContextSign", "args": { "signType": "DE:276", "from": { "lat": 52.1, "lng": 13.0 }, "to": { "lat": 52.1, "lng": 13.004 } }, "expectError": "notOffered" }
+      ]
+    },
+    {
       "name": "offline area, automatic: nothing without a position, then the surroundings; lookups fall back online outside",
       "servers": { "main": { "secondTile": true } },
       "options": { "nodes": ["${main}"], "discovery": false, "credentials": { "type": "client", "clientId": "conformance", "clientSecret": "secret" } },

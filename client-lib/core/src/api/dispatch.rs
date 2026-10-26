@@ -120,6 +120,45 @@ struct IntervalLimitArgs {
 }
 
 #[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ContextSignsArgs {
+    lat: f64,
+    lng: f64,
+    heading: Option<f64>,
+    ahead_meters: Option<f64>,
+    /// RFC 3339 instant or Unix milliseconds; default now.
+    at: Option<serde_json::Value>,
+    #[serde(default)]
+    include_unconfirmed: bool,
+    #[serde(default)]
+    include_inactive: bool,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ContextSignVoteArgs {
+    id: String,
+    agrees: bool,
+}
+
+/// `at` as the host gives it: Unix milliseconds, or an RFC 3339 text.
+fn instant_ms(value: Option<serde_json::Value>) -> Result<Option<i64>, ApiError> {
+    match value {
+        None | Some(serde_json::Value::Null) => Ok(None),
+        Some(serde_json::Value::Number(n)) => n
+            .as_i64()
+            .map(Some)
+            .ok_or_else(|| ApiError::invalid("at must be whole milliseconds")),
+        Some(serde_json::Value::String(text)) => chrono::DateTime::parse_from_rfc3339(&text)
+            .map(|t| Some(t.timestamp_millis()))
+            .map_err(|_| ApiError::invalid("at must be an RFC 3339 time or Unix milliseconds")),
+        Some(_) => Err(ApiError::invalid(
+            "at must be an RFC 3339 time or Unix milliseconds",
+        )),
+    }
+}
+
+#[derive(Deserialize)]
 struct ResolveIntervalArgs {
     from: PointArgs,
     to: PointArgs,
@@ -253,6 +292,34 @@ impl TrafficNetworkClient {
                     self.resolve_road_interval(a.from.into(), a.to.into())
                         .await?,
                 )
+            }
+            "getContextSigns" => {
+                let a: ContextSignsArgs = parse(method, args)?;
+                to_json(
+                    self.get_context_signs(&crate::sync::ContextSignQuery {
+                        lat: a.lat,
+                        lng: a.lng,
+                        heading_deg: a.heading,
+                        ahead_m: a
+                            .ahead_meters
+                            .unwrap_or(crate::sync::context_sign_eval::DEFAULT_AHEAD_METERS),
+                        at_unix_ms: instant_ms(a.at)?.unwrap_or_else(|| self.now()),
+                        include_unconfirmed: a.include_unconfirmed,
+                        include_inactive: a.include_inactive,
+                    })?,
+                )
+            }
+            "resolveContextSign" => {
+                let request: crate::sync::ContextSignRequest = parse(method, args)?;
+                to_json(self.resolve_context_sign(&request).await?)
+            }
+            "reportContextSign" => {
+                let request: crate::sync::ContextSignRequest = parse(method, args)?;
+                Ok(local_id(self.report_context_sign(&request)?))
+            }
+            "voteContextSign" => {
+                let a: ContextSignVoteArgs = parse(method, args)?;
+                Ok(local_id(self.vote_context_sign(&a.id, a.agrees)?))
             }
             "dataDefectsNear" => {
                 let a: DefectsNearArgs = parse(method, args)?;

@@ -10,6 +10,8 @@
 
 pub mod auth;
 pub mod camera_policy;
+pub mod context_sign_eval;
+pub mod context_signs;
 pub mod corrections;
 pub mod engine;
 pub mod expiry;
@@ -31,6 +33,13 @@ pub use auth::{
 pub use camera_policy::{
     effective_camera_policy, purge_camera_data, CameraLevel, CameraNotice, CameraPolicyConfig,
     CameraZone, EffectiveCameraPolicy, ZoneBoundary,
+};
+pub use context_sign_eval::{evaluate as evaluate_context_signs, ContextSign, ContextSignQuery};
+pub use context_signs::{
+    find_stored_entry as find_context_sign_entry, queue_context_sign_proposal,
+    queue_context_sign_vote, resolve_context_sign, stored_entries as stored_context_signs,
+    stored_tiles as stored_context_sign_tiles, sync_context_signs, ContextSignEntry,
+    ContextSignError, ContextSignPreview, ContextSignRequest, ContextSignSyncOutcome,
 };
 pub use corrections::{
     confirm_speed_limit_correction, correction_id, fetch_corrections, report_speed_limit_interval,
