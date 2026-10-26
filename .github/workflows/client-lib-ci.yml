@@ -1069,6 +1069,9 @@ jobs:
 
       - uses: subosito/flutter-action@v2
         with:
+          # 3.47.8 (the stable version after the last green run, 2026-10-23) hangs `flutter test` on the iOS simulator: the app starts, the VM service is up,
+          # no test ever runs - also on main, which passed with 3.47.7. Pinned until a newer release is known to work.
+          flutter-version: 3.47.7
           channel: stable
           cache: true
 
